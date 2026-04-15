@@ -1,8 +1,35 @@
 # Backlog
 
-Ultima revisao: 2026-04-15. Itens derivados da analise tecnica e das decisoes de produto.
+Ultima revisao: 2026-04-15
 
 Legenda: `[x]` concluido · `[ ]` pendente · `[~]` parcialmente feito
+
+---
+
+## Decisoes tomadas
+
+| Decisao | Escolha |
+|---|---|
+| Registro de usuarios | Autoregistro por convite (beta) → autoregistro aberto + Free tier (SaaS publico) |
+| Scanner | Global com recalculo por workspace na leitura — 1 scan serve todos sem multiplicar chamadas as exchanges |
+| Trading | Sequencial: Monitoramento → Paper trading → Manual confirmado → Automatico |
+| Exchange prioritaria | **Binance** — maior liquidez em BRL, API mais madura, rate limits generosos, 0.1% de fee |
+| Unidade de cobranca (SaaS) | `Organization` — e a conta que paga; `Workspace` e subdivisao operacional dentro dela |
+| Modelo de planos | Free / Pro / Trading / Enterprise (ver tabela em P3) |
+
+---
+
+## Arquitetura alvo
+
+```
+Organization  ← unidade de cobranca (tem plano, Stripe customer)
+  ├── Plan: free | pro | trading | enterprise
+  ├── Members: usuario A (owner), usuario B (admin), ...
+  ├── Workspace "Scalping"
+  │     └── Config: thresholds proprios, pares, pesos de score, Telegram
+  └── Workspace "Swing Trade"
+        └── Config: thresholds diferentes
+```
 
 ---
 
@@ -60,6 +87,17 @@ Legenda: `[x]` concluido · `[ ]` pendente · `[~]` parcialmente feito
 
 ## P1 — Bloqueia crescimento para mais usuarios
 
+- [ ] **Autoregistro por convite**
+  Admin gera link com codigo unico e prazo de validade (ex: 7 dias, uso unico).
+  Usuario abre o link, preenche email + senha — conta criada sem admin precisar estar online.
+  Fundacao para autoregistro aberto do SaaS: so troca o guard de "codigo valido" por "email verificado".
+
+- [ ] **Entidade Organization (fundacao do SaaS)**
+  Criar `Organization` como unidade de cobranca acima dos workspaces atuais.
+  `User` pertence a uma `Organization`; `Workspace` e subdivisao dela.
+  Campos: `plan`, `stripe_customer_id`, `subscription_status`, `trial_ends_at`.
+  Implementar agora evita refatoracao maior quando o SaaS for lancado.
+
 - [ ] **Pares dinamicos por exchange** — substituir lista hardcoded de pares por descoberta dinamica via `get_available_pairs()` (ja existe nos providers). Cache no backend com TTL de 1h. UI de selecao com busca e indicador por exchange:
   ```
   BTC/BRL   [NovaDAX ✓] [Mercado BTC ✓] [Binance ✓]
@@ -89,58 +127,125 @@ Legenda: `[x]` concluido · `[ ]` pendente · `[~]` parcialmente feito
 
 - [ ] **Tratamento de erros no frontend** — crashes silenciosos quando a API retorna erro. Implementar error boundary global e feedback visual para o usuario (toast de erro, estado de falha nos componentes).
 
-- [ ] **Convite por link** — admin gera link de convite com prazo de validade. Usuario abre, define senha e ja entra no workspace correto. Mais elegante que senha temporaria.
+---
+
+## P3 — Plataforma SaaS e multi-tenant madura
+
+- [ ] **Feature gates por plano**
+  Middleware que verifica `organization.plan` antes de servir cada feature.
+  Retorna `402 Payment Required` com mensagem clara quando limite e atingido.
+  Ex: workspace adicional bloqueado no Free; Telegram bloqueado no Free; paper trading so no Trading+.
+
+- [ ] **Stripe integration (cobranca)**
+  Tres eventos criticos a reagir:
+  - `checkout.session.completed` → ativa o plano
+  - `invoice.payment_failed` → aviso, bloqueia apos grace period
+  - `customer.subscription.deleted` → downgrade para Free
+  Self-service billing portal (Stripe fornece pagina pronta — so redirecionar).
+
+- [ ] **Planos e limites**
+  | | Free | Pro (~R$49/mes) | Trading (~R$149/mes) | Enterprise (~R$499/mes) |
+  |---|---|---|---|---|
+  | Pares | 3 | Ilimitado | Ilimitado | Ilimitado |
+  | Exchanges | 1 | 3 | 3 | 3 |
+  | Telegram | Nao | Sim | Sim | Sim |
+  | Historico | 7 dias | 90 dias | 180 dias | 1 ano |
+  | Paper trading | Nao | Nao | Sim | Sim |
+  | Execucao manual | Nao | Nao | Sim | Sim |
+  | Execucao automatica | Nao | Nao | Nao | Sim |
+  | Membros por org | 1 | 2 | 3 | 10 |
+  | Trial gratuito | 14 dias | — | — | — |
+
+- [ ] **Autoregistro aberto com Free tier**
+  Remover guard de convite, adicionar verificacao de email.
+  Free tier com limites automaticamente aplicados.
+  Stripe Checkout para upgrade de plano.
+
+- [ ] **Modelo de permissoes por workspace**
+  Roles `owner`, `admin`, `member`:
+  - `member`: visualiza dashboard e historico
+  - `admin`: configura thresholds, pares, Telegram
+  - `owner`: + gerencia membros e plano de cobranca
+
+- [ ] **Scanner dedicado por worker**
+  Extrair scanner de `backend/app/worker.py` (scaffold ja existe) para processo separado.
+  Comunicacao via banco ou Redis pub/sub.
+  Obrigatorio antes de ter dezenas de tenants ativos.
+
+- [ ] **Notificacoes por workspace**
+  Cada workspace usa seu proprio bot Telegram.
+  Hoje o Telegram le do `.env` — ja esta na estrutura de config, falta o dispatch correto.
+
+- [ ] **Auditoria no frontend**
+  Endpoint `/api/admin/audit-log` existe mas sem tela. Pagina de auditoria para admins.
+
+- [ ] **Deploy de producao endurecido**
+  Postgres como padrao, rotacao de segredos, HTTPS obrigatorio, ALLOWED_ORIGINS configurado,
+  health check conectado a monitoramento externo.
 
 ---
 
-## P3 — Plataforma multi-tenant madura
+## P4 — Fundacao para trading (Binance prioritaria)
 
-- [ ] **Modelo de permissoes por workspace** — roles `owner`, `admin`, `member` com operacoes distintas. Ex: member ve dashboard mas nao altera configuracoes; admin configura mas nao cria workspaces.
+> Implementar apos o produto de monitoramento estar validado com usuarios reais e receita recorrente estabelecida. Cada fase valida a anterior antes de arriscar capital real.
 
-- [ ] **Scanner dedicado por worker** — hoje o scanner roda no mesmo processo da API FastAPI. Extrair para `backend/app/worker.py` (scaffold ja existe) com comunicacao via DB ou Redis pub/sub. Permite escalar a API horizontalmente sem duplicar o scanner.
+- [ ] **Metadados de trading por par (Binance)**
+  Enriquecer cache de pares com: tamanho minimo de ordem, precisao de preco (step size), status de trading.
+  Pre-requisito para qualquer execucao sem erros da exchange.
 
-- [ ] **Notificacoes por workspace** — cada workspace configura seu proprio bot Telegram. Hoje o Telegram e global. Com multi-tenant real cada usuario recebe alertas no proprio canal.
+- [ ] **Busca de saldo por exchange**
+  Quando API keys estao configuradas, exibir saldo disponivel.
+  Pre-requisito para calcular tamanho de posicao.
 
-- [ ] **Auditoria expandida no frontend** — hoje existe endpoint `/api/admin/audit-log` mas nenhuma tela de auditoria no frontend. Implementar pagina de auditoria para admins verem historico de acoes.
+- [ ] **Paper trading — Fase 1 do trading**
+  Simula entradas e saidas com base nos sinais detectados, sem dinheiro real.
+  Entidade `SimulatedTrade`: par, exchange, preco de entrada, preco de saida, resultado %.
+  Dashboard de performance: win rate, retorno medio, drawdown maximo.
+  Validacao obrigatoria antes de colocar capital real. Disponivel no plano Trading.
 
-- [ ] **Deploy de producao endurecido** — Postgres como padrao (nao SQLite), rotacao de segredos, ALLOWED_ORIGINS configurado, HTTPS obrigatorio, health check conectado a monitoramento externo (UptimeRobot ou similar).
+- [ ] **Execucao manual confirmada — Fase 2 do trading**
+  Sinal detectado → alerta Telegram com botao "Executar".
+  Usuario confirma → ordem executada via API privada da Binance.
+  Log imutavel de todas as ordens.
+  Disponivel no plano Trading.
 
----
+- [ ] **Gestao de posicoes**
+  Entidade `Position`: par, exchange, preco de entrada, quantidade, stop-loss, target, status.
+  Historico de posicoes fechadas com resultado em BRL e percentual.
 
-## P4 — Fundacao para trading automatizado
-
-> Estas features representam uma evolucao significativa de arquitetura. Implementar apenas apos o produto de monitoramento estar validado com usuarios reais.
-
-- [ ] **Metadados de trading por par** — enriquecer cache de pares com: tamanho minimo de ordem, precisao de preco (step size), status de trading (ativo/suspenso). Necessario para qualquer execucao automatizada sem erros da exchange.
-
-- [ ] **Busca de saldo por exchange** — quando API keys estao configuradas, exibir saldo disponivel por exchange e moeda. Pre-requisito para calcular tamanho de posicao.
-
-- [ ] **Paper trading (simulacao)** — simular entradas e saidas com base nas oportunidades detectadas, sem dinheiro real. Registrar resultado hipotetico de cada trade. Permite validar a qualidade do scoring antes de arriscar capital.
-  - Entidade `SimulatedTrade`: par, exchange, entrada, saida, resultado %
-  - Dashboard de performance do paper trading
-
-- [ ] **Gestao de posicoes** — entidade `Position` com: par, exchange, preco de entrada, quantidade, stop-loss, target, status (aberta/fechada/stopada).
-
-- [ ] **Motor de execucao de ordens** — modulo isolado que recebe sinal de oportunidade, verifica saldo, calcula tamanho de posicao e executa ordem via API privada da exchange. Deve ter:
-  - Circuit breaker (parar se perda acumulada > limite)
-  - Log imutavel de todas as ordens
-  - Modo manual (confirma antes de executar) e automatico (executa direto)
-
-- [ ] **Gestao de risco** — regras configuradas por workspace:
+- [ ] **Gestao de risco (obrigatoria antes do automatico)**
+  Regras por workspace:
   - Exposicao maxima por exchange (ex: max 30% do capital na Binance)
   - Exposicao maxima por par (ex: max 10% em DOGE)
-  - Stop global diario (ex: parar se perda > 2% do portfolio no dia)
-  - Tamanho de posicao por score (score 80+ = 2x tamanho padrao)
+  - Stop global diario (ex: parar se perda > 2% no dia)
+  - Tamanho de posicao por faixa de score (score 80+ = 2x tamanho padrao)
 
-- [ ] **Portfolio e P&L** — visao consolidada de todas as posicoes abertas e historico de trades fechados, com resultado em BRL e percentual.
+- [ ] **Motor de execucao automatica — Fase 3 do trading**
+  Pipeline: sinal → verificacao de risco → calculo de tamanho → ordem → monitoramento → saida.
+  Circuit breaker: parar se perda acumulada > limite configurado.
+  Disponivel no plano Enterprise.
+
+- [ ] **Portfolio e P&L**
+  Visao consolidada de posicoes abertas e trades fechados.
+  Resultado em BRL e percentual por exchange e por par.
 
 ---
 
-## Decisoes de produto em aberto
+## Proximos passos (ordem de implementacao)
 
-| Decisao | Opcoes | Status |
-|---|---|---|
-| Usuario cadastra sozinho ou apenas admin cria? | Autoregistro aberto vs convite | Pendente — depende de se vai ser SaaS publico ou plataforma fechada |
-| Scanner global ou por workspace? | Global (eficiente) vs por workspace (isolado) | Decidir antes de escalar para 10+ workspaces |
-| Trading: manual confirmado ou totalmente automatico? | Manual tem menos risco, automatico e o objetivo final | Comecar com manual, evoluir para automatico |
-| Qual exchange priorizar para trading? | NovaDAX (BR, menor liquidez) vs Binance (global, maior liquidez) | Validar com paper trading primeiro |
+1. **P0** — Criar usuarios + refresh token + reset de senha
+   *Permite que seu pai tenha conta propria com sessao confortavel*
+
+2. **P1** — Autoregistro por convite + entidade Organization
+   *Estrutura certa desde o inicio; zero retrabalho quando o SaaS chegar*
+
+3. **P1** — Pares dinamicos por exchange
+   *Zera manutencao manual da lista; resolve MATIC/POL e listagens futuras*
+
+4. **P1** — Mobile responsivo + onboarding
+   *Qualquer pessoa convidada consegue usar sem orientacao presencial*
+
+5. **P3** — Feature gates + Stripe
+   *Liga o modelo de negocio sem mudar a arquitetura*
+
+6. **P4** — Paper trading → execucao manual → automatica (nao pula fases)**
