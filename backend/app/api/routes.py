@@ -9,32 +9,52 @@ from pydantic import BaseModel
 from app.api.websocket import manager
 from app.config import settings
 from app.models.schemas import (
+    AvailablePairsResponse,
     AppConfig,
     DashboardStats,
+    ExchangeCredentialValidationResponse,
     Exchange,
     FilterThresholds,
+    InvitePreviewResponse,
+    InviteRecordResponse,
     Opportunity,
     ScoreWeights,
+    UserCreateResponse,
+    UserRecordResponse,
     UserSessionResponse,
+    WorkspaceStatusResponse,
     WorkspaceSummary,
 )
 from app.services.auth import (
     UserSession,
+    accept_invite,
     authenticate_admin_credentials,
     change_admin_password,
+    create_invite_for_workspace,
+    create_user_by_admin,
     create_workspace_for_user,
     ensure_admin_bootstrap,
+    get_invite_preview,
     get_user_session_metadata,
     get_workspace_for_user,
     issue_access_token,
+    issue_refresh_token,
     legacy_admin_session,
     list_audit_logs,
+    list_invites_for_workspace,
+    list_users_for_workspace,
+    mark_onboarding_completed,
     list_user_workspaces,
     record_audit_event,
+    reset_user_password,
+    set_user_active_state,
     validate_legacy_admin_token,
     verify_access_token,
+    verify_refresh_token,
 )
 from app.services.monitoring import scan_monitor
+from app.services.pairs import get_available_pairs_catalog
+from app.services.exchange_credentials import validate_exchange_credentials
 from app.services.persistence import (
     DEFAULT_WORKSPACE_ID,
     get_filtered_analytics,
@@ -45,6 +65,8 @@ from app.services.persistence import (
     opportunity_matches_config,
     save_workspace_config,
 )
+from app.services.scan_runtime import request_scan_refresh
+from app.services.telegram import send_telegram_test_message
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +231,51 @@ class WorkspaceCreateRequest(BaseModel):
     name: str
 
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class UserCreateRequest(BaseModel):
+    username: str
+    temporary_password: str | None = None
+    role: str = "member"
+
+
+class UserUpdateRequest(BaseModel):
+    is_active: bool
+
+
+class TelegramTestRequest(BaseModel):
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+
+
+class InviteCreateRequest(BaseModel):
+    email: str
+    role: str = "member"
+    expires_in_days: int = 7
+
+
+class InviteAcceptRequest(BaseModel):
+    code: str
+    email: str
+    password: str
+
+
+class ExchangeCredentialValidationRequest(BaseModel):
+    novadax_api_key: str | None = None
+    novadax_api_secret: str | None = None
+    mb_api_key: str | None = None
+    mb_api_secret: str | None = None
+    binance_api_key: str | None = None
+    binance_api_secret: str | None = None
+
+
+def require_admin_role(session_info: UserSession) -> None:
+    if session_info.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+
+
 class ConfigUpdate(BaseModel):
     thresholds: FilterThresholds | None = None
     weights: ScoreWeights | None = None
@@ -224,6 +291,41 @@ class ConfigUpdate(BaseModel):
     mb_api_secret: str | None = None
     binance_api_key: str | None = None
     binance_api_secret: str | None = None
+
+
+def merge_config_with_sensitive_overrides(
+    current_config: AppConfig,
+    update_data: dict[str, object],
+) -> AppConfig:
+    data = current_config.model_dump()
+    sanitized_update = dict(update_data)
+    for field in _SENSITIVE_CONFIG_FIELDS:
+        if sanitized_update.get(field, None) == "":
+            sanitized_update.pop(field)
+    data.update(sanitized_update)
+    return AppConfig(**data)
+
+
+async def build_workspace_status_response(
+    *,
+    session_info: UserSession,
+    workspace: WorkspaceSummary,
+    config: AppConfig,
+) -> dict:
+    session_metadata = await get_user_session_metadata(session_info)
+    return {
+        "workspace": workspace.model_dump(),
+        "organization": session_metadata.get("organization"),
+        "configured_pairs_count": len(config.enabled_pairs),
+        "enabled_exchange_count": len(config.enabled_exchanges),
+        "telegram_configured": bool(config.telegram_enabled and config.telegram_bot_token and config.telegram_chat_id),
+        "exchange_credentials_configured": {
+            "novadax": bool(config.novadax_api_key and config.novadax_api_secret),
+            "mercado_bitcoin": bool(config.mb_api_key and config.mb_api_secret),
+            "binance": bool(config.binance_api_key and config.binance_api_secret),
+        },
+        "onboarding_completed_at": session_metadata.get("onboarding_completed_at"),
+    }
 
 
 @router.post("/auth/login")
@@ -247,7 +349,8 @@ async def auth_login(payload: AuthLoginRequest):
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    token = issue_access_token(session_info)
+    access_token = issue_access_token(session_info)
+    refresh_token = issue_refresh_token(session_info)
     await record_audit_event(
         "auth.login",
         actor_user_id=session_info.user_id,
@@ -255,9 +358,58 @@ async def auth_login(payload: AuthLoginRequest):
         details={"auth_mode": session_info.auth_mode},
     )
     return {
-        "access_token": token,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "expires_in_seconds": settings.access_token_ttl_minutes * 60,
+        "refresh_expires_in_seconds": settings.refresh_token_ttl_days * 24 * 3600,
+        "session": await get_user_session_metadata(session_info),
+    }
+
+
+@router.post("/auth/refresh")
+async def auth_refresh(payload: RefreshTokenRequest):
+    session_info = await verify_refresh_token(payload.refresh_token)
+    if session_info is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    access_token = issue_access_token(session_info)
+    refresh_token = issue_refresh_token(session_info)
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in_seconds": settings.access_token_ttl_minutes * 60,
+        "refresh_expires_in_seconds": settings.refresh_token_ttl_days * 24 * 3600,
+        "session": await get_user_session_metadata(session_info),
+    }
+
+
+@router.get("/invites/{code}", response_model=InvitePreviewResponse)
+async def invite_preview(code: str):
+    try:
+        return await get_invite_preview(code)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post("/invites/accept")
+async def invite_accept(payload: InviteAcceptRequest):
+    try:
+        session_info = await accept_invite(code=payload.code, email=payload.email, password=payload.password)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    access_token = issue_access_token(session_info)
+    refresh_token = issue_refresh_token(session_info)
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in_seconds": settings.access_token_ttl_minutes * 60,
+        "refresh_expires_in_seconds": settings.refresh_token_ttl_days * 24 * 3600,
         "session": await get_user_session_metadata(session_info),
     }
 
@@ -283,11 +435,14 @@ async def auth_change_password(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    token = issue_access_token(updated_session)
+    access_token = issue_access_token(updated_session)
+    refresh_token = issue_refresh_token(updated_session)
     return {
-        "access_token": token,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "expires_in_seconds": settings.access_token_ttl_minutes * 60,
+        "refresh_expires_in_seconds": settings.refresh_token_ttl_days * 24 * 3600,
         "session": await get_user_session_metadata(updated_session),
     }
 
@@ -295,6 +450,23 @@ async def auth_change_password(
 @router.get("/workspaces", response_model=list[WorkspaceSummary])
 async def workspaces(session_info: UserSession = Depends(require_user_session)):
     return await list_user_workspaces(session_info.user_id)
+
+
+@router.get("/workspace/status", response_model=WorkspaceStatusResponse)
+async def workspace_status(
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    workspace, config = await resolve_workspace_context(session_info, x_workspace_id)
+    return await build_workspace_status_response(session_info=session_info, workspace=workspace, config=config)
+
+
+@router.post("/onboarding/complete")
+async def onboarding_complete(session_info: UserSession = Depends(require_user_session)):
+    try:
+        return await mark_onboarding_completed(actor=session_info)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post("/workspaces", response_model=WorkspaceSummary)
@@ -309,12 +481,132 @@ async def create_workspace(
     return workspace
 
 
+@router.get("/users", response_model=list[UserRecordResponse])
+async def list_users_endpoint(
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    require_admin_role(session_info)
+    workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    return await list_users_for_workspace(workspace.id)
+
+
+@router.post("/users", response_model=UserCreateResponse)
+async def create_user_endpoint(
+    payload: UserCreateRequest,
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    require_admin_role(session_info)
+    workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    try:
+        user, temporary_password = await create_user_by_admin(
+            actor=session_info,
+            workspace_id=workspace.id,
+            username=payload.username,
+            temporary_password=payload.temporary_password,
+            role=payload.role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"user": user, "temporary_password": temporary_password}
+
+
+@router.get("/invites", response_model=list[InviteRecordResponse])
+async def list_invites_endpoint(
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    require_admin_role(session_info)
+    workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    try:
+        return await list_invites_for_workspace(actor=session_info, workspace_id=workspace.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post("/invites", response_model=InviteRecordResponse)
+async def create_invite_endpoint(
+    payload: InviteCreateRequest,
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    require_admin_role(session_info)
+    workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    try:
+        return await create_invite_for_workspace(
+            actor=session_info,
+            workspace_id=workspace.id,
+            email=payload.email,
+            role=payload.role,
+            expires_in_days=payload.expires_in_days,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.patch("/users/{user_id}", response_model=UserRecordResponse)
+async def update_user_endpoint(
+    user_id: str,
+    payload: UserUpdateRequest,
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    require_admin_role(session_info)
+    workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    try:
+        return await set_user_active_state(
+            actor=session_info,
+            workspace_id=workspace.id,
+            user_id=user_id,
+            is_active=payload.is_active,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post("/users/{user_id}/reset-password", response_model=UserCreateResponse)
+async def reset_user_password_endpoint(
+    user_id: str,
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    require_admin_role(session_info)
+    workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    try:
+        user, temporary_password = await reset_user_password(
+            actor=session_info,
+            workspace_id=workspace.id,
+            user_id=user_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return {"user": user, "temporary_password": temporary_password}
+
+
 @router.get("/admin/audit-log")
 async def admin_audit_log(
     limit: int = Query(default=25, ge=1, le=100),
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_admin_role(session_info)
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
     return await list_audit_logs(workspace_id=workspace.id, limit=limit)
 
@@ -436,11 +728,17 @@ async def analytics(
     )
 
 
+@router.get("/pairs/available", response_model=AvailablePairsResponse)
+async def available_pairs():
+    return await get_available_pairs_catalog()
+
+
 @router.get("/config", response_model=AppConfig)
 async def get_config_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_admin_role(session_info)
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     return sanitize_config(config)
 
@@ -449,27 +747,77 @@ async def get_config_endpoint(
 async def update_config(
     update: ConfigUpdate,
     x_workspace_id: str | None = Header(default=None),
+    x_config_audit_mode: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_admin_role(session_info)
     workspace, current_config = await resolve_workspace_context(session_info, x_workspace_id)
-    data = current_config.model_dump()
     update_data = update.model_dump(exclude_none=True)
-
-    for field in _SENSITIVE_CONFIG_FIELDS:
-        if update_data.get(field, None) == "":
-            update_data.pop(field)
-
-    data.update(update_data)
-    updated_config = AppConfig(**data)
+    updated_config = merge_config_with_sensitive_overrides(current_config, update_data)
     await save_workspace_config(workspace.id, updated_config)
+    request_scan_refresh()
+    if x_config_audit_mode != "skip":
+        await record_audit_event(
+            "workspace.config_updated",
+            actor_user_id=session_info.user_id,
+            actor_username=session_info.username,
+            workspace_id=workspace.id,
+            details={"updated_fields": sorted(update_data.keys())},
+        )
+    return sanitize_config(updated_config)
+
+
+@router.post("/config/validate-exchanges", response_model=ExchangeCredentialValidationResponse)
+async def validate_exchange_credentials_endpoint(
+    payload: ExchangeCredentialValidationRequest,
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    require_admin_role(session_info)
+    workspace, current_config = await resolve_workspace_context(session_info, x_workspace_id)
+    effective_config = merge_config_with_sensitive_overrides(current_config, payload.model_dump(exclude_none=True))
+    results = await validate_exchange_credentials(effective_config)
     await record_audit_event(
-        "workspace.config_updated",
+        "workspace.exchange_credentials_validated",
         actor_user_id=session_info.user_id,
         actor_username=session_info.username,
         workspace_id=workspace.id,
-        details={"updated_fields": sorted(update_data.keys())},
+        details={
+            "states": {result.exchange.value: result.state for result in results},
+        },
     )
-    return sanitize_config(updated_config)
+    return {"results": [result.model_dump() for result in results]}
+
+
+@router.post("/config/telegram/test")
+async def test_telegram_endpoint(
+    payload: TelegramTestRequest,
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    require_admin_role(session_info)
+    workspace, current_config = await resolve_workspace_context(session_info, x_workspace_id)
+
+    effective_token = (payload.telegram_bot_token or "").strip() or current_config.telegram_bot_token
+    effective_chat_id = (payload.telegram_chat_id or "").strip() or current_config.telegram_chat_id
+
+    try:
+        await send_telegram_test_message(
+            token=effective_token,
+            chat_id=effective_chat_id,
+            workspace_name=workspace.name,
+            actor_username=session_info.username,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("telegram_test_failed error=%s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to deliver Telegram test message",
+        ) from exc
+
+    return {"delivered": True}
 
 
 @router.get("/health")

@@ -18,11 +18,13 @@ from app.services.persistence import (
     build_merged_scan_config,
     get_historical_pair_calibration,
     load_all_workspace_configs,
+    run_history_retention_if_due,
     save_opportunities,
 )
 from app.services.monitoring import scan_monitor
 from app.services.logging_handlers import HTTPLogHandler
 from app.services.auth import ensure_admin_bootstrap
+from app.services.scan_runtime import wait_for_refresh_or_timeout
 from app.services.telegram import send_telegram_alert
 
 try:
@@ -98,6 +100,8 @@ async def scan_loop() -> None:
             if opportunities:
                 await save_opportunities(opportunities)
 
+            await run_history_retention_if_due(now=now)
+
             # Broadcast via WebSocket
             await manager.broadcast({
                 "type": "opportunities_update",
@@ -131,7 +135,7 @@ async def scan_loop() -> None:
             scan_monitor.fail_cycle(str(e), duration_ms=(time.perf_counter() - cycle_started) * 1000)
             logger.error("scan_loop_error error=%s", e, exc_info=True)
 
-        await asyncio.sleep(get_scan_config().scan_interval_seconds)
+        await wait_for_refresh_or_timeout(get_scan_config().scan_interval_seconds)
 
 
 @asynccontextmanager

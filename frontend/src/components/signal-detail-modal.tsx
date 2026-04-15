@@ -43,6 +43,25 @@ function exchangeLabel(exchange: string): string {
   return map[exchange] || exchange;
 }
 
+const CHART_GRID_STROKE = "var(--border)";
+const CHART_AXIS_TICK = {
+  fill: "var(--muted-foreground)",
+  fontSize: 11,
+} as const;
+const CHART_TOOLTIP_STYLE = {
+  backgroundColor: "var(--card)",
+  border: "1px solid var(--border)",
+  borderRadius: "8px",
+  color: "var(--card-foreground)",
+  fontSize: "12px",
+} as const;
+const CHART_TOOLTIP_LABEL_STYLE = {
+  color: "var(--card-foreground)",
+} as const;
+const CHART_TOOLTIP_ITEM_STYLE = {
+  color: "var(--card-foreground)",
+} as const;
+
 export function SignalDetailModal({
   opportunity: opp,
   open,
@@ -80,9 +99,9 @@ export function SignalDetailModal({
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <DetailCard label="Preco" value={`R$ ${opp.last_price.toLocaleString("pt-BR")}`} />
+          <DetailCard label="Preço" value={`R$ ${opp.last_price.toLocaleString("pt-BR")}`} />
           <DetailCard
-            label="Variacao"
+            label="Variação"
             value={`${opp.change_pct >= 0 ? "+" : ""}${opp.change_pct.toFixed(2)}%`}
             valueClass={opp.change_pct >= 0 ? "text-emerald-500" : "text-red-500"}
           />
@@ -110,11 +129,11 @@ export function SignalDetailModal({
             <Separator className="my-2" />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <DetailCard
-                label="Exchange referencia"
+                label="Exchange referência"
                 value={opp.cross_exchange_reference_exchange ?? "-"}
               />
               <DetailCard
-                label="Preco referencia"
+                label="Preço referência"
                 value={
                   opp.cross_exchange_reference_price
                     ? `R$ ${opp.cross_exchange_reference_price.toLocaleString("pt-BR")}`
@@ -122,7 +141,7 @@ export function SignalDetailModal({
                 }
               />
               <DetailCard
-                label="Confianca historica"
+                label="Confiança histórica"
                 value={`${(opp.historical_confidence * 100).toFixed(1)}%`}
               />
             </div>
@@ -135,46 +154,43 @@ export function SignalDetailModal({
           <div className="space-y-4">
             <div>
               <h4 className="mb-2 text-sm font-medium text-muted-foreground">
-                Preco Recente
+                Preço Recente
               </h4>
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
                   <XAxis
                     dataKey="time"
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={11}
+                    tick={CHART_AXIS_TICK}
+                    axisLine={false}
                     tickLine={false}
                   />
                   <YAxis
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={11}
+                    tick={CHART_AXIS_TICK}
+                    axisLine={false}
                     tickLine={false}
                     domain={["auto", "auto"]}
                     tickFormatter={(v: number) => v.toLocaleString("pt-BR")}
                   />
                   <Tooltip
-                    contentStyle={{
-                      background: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                      fontSize: "12px",
-                    }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                    itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                     formatter={(value) => [
                       `R$ ${Number(value).toLocaleString("pt-BR")}`,
-                      "Preco",
+                      "Preço",
                     ]}
                   />
                   <Area
                     type="monotone"
                     dataKey="price"
-                    stroke="hsl(var(--primary))"
+                    stroke="var(--primary)"
                     fill="url(#priceGradient)"
                     strokeWidth={2}
                   />
@@ -188,29 +204,26 @@ export function SignalDetailModal({
               </h4>
               <ResponsiveContainer width="100%" height={120}>
                 <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
                   <XAxis
                     dataKey="time"
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={11}
+                    tick={CHART_AXIS_TICK}
+                    axisLine={false}
                     tickLine={false}
                   />
                   <YAxis
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={11}
+                    tick={CHART_AXIS_TICK}
+                    axisLine={false}
                     tickLine={false}
                   />
                   <Tooltip
-                    contentStyle={{
-                      background: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                      fontSize: "12px",
-                    }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                    itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                   />
                   <Bar
                     dataKey="volume"
-                    fill="hsl(var(--primary))"
+                    fill="var(--primary)"
                     opacity={0.7}
                     radius={[4, 4, 0, 0]}
                   />

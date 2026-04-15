@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { InlineErrorState } from "@/components/inline-error-state";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getHistory, getAnalytics } from "@/lib/api";
 import type { Analytics, HistoryRecord } from "@/lib/types";
@@ -63,6 +64,45 @@ const EXCHANGE_LABELS: Record<string, string> = {
   binance: "Binance",
 };
 
+function parseUtcDate(value: string): Date {
+  const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`;
+  return new Date(normalized);
+}
+
+function mapHourlyDistributionToLocalHours(distribution: Record<string, number>) {
+  const localDistribution = Object.fromEntries(
+    Array.from({ length: 24 }, (_, hour) => [String(hour), 0]),
+  ) as Record<string, number>;
+
+  for (const [utcHour, count] of Object.entries(distribution)) {
+    const localHour = new Date(Date.UTC(2026, 0, 1, Number(utcHour), 0, 0)).getHours();
+    localDistribution[String(localHour)] += Number(count ?? 0);
+  }
+
+  return localDistribution;
+}
+
+const CHART_GRID_STROKE = "var(--border)";
+const CHART_AXIS_TICK = {
+  fill: "var(--muted-foreground)",
+  fontSize: 12,
+} as const;
+const CHART_TOOLTIP_STYLE = {
+  backgroundColor: "var(--card)",
+  border: "1px solid var(--border)",
+  borderRadius: "8px",
+  color: "var(--card-foreground)",
+} as const;
+const CHART_TOOLTIP_LABEL_STYLE = {
+  color: "var(--card-foreground)",
+} as const;
+const CHART_TOOLTIP_ITEM_STYLE = {
+  color: "var(--card-foreground)",
+} as const;
+const CHART_TOOLTIP_CURSOR = {
+  fill: "rgba(148, 163, 184, 0.08)",
+} as const;
+
 function scoreColor(score: number): string {
   if (score >= 70) return "bg-emerald-500/15 text-emerald-500 border-emerald-500/20";
   if (score >= 40) return "bg-yellow-500/15 text-yellow-500 border-yellow-500/20";
@@ -73,6 +113,7 @@ export default function HistoryPage() {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [hours, setHours] = useState<string>("24");
   const [page, setPage] = useState(0);
 
@@ -85,8 +126,9 @@ export default function HistoryPage() {
       ]);
       setRecords(hist);
       setAnalytics(anal);
-    } catch {
-      // ignore
+      setError(null);
+    } catch (fetchError) {
+      setError(fetchError instanceof Error ? fetchError.message : "Falha ao carregar histórico e analytics.");
     } finally {
       setLoading(false);
     }
@@ -106,10 +148,13 @@ export default function HistoryPage() {
         count,
       }))
     : [];
+  const localHourlyDistribution = analytics
+    ? mapHourlyDistributionToLocalHours(analytics.hourly_distribution)
+    : null;
   const hourlyData = analytics
     ? HOURS_DATA.map((item) => ({
         hour: item.hour,
-        count: Number(analytics.hourly_distribution[item.key] ?? 0),
+        count: Number(localHourlyDistribution?.[item.key] ?? 0),
       }))
     : [];
 
@@ -117,7 +162,7 @@ export default function HistoryPage() {
     <div className="mx-auto max-w-7xl space-y-6 p-4 pt-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Historico & Analytics</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Histórico & Analytics</h1>
           <p className="text-sm text-muted-foreground">
             {analytics?.total_records ?? 0} sinais registrados
           </p>
@@ -127,14 +172,16 @@ export default function HistoryPage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="1">Ultima hora</SelectItem>
-            <SelectItem value="6">Ultimas 6h</SelectItem>
-            <SelectItem value="24">Ultimas 24h</SelectItem>
-            <SelectItem value="72">Ultimos 3 dias</SelectItem>
-            <SelectItem value="168">Ultima semana</SelectItem>
+            <SelectItem value="1">Última hora</SelectItem>
+            <SelectItem value="6">Últimas 6h</SelectItem>
+            <SelectItem value="24">Últimas 24h</SelectItem>
+            <SelectItem value="72">Últimos 3 dias</SelectItem>
+            <SelectItem value="168">Última semana</SelectItem>
           </SelectContent>
         </Select>
       </div>
+
+      {error ? <InlineErrorState message={error} onRetry={() => void fetchData()} /> : null}
 
       {analytics ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -142,16 +189,16 @@ export default function HistoryPage() {
             <CardContent className="p-5">
               <p className="text-sm text-muted-foreground">Arbitragem</p>
               <p className="mt-1 text-2xl font-bold text-blue-500">{analytics.arbitrage_count}</p>
-              <p className="text-xs text-muted-foreground">Registros com gap aproveitavel</p>
+              <p className="text-xs text-muted-foreground">Registros com gap aproveitável</p>
             </CardContent>
           </Card>
           <Card className="rounded-2xl">
             <CardContent className="p-5">
-              <p className="text-sm text-muted-foreground">Gap medio</p>
+              <p className="text-sm text-muted-foreground">Gap médio</p>
               <p className="mt-1 text-2xl font-bold">
                 {analytics.avg_cross_exchange_gap_pct.toFixed(2)}%
               </p>
-              <p className="text-xs text-muted-foreground">Diferenca media entre exchanges</p>
+              <p className="text-xs text-muted-foreground">Diferença média entre exchanges</p>
             </CardContent>
           </Card>
         </div>
@@ -160,20 +207,20 @@ export default function HistoryPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="rounded-2xl">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Distribuicao de Scores</CardTitle>
+            <CardTitle className="text-base">Distribuição de Scores</CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={scoreDistData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="range" fontSize={12} stroke="hsl(var(--muted-foreground))" />
-                <YAxis fontSize={12} stroke="hsl(var(--muted-foreground))" />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                <XAxis dataKey="range" tick={CHART_AXIS_TICK} axisLine={false} tickLine={false} />
+                <YAxis tick={CHART_AXIS_TICK} axisLine={false} tickLine={false} />
                 <Tooltip
-                  contentStyle={{
-                    background: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
+                  cursor={CHART_TOOLTIP_CURSOR}
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  formatter={(value) => [value, "Quantidade"]}
                 />
                 <Bar dataKey="count" radius={[6, 6, 0, 0]}>
                   {scoreDistData.map((_, index) => (
@@ -192,25 +239,22 @@ export default function HistoryPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={topPairsData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff18" />
-                <XAxis type="number" fontSize={12} tick={{ fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                <XAxis type="number" tick={CHART_AXIS_TICK} axisLine={false} tickLine={false} />
                 <YAxis
                   type="category"
                   dataKey="pair"
-                  fontSize={12}
                   width={80}
-                  tick={{ fill: "#94a3b8" }}
+                  tick={CHART_AXIS_TICK}
                   axisLine={false}
                   tickLine={false}
                 />
                 <Tooltip
-                  cursor={{ fill: "#ffffff08" }}
-                  contentStyle={{
-                    background: "#1e293b",
-                    border: "1px solid #334155",
-                    borderRadius: "8px",
-                    color: "#f1f5f9",
-                  }}
+                  cursor={CHART_TOOLTIP_CURSOR}
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  formatter={(value) => [value, "Quantidade"]}
                 />
                 <Bar dataKey="count" radius={[0, 6, 6, 0]}>
                   {topPairsData.map((_, index) => (
@@ -231,15 +275,22 @@ export default function HistoryPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={movementData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="movement" fontSize={12} stroke="hsl(var(--muted-foreground))" />
-                <YAxis fontSize={12} stroke="hsl(var(--muted-foreground))" />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                <XAxis
+                  dataKey="movement"
+                  tick={CHART_AXIS_TICK}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(value: string) => MOVEMENT_LABELS[value] ?? value}
+                />
+                <YAxis tick={CHART_AXIS_TICK} axisLine={false} tickLine={false} />
                 <Tooltip
-                  contentStyle={{
-                    background: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
+                  cursor={CHART_TOOLTIP_CURSOR}
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  formatter={(value, _name, item) => [value, MOVEMENT_LABELS[item?.payload?.movement] ?? "Movimento"]}
+                  labelFormatter={(label) => MOVEMENT_LABELS[String(label)] ?? String(label)}
                 />
                 <Bar dataKey="count" radius={[6, 6, 0, 0]}>
                   {movementData.map((_, index) => (
@@ -258,15 +309,15 @@ export default function HistoryPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={hourlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="hour" fontSize={12} stroke="hsl(var(--muted-foreground))" />
-                <YAxis fontSize={12} stroke="hsl(var(--muted-foreground))" />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                <XAxis dataKey="hour" tick={CHART_AXIS_TICK} axisLine={false} tickLine={false} />
+                <YAxis tick={CHART_AXIS_TICK} axisLine={false} tickLine={false} />
                 <Tooltip
-                  contentStyle={{
-                    background: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
+                  cursor={CHART_TOOLTIP_CURSOR}
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  formatter={(value) => [value, "Quantidade"]}
                 />
                 <Bar dataKey="count" radius={[6, 6, 0, 0]} fill="#3b82f6" />
               </BarChart>
@@ -284,7 +335,7 @@ export default function HistoryPage() {
                   {item.exchange.replace("_", " ")}
                 </p>
                 <p className="mt-1 text-2xl font-bold">{item.avg_score}</p>
-                <p className="text-xs text-muted-foreground">Score medio</p>
+                <p className="text-xs text-muted-foreground">Score médio</p>
               </CardContent>
             </Card>
           ))}
@@ -304,8 +355,8 @@ export default function HistoryPage() {
                   <TableHead>Score</TableHead>
                   <TableHead>Par</TableHead>
                   <TableHead>Exchange</TableHead>
-                  <TableHead>Preco</TableHead>
-                  <TableHead>Variacao</TableHead>
+                  <TableHead>Preço</TableHead>
+                  <TableHead>Variação</TableHead>
                   <TableHead>Movimento</TableHead>
                 </TableRow>
               </TableHeader>
@@ -330,7 +381,7 @@ export default function HistoryPage() {
                   records.map((record) => (
                     <TableRow key={record.id}>
                       <TableCell className="text-xs text-muted-foreground">
-                        {new Date(record.detected_at).toLocaleString("pt-BR")}
+                        {parseUtcDate(record.detected_at).toLocaleString("pt-BR")}
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -376,7 +427,7 @@ export default function HistoryPage() {
             >
               Anterior
             </Button>
-            <span className="text-sm text-muted-foreground">Pagina {page + 1}</span>
+            <span className="text-sm text-muted-foreground">Página {page + 1}</span>
             <Button
               variant="outline"
               size="sm"

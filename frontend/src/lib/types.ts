@@ -120,14 +120,68 @@ export interface WorkspaceSummary {
   is_active: boolean;
 }
 
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  stripe_customer_id?: string | null;
+  subscription_status: string;
+  trial_ends_at?: string | null;
+}
+
 export interface AdminSessionInfo {
   user_id: string;
   username: string;
+  email?: string | null;
   role: string;
   auth_mode: string;
   token_version: number;
   password_last_changed_at: string | null;
+  must_change_password: boolean;
+  onboarding_completed_at?: string | null;
+  organization?: OrganizationSummary | null;
   workspaces: WorkspaceSummary[];
+}
+
+export interface AuthResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in_seconds: number;
+  refresh_expires_in_seconds: number;
+  session: AdminSessionInfo;
+}
+
+export interface UserRecord {
+  id: string;
+  username: string;
+  email?: string | null;
+  role: string;
+  is_active: boolean;
+  must_change_password: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  password_last_changed_at: string | null;
+  created_by_user_id: string | null;
+  token_version: number;
+}
+
+export interface UserCreateResult {
+  user: UserRecord;
+  temporary_password: string;
+}
+
+export interface AvailablePairRecord {
+  pair: string;
+  display_name: string;
+  availability: Record<Exchange, boolean>;
+}
+
+export interface AvailablePairsResponse {
+  generated_at: string;
+  expires_at: string;
+  pairs: AvailablePairRecord[];
 }
 
 export interface AuditLogEntry {
@@ -139,4 +193,51 @@ export interface AuditLogEntry {
   status: string;
   details: Record<string, unknown>;
   created_at: string;
+}
+
+export interface InviteRecord {
+  id: string;
+  code: string;
+  email: string;
+  workspace_id: string;
+  workspace_name: string;
+  organization_id: string;
+  organization_name: string;
+  role: string;
+  status: "pending" | "used" | "expired";
+  expires_at: string;
+  used_at?: string | null;
+  created_at: string;
+}
+
+export interface InvitePreview {
+  code: string;
+  email: string;
+  workspace_name: string;
+  organization_name: string;
+  role: string;
+  status: "pending" | "used" | "expired";
+  expires_at: string;
+}
+
+export interface WorkspaceStatus {
+  workspace: WorkspaceSummary;
+  organization?: OrganizationSummary | null;
+  configured_pairs_count: number;
+  enabled_exchange_count: number;
+  telegram_configured: boolean;
+  exchange_credentials_configured: Record<Exchange, boolean>;
+  onboarding_completed_at?: string | null;
+}
+
+export interface ExchangeCredentialValidationResult {
+  exchange: Exchange;
+  state: "missing" | "valid" | "invalid" | "no_trading_permission" | "error";
+  checked_at: string;
+  can_trade?: boolean | null;
+  message: string;
+}
+
+export interface ExchangeCredentialValidationResponse {
+  results: ExchangeCredentialValidationResult[];
 }

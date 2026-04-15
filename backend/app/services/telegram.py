@@ -14,6 +14,23 @@ TELEGRAM_API = "https://api.telegram.org"
 _last_alert_sent_at: dict[str, datetime] = {}
 
 
+async def _send_message(*, token: str, chat_id: str, text: str) -> None:
+    if not token or not chat_id:
+        raise ValueError("Telegram bot token and chat id must be configured")
+
+    url = f"{TELEGRAM_API}/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True,
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, timeout=10)
+        response.raise_for_status()
+
+
 def _format_opportunity(opp: Opportunity) -> str:
     score_emoji = "🟢" if opp.score >= 70 else "🟡" if opp.score >= 40 else "🔴"
     movement_emoji = {
@@ -93,23 +110,39 @@ async def send_telegram_alert(
     lines.append(f"_Total de sinais: {len(opportunities)}_")
     message = "\n".join(lines)
 
-    url = f"{TELEGRAM_API}/bot{effective_token}/sendMessage"
-    payload = {
-        "chat_id": effective_chat_id,
-        "text": message,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": True,
-    }
-
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json=payload, timeout=10)
-            resp.raise_for_status()
-            now = datetime.now(timezone.utc)
-            for opp in top:
-                _last_alert_sent_at[_alert_key(opp)] = now
-            logger.info("Telegram alert sent successfully")
-            return True
+        await _send_message(token=effective_token, chat_id=effective_chat_id, text=message)
+        now = datetime.now(timezone.utc)
+        for opp in top:
+            _last_alert_sent_at[_alert_key(opp)] = now
+        logger.info("Telegram alert sent successfully")
+        return True
     except Exception as e:
         logger.error(f"Failed to send Telegram alert: {e}")
         return False
+
+
+async def send_telegram_test_message(
+    *,
+    token: str = "",
+    chat_id: str = "",
+    workspace_name: str = "",
+    actor_username: str = "",
+) -> bool:
+    effective_token = token or settings.telegram_bot_token
+    effective_chat_id = chat_id or settings.telegram_chat_id
+
+    timestamp = datetime.now(timezone.utc).astimezone().strftime("%d/%m/%Y %H:%M:%S %Z")
+    workspace_label = workspace_name or "Default Workspace"
+    actor_label = actor_username or "sistema"
+    message = (
+        "✅ *Crypto Analytics - Teste de Telegram*\n\n"
+        f"Workspace: *{workspace_label}*\n"
+        f"Executado por: *{actor_label}*\n"
+        f"Horário: `{timestamp}`\n\n"
+        "Se esta mensagem chegou, a configuração do bot e do chat está funcional."
+    )
+
+    await _send_message(token=effective_token, chat_id=effective_chat_id, text=message)
+    logger.info("telegram_test_sent workspace=%s actor=%s", workspace_label, actor_label)
+    return True

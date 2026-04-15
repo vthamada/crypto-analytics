@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -189,11 +190,103 @@ class WorkspaceSummary(BaseModel):
     is_active: bool = True
 
 
+class OrganizationSummary(BaseModel):
+    id: str
+    name: str
+    slug: str
+    plan: str
+    stripe_customer_id: str | None = None
+    subscription_status: str
+    trial_ends_at: datetime | None = None
+
+
 class UserSessionResponse(BaseModel):
     user_id: str
     username: str
+    email: str | None = None
     role: str
     token_version: int
     auth_mode: str
     password_last_changed_at: datetime | None = None
+    must_change_password: bool = False
+    onboarding_completed_at: datetime | None = None
+    organization: OrganizationSummary | None = None
     workspaces: list[WorkspaceSummary] = []
+
+
+class UserRecordResponse(BaseModel):
+    id: str
+    username: str
+    email: str | None = None
+    role: str
+    is_active: bool
+    must_change_password: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    password_last_changed_at: datetime | None = None
+    created_by_user_id: str | None = None
+    token_version: int = 0
+
+
+class UserCreateResponse(BaseModel):
+    user: UserRecordResponse
+    temporary_password: str
+
+
+class AvailablePairRecord(BaseModel):
+    pair: str
+    display_name: str
+    availability: dict[str, bool]
+
+
+class AvailablePairsResponse(BaseModel):
+    generated_at: datetime
+    expires_at: datetime
+    pairs: list[AvailablePairRecord]
+
+
+class InviteRecordResponse(BaseModel):
+    id: str
+    code: str
+    email: str
+    workspace_id: str
+    workspace_name: str
+    organization_id: str
+    organization_name: str
+    role: str
+    status: Literal["pending", "used", "expired"]
+    expires_at: datetime
+    used_at: datetime | None = None
+    created_at: datetime
+
+
+class InvitePreviewResponse(BaseModel):
+    code: str
+    email: str
+    workspace_name: str
+    organization_name: str
+    role: str
+    status: Literal["pending", "used", "expired"]
+    expires_at: datetime
+
+
+class WorkspaceStatusResponse(BaseModel):
+    workspace: WorkspaceSummary
+    organization: OrganizationSummary | None = None
+    configured_pairs_count: int
+    enabled_exchange_count: int
+    telegram_configured: bool
+    exchange_credentials_configured: dict[str, bool]
+    onboarding_completed_at: datetime | None = None
+
+
+class ExchangeCredentialValidationResult(BaseModel):
+    exchange: Exchange
+    state: Literal["missing", "valid", "invalid", "no_trading_permission", "error"]
+    checked_at: datetime
+    can_trade: bool | None = None
+    message: str
+
+
+class ExchangeCredentialValidationResponse(BaseModel):
+    results: list[ExchangeCredentialValidationResult]

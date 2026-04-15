@@ -77,55 +77,55 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 
 ## P0 — Bloqueia o uso com duas ou mais pessoas
 
-- [ ] **Criar usuarios pelo admin** — endpoint `POST /api/users` (admin cria contas com usuario+senha temporaria) e tela "Usuarios" no frontend para listar, criar e desativar contas. Sem isso o pai nao tem conta propria.
+- [x] **Criar usuarios pelo admin** — endpoint `POST /api/users` (admin cria contas com usuario+senha temporaria) e tela "Usuarios" no frontend para listar, criar e desativar contas. Sem isso o pai nao tem conta propria.
 
-- [ ] **Refresh token** — sessao atual expira em 8h sem renovacao silenciosa. Implementar refresh token de 30 dias: o access token (8h) e renovado automaticamente enquanto o refresh token for valido. Usuario so ve tela de login apos 30 dias de inatividade.
+- [x] **Refresh token** — sessao atual expira em 8h sem renovacao silenciosa. Implementar refresh token de 30 dias: o access token (8h) e renovado automaticamente enquanto o refresh token for valido. Usuario so ve tela de login apos 30 dias de inatividade.
 
-- [ ] **Redefinicao de senha** — se alguem esquecer a senha o unico caminho e alterar as vars de ambiente e reiniciar o servidor. Implementar fluxo de reset gerado pelo admin (gera token temporario que o usuario usa no primeiro login).
+- [x] **Redefinicao de senha** — se alguem esquecer a senha o unico caminho e alterar as vars de ambiente e reiniciar o servidor. Fluxo de reset gerado pelo admin agora emite credencial temporaria e obriga troca no primeiro login.
 
 ---
 
 ## P1 — Bloqueia crescimento para mais usuarios
 
-- [ ] **Autoregistro por convite**
+- [x] **Autoregistro por convite**
   Admin gera link com codigo unico e prazo de validade (ex: 7 dias, uso unico).
   Usuario abre o link, preenche email + senha — conta criada sem admin precisar estar online.
   Fundacao para autoregistro aberto do SaaS: so troca o guard de "codigo valido" por "email verificado".
 
-- [ ] **Entidade Organization (fundacao do SaaS)**
+- [x] **Entidade Organization (fundacao do SaaS)**
   Criar `Organization` como unidade de cobranca acima dos workspaces atuais.
   `User` pertence a uma `Organization`; `Workspace` e subdivisao dela.
   Campos: `plan`, `stripe_customer_id`, `subscription_status`, `trial_ends_at`.
   Implementar agora evita refatoracao maior quando o SaaS for lancado.
 
-- [ ] **Pares dinamicos por exchange** — substituir lista hardcoded de pares por descoberta dinamica via `get_available_pairs()` (ja existe nos providers). Cache no backend com TTL de 1h. UI de selecao com busca e indicador por exchange:
+- [x] **Pares dinamicos por exchange** — substituir lista hardcoded de pares por descoberta dinamica via `get_available_pairs()` (ja existe nos providers). Cache no backend com TTL de 1h. UI de selecao com busca e indicador por exchange:
   ```
   BTC/BRL   [NovaDAX ✓] [Mercado BTC ✓] [Binance ✓]
   PEPE/BRL  [NovaDAX ✗] [Mercado BTC ✗] [Binance ✓]
   ```
   Endpoint `GET /api/pairs/available`. Resolve o problema de pares renomeados (ex: MATIC→POL).
 
-- [ ] **Mobile responsivo** — tabela do dashboard tem 10 colunas, quebra em celular. Implementar visao em cards para telas pequenas (`sm:`). A maioria dos usuarios externos vai acessar pelo celular.
+- [x] **Mobile responsivo** — tabela do dashboard tem 10 colunas, quebra em celular. Implementada visao em cards para telas pequenas (`sm:`) mantendo a tabela completa no desktop.
 
-- [ ] **Onboarding de novos usuarios** — quando uma pessoa entra pela primeira vez nao ha nenhuma orientacao. Implementar tela de boas-vindas com checklist: configurar Telegram, selecionar pares, entender os scores.
+- [x] **Onboarding de novos usuarios** — quando uma pessoa entra pela primeira vez nao ha nenhuma orientacao. Implementada checklist inicial no dashboard com conclusao persistida por usuario.
 
-- [ ] **Scanner hot-reload de configuracao** — verificar e garantir que mudar exchanges/pares habilitados na UI recarregue o scanner imediatamente sem reiniciar o servidor. O CHANGELOG indica que foi parcialmente resolvido mas precisa de validacao.
+- [x] **Scanner hot-reload de configuracao** — mudar exchanges/pares habilitados na UI agora sinaliza wake-up imediato do scanner sem reiniciar o servidor.
 
-- [ ] **Teste de Telegram na UI** — botao "Enviar mensagem de teste" nas Configuracoes que dispara uma mensagem real para o bot configurado. Elimina a incerteza de "sera que esta funcionando?".
+- [x] **Teste de Telegram na UI** — botao "Enviar mensagem de teste" nas Configuracoes dispara uma mensagem real para o bot configurado, usando os valores digitados ou as credenciais persistidas do workspace.
 
-- [ ] **Validacao de API keys das exchanges** — apos salvar chaves de API, validar com uma chamada autenticada simples (ex: buscar saldo ou permissoes). Mostrar status: chave valida/invalida/sem permissao de trading.
+- [x] **Validacao de API keys das exchanges** — apos salvar chaves de API, o sistema valida acesso real e mostra status por exchange: ausente, valida, invalida, sem permissao de trade ou erro.
 
 ---
 
 ## P2 — Qualidade e confiabilidade
 
-- [ ] **Politica de retencao do historico** — banco cresce indefinidamente mesmo com deduplicacao. Implementar job periodico que deleta registros com mais de 90 dias (configuravel). Critico para plataforma com muitos usuarios.
+- [x] **Politica de retencao do historico** — scanner e worker agora executam limpeza periodica configuravel (`HISTORY_RETENTION_DAYS`, `HISTORY_RETENTION_CHECK_MINUTES`) para remover registros antigos sem depender de manutencao manual.
 
-- [ ] **Testes E2E do frontend** — login, troca de workspace, configuracao isolada, dashboard em tempo real. Hoje zero cobertura automatizada de interface.
+- [x] **Testes E2E do frontend** — Playwright cobre login administrativo, troca de workspace com configuracao isolada, dashboard em tempo real e falha de historico com feedback visual.
 
-- [ ] **Testes de workspace e membership no backend** — cobertura atual nao cobre cenarios de multi-tenant: criacao de workspace, configuracao isolada por tenant, projecao de score por workspace.
+- [x] **Testes de workspace e membership no backend** — cobertura agora valida isolamento de config por tenant, membership por workspace e projecao de score recalculada por workspace.
 
-- [ ] **Tratamento de erros no frontend** — crashes silenciosos quando a API retorna erro. Implementar error boundary global e feedback visual para o usuario (toast de erro, estado de falha nos componentes).
+- [x] **Tratamento de erros no frontend** — app ganhou `error.tsx`, `global-error.tsx`, toaster global para falhas de API/WebSocket/runtime e estados inline de erro no dashboard e historico.
 
 ---
 
@@ -233,19 +233,16 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 
 ## Proximos passos (ordem de implementacao)
 
-1. **P0** — Criar usuarios + refresh token + reset de senha
-   *Permite que seu pai tenha conta propria com sessao confortavel*
+1. **P3** — Feature gates por plano + Stripe
+  *Liga monetizacao em cima da arquitetura de Organization ja implantada*
 
-2. **P1** — Autoregistro por convite + entidade Organization
-   *Estrutura certa desde o inicio; zero retrabalho quando o SaaS chegar*
+2. **P3** — Modelo de permissoes por workspace
+  *Separa owner/admin/member antes de expor billing e colaboracao em orgs reais*
 
-3. **P1** — Pares dinamicos por exchange
-   *Zera manutencao manual da lista; resolve MATIC/POL e listagens futuras*
+3. **P3** — Scanner dedicado por worker
+  *Isola carga operacional do app web antes de escalar tenants e frequencia de scans*
 
-4. **P1** — Mobile responsivo + onboarding
-   *Qualquer pessoa convidada consegue usar sem orientacao presencial*
+4. **P3** — Notificacoes por workspace
+  *Fecha a separacao operacional entre workspaces, inclusive no dispatch do Telegram*
 
-5. **P3** — Feature gates + Stripe
-   *Liga o modelo de negocio sem mudar a arquitetura*
-
-6. **P4** — Paper trading → execucao manual → automatica (nao pula fases)**
+5. **P4** — Paper trading → execucao manual → automatica (nao pula fases)**

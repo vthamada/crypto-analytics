@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import { KPICards } from "@/components/kpi-cards";
+import { InlineErrorState } from "@/components/inline-error-state";
+import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { OpportunitiesTable } from "@/components/opportunities-table";
 import { SignalDetailModal } from "@/components/signal-detail-modal";
 import { useOpportunities } from "@/hooks/use-opportunities";
 import type { Opportunity } from "@/lib/types";
 
 export default function DashboardPage() {
-  const { opportunities, stats, loading } = useOpportunities();
+  const { opportunities, stats, loading, error, refetch } = useOpportunities();
   const [selected, setSelected] = useState<Opportunity | null>(null);
 
   return (
@@ -21,6 +23,10 @@ export default function DashboardPage() {
       </div>
 
       <KPICards stats={stats} loading={loading} />
+
+      {error ? <InlineErrorState message={error} onRetry={() => void refetch()} /> : null}
+
+      <OnboardingChecklist />
 
       <OpportunitiesTable
         opportunities={opportunities}

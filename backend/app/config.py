@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     admin_password: str = ""
     auth_secret_key: str = ""
     access_token_ttl_minutes: int = 480
+    refresh_token_ttl_days: int = 30
 
     # Telegram
     telegram_bot_token: str = ""
@@ -36,6 +37,8 @@ class Settings(BaseSettings):
 
     # Scanning
     scan_interval_seconds: int = 30
+    history_retention_days: int = 90
+    history_retention_check_minutes: int = 60
 
     # Default filter thresholds
     min_volatility_pct: float = 2.0
@@ -61,7 +64,7 @@ class Settings(BaseSettings):
     log_aggregation_token: str = ""
 
     # CORS
-    cors_allowed_origins: str = "http://localhost:3000"
+    cors_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

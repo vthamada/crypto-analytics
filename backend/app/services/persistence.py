@@ -4,9 +4,10 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, desc, func
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.database import OpportunityRecord, ConfigRecord, WorkspaceConfigRecord, async_session
 from app.models.schemas import AppConfig, HistoryRecord, MovementType, Opportunity, ScoreWeights
 
@@ -14,10 +15,17 @@ logger = logging.getLogger(__name__)
 
 
 _DEDUP_WINDOW_MINUTES = 5  # só salva o mesmo par+exchange uma vez a cada N minutos
+_last_history_retention_run: datetime | None = None
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def ensure_utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 DEFAULT_WORKSPACE_ID = "default"
@@ -78,6 +86,7 @@ def opportunity_matches_config(opportunity: Opportunity | HistoryRecord | Opport
 
 
 def serialize_history_record(record: OpportunityRecord, config: AppConfig | None = None) -> dict:
+    detected_at = ensure_utc_datetime(record.detected_at)
     workspace_score = record.score
     if config is not None:
         workspace_score = get_workspace_score(
@@ -104,7 +113,7 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "movement_type": record.movement_type,
         "last_price": record.last_price,
         "change_pct": record.change_pct,
-        "detected_at": record.detected_at.isoformat(),
+        "detected_at": detected_at.isoformat(),
         "duration_minutes": record.duration_minutes,
         "cross_exchange_gap_pct": record.cross_exchange_gap_pct,
         "cross_exchange_reference_exchange": record.cross_exchange_reference_exchange,
@@ -237,6 +246,54 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
         )
 
 
+async def purge_history_older_than(*, retention_days: int, now: datetime | None = None) -> int:
+    if retention_days <= 0:
+        return 0
+
+    reference_time = now or utcnow()
+    cutoff = reference_time - timedelta(days=retention_days)
+
+    async with async_session() as session:
+        count_query = (
+            select(func.count())
+            .select_from(OpportunityRecord)
+            .where(OpportunityRecord.detected_at < cutoff)
+        )
+        removable_count = int((await session.scalar(count_query)) or 0)
+        if removable_count == 0:
+            return 0
+
+        await session.execute(delete(OpportunityRecord).where(OpportunityRecord.detected_at < cutoff))
+        await session.commit()
+
+    logger.info(
+        "history_retention_pruned removed=%s retention_days=%s cutoff=%s",
+        removable_count,
+        retention_days,
+        cutoff.isoformat(),
+    )
+    return removable_count
+
+
+async def run_history_retention_if_due(*, now: datetime | None = None) -> int:
+    global _last_history_retention_run
+
+    if settings.history_retention_days <= 0:
+        return 0
+
+    reference_time = now or utcnow()
+    check_interval = timedelta(minutes=max(settings.history_retention_check_minutes, 1))
+    if _last_history_retention_run is not None and reference_time - _last_history_retention_run < check_interval:
+        return 0
+
+    removed = await purge_history_older_than(
+        retention_days=settings.history_retention_days,
+        now=reference_time,
+    )
+    _last_history_retention_run = reference_time
+    return removed
+
+
 async def get_history(
     limit: int = 100,
     offset: int = 0,
@@ -329,7 +386,7 @@ async def get_filtered_analytics(
         pair_counts[row["pair"]] = pair_counts.get(row["pair"], 0) + 1
         exchange_totals.setdefault(row["exchange"], []).append(row["score"])
         movement_distribution[row["movement_type"]] = movement_distribution.get(row["movement_type"], 0) + 1
-        detected_at = datetime.fromisoformat(row["detected_at"])
+        detected_at = ensure_utc_datetime(datetime.fromisoformat(row["detected_at"]))
         hourly_distribution[str(detected_at.hour)] += 1
         if row["arbitrage_available"]:
             arbitrage_count += 1

@@ -12,8 +12,10 @@ from app.services.persistence import (
     build_merged_scan_config,
     get_historical_pair_calibration,
     load_all_workspace_configs,
+    run_history_retention_if_due,
     save_opportunities,
 )
+from app.services.scan_runtime import wait_for_refresh_or_timeout
 from app.services.scanner import Scanner
 from app.services.telegram import send_telegram_alert
 
@@ -50,6 +52,8 @@ async def run_worker() -> None:
             if opportunities:
                 await save_opportunities(opportunities)
 
+            await run_history_retention_if_due(now=now)
+
             if config.telegram_enabled:
                 high_score = [opportunity for opportunity in opportunities if opportunity.score >= 60]
                 if high_score:
@@ -70,7 +74,7 @@ async def run_worker() -> None:
             )
             logger.exception("worker_scan_failed error=%s", exc)
 
-        await asyncio.sleep(get_scan_config().scan_interval_seconds)
+        await wait_for_refresh_or_timeout(get_scan_config().scan_interval_seconds)
 
 
 if __name__ == "__main__":

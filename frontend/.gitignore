@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+/playwright-results.json
 
 # next.js
 /.next/
@@ -29,6 +32,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+/server.pid
+/next-start.log
+/next-start.err.log
+/playwright-stderr.log
 
 # env files (can opt-in for committing if needed)
 .env*

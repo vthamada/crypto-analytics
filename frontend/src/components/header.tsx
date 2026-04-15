@@ -11,31 +11,53 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
-import { getAdminSession, getStoredAuthToken, getStoredWorkspaceId, setStoredWorkspaceId } from "@/lib/api";
+import {
+  getAdminSession,
+  getStoredAuthToken,
+  getStoredWorkspaceId,
+  SESSION_STORAGE_EVENT,
+  setStoredWorkspaceId,
+} from "@/lib/api";
 import type { WorkspaceSummary } from "@/lib/types";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/history", label: "Historico", icon: History },
-  { href: "/settings", label: "Configuracoes", icon: Settings },
+  { href: "/history", label: "Histórico", icon: History },
+  { href: "/settings", label: "Configurações", icon: Settings },
 ];
 
 export function Header() {
   const pathname = usePathname();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
 
   useEffect(() => {
-    const token = getStoredAuthToken();
-    if (!token) return;
+    const syncSession = () => {
+      const token = getStoredAuthToken();
+      if (!token) {
+        setWorkspaces([]);
+        setActiveWorkspaceId("");
+        setOrganizationName("");
+        return;
+      }
 
-    void getAdminSession(token).then((session) => {
-      setWorkspaces(session.workspaces);
-      setActiveWorkspaceId(getStoredWorkspaceId() || session.workspaces[0]?.id || "");
-    }).catch(() => {
-      setWorkspaces([]);
-      setActiveWorkspaceId("");
-    });
+      void getAdminSession(token)
+        .then((session) => {
+          setWorkspaces(session.workspaces);
+          setActiveWorkspaceId(getStoredWorkspaceId() || session.workspaces[0]?.id || "");
+          setOrganizationName(session.organization?.name || "");
+        })
+        .catch(() => {
+          setWorkspaces([]);
+          setActiveWorkspaceId("");
+          setOrganizationName("");
+        });
+    };
+
+    syncSession();
+    window.addEventListener(SESSION_STORAGE_EVENT, syncSession);
+    return () => window.removeEventListener(SESSION_STORAGE_EVENT, syncSession);
   }, []);
 
   function handleWorkspaceChange(workspaceId: string) {
@@ -51,14 +73,18 @@ export function Header() {
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary">
             <Zap className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className="text-lg font-bold tracking-tight">
-            Crypto Analytics
-          </span>
+          <div>
+            <span className="text-lg font-bold tracking-tight">Crypto Analytics</span>
+            {organizationName ? (
+              <p className="hidden text-xs text-muted-foreground sm:block">{organizationName}</p>
+            ) : null}
+          </div>
         </div>
 
         <nav className="flex items-center gap-1">
           {workspaces.length > 0 ? (
             <select
+              data-testid="header-workspace-select"
               value={activeWorkspaceId}
               onChange={(event) => handleWorkspaceChange(event.target.value)}
               className="mr-2 h-9 rounded-lg border bg-background px-3 text-sm"

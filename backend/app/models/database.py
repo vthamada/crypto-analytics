@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from alembic import command
@@ -73,15 +73,34 @@ class AdminUserRecord(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
+class OrganizationRecord(Base):
+    __tablename__ = "organizations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False)
+    slug = Column(String, nullable=False, unique=True, index=True)
+    plan = Column(String, nullable=False, default="trial")
+    stripe_customer_id = Column(String, nullable=True)
+    subscription_status = Column(String, nullable=False, default="trialing")
+    trial_ends_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
 class UserRecord(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     username = Column(String, nullable=False, unique=True, index=True)
+    email = Column(String, nullable=True, unique=True, index=True)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default="member", index=True)
+    organization_id = Column(String, nullable=True, index=True)
     token_version = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
+    must_change_password = Column(Boolean, nullable=False, default=False)
+    created_by_user_id = Column(String, nullable=True, index=True)
+    onboarding_completed_at = Column(DateTime, nullable=True)
     password_updated_at = Column(DateTime, nullable=False, default=utcnow)
     created_at = Column(DateTime, nullable=False, default=utcnow)
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
@@ -91,6 +110,7 @@ class WorkspaceRecord(Base):
     __tablename__ = "workspaces"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String, nullable=True, index=True)
     slug = Column(String, nullable=False, unique=True, index=True)
     name = Column(String, nullable=False)
     owner_user_id = Column(String, nullable=False, index=True)
@@ -115,6 +135,22 @@ class WorkspaceConfigRecord(Base):
 
     workspace_id = Column(String, primary_key=True)
     value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class InviteRecord(Base):
+    __tablename__ = "invites"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    code = Column(String, nullable=False, unique=True, index=True)
+    email = Column(String, nullable=False, index=True)
+    organization_id = Column(String, nullable=False, index=True)
+    workspace_id = Column(String, nullable=False, index=True)
+    role = Column(String, nullable=False, default="member")
+    created_by_user_id = Column(String, nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
@@ -198,15 +234,40 @@ async def ensure_schema_compatibility() -> None:
         "workspace_id": "VARCHAR",
     }
 
+    user_columns = {
+        "email": "VARCHAR",
+        "organization_id": "VARCHAR",
+        "must_change_password": "BOOLEAN DEFAULT FALSE NOT NULL",
+        "created_by_user_id": "VARCHAR",
+        "onboarding_completed_at": "DATETIME",
+    }
+
+    workspace_columns = {
+        "organization_id": "VARCHAR",
+    }
+
+    default_org_payload = {
+        "id": str(uuid.uuid4()),
+        "name": "Default Organization",
+        "slug": "default-org",
+        "plan": "trial",
+        "subscription_status": "trialing",
+        "trial_ends_at": utcnow() + timedelta(days=14),
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
+    }
+
     async with engine.begin() as conn:
         existing_tables = await conn.run_sync(lambda sync_conn: set(inspect(sync_conn).get_table_names()))
         for table_name in (
             "admin_users",
             "audit_logs",
+            "organizations",
             "users",
             "workspaces",
             "workspace_memberships",
             "workspace_configs",
+            "invites",
         ):
             if table_name in existing_tables:
                 continue
@@ -227,6 +288,66 @@ async def ensure_schema_compatibility() -> None:
             if column_name in audit_existing_columns:
                 continue
             await conn.execute(text(f"ALTER TABLE audit_logs ADD COLUMN {column_name} {ddl}"))
+
+        user_existing_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("users")}
+        )
+        for column_name, ddl in user_columns.items():
+            if column_name in user_existing_columns:
+                continue
+            await conn.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} {ddl}"))
+
+        workspace_existing_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("workspaces")}
+        )
+        for column_name, ddl in workspace_columns.items():
+            if column_name in workspace_existing_columns:
+                continue
+            await conn.execute(text(f"ALTER TABLE workspaces ADD COLUMN {column_name} {ddl}"))
+
+        organization_count = await conn.scalar(text("SELECT COUNT(1) FROM organizations"))
+        if not organization_count:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO organizations (
+                        id,
+                        name,
+                        slug,
+                        plan,
+                        stripe_customer_id,
+                        subscription_status,
+                        trial_ends_at,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        :id,
+                        :name,
+                        :slug,
+                        :plan,
+                        NULL,
+                        :subscription_status,
+                        :trial_ends_at,
+                        :created_at,
+                        :updated_at
+                    )
+                    """
+                ),
+                default_org_payload,
+            )
+
+        default_org_id = await conn.scalar(text("SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1"))
+        if default_org_id:
+            if "organization_id" in user_columns:
+                await conn.execute(
+                    text("UPDATE users SET organization_id = :organization_id WHERE organization_id IS NULL"),
+                    {"organization_id": default_org_id},
+                )
+            if "organization_id" in workspace_columns:
+                await conn.execute(
+                    text("UPDATE workspaces SET organization_id = :organization_id WHERE organization_id IS NULL"),
+                    {"organization_id": default_org_id},
+                )
 
 
 async def get_session() -> AsyncSession:
