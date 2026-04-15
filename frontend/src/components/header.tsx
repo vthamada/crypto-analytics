@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
-  BarChart3,
   History,
   LayoutDashboard,
   Settings,
@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
+import { getAdminSession, getStoredAuthToken, getStoredWorkspaceId, setStoredWorkspaceId } from "@/lib/api";
+import type { WorkspaceSummary } from "@/lib/types";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -20,6 +22,27 @@ const navItems = [
 
 export function Header() {
   const pathname = usePathname();
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+
+  useEffect(() => {
+    const token = getStoredAuthToken();
+    if (!token) return;
+
+    void getAdminSession(token).then((session) => {
+      setWorkspaces(session.workspaces);
+      setActiveWorkspaceId(getStoredWorkspaceId() || session.workspaces[0]?.id || "");
+    }).catch(() => {
+      setWorkspaces([]);
+      setActiveWorkspaceId("");
+    });
+  }, []);
+
+  function handleWorkspaceChange(workspaceId: string) {
+    setStoredWorkspaceId(workspaceId);
+    setActiveWorkspaceId(workspaceId);
+    window.location.reload();
+  }
 
   return (
     <header className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-md">
@@ -34,6 +57,19 @@ export function Header() {
         </div>
 
         <nav className="flex items-center gap-1">
+          {workspaces.length > 0 ? (
+            <select
+              value={activeWorkspaceId}
+              onChange={(event) => handleWorkspaceChange(event.target.value)}
+              className="mr-2 h-9 rounded-lg border bg-background px-3 text-sm"
+            >
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;

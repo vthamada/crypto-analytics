@@ -1,8 +1,6 @@
-import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
-from pydantic import Field
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 _DEFAULT_DB = f"sqlite+aiosqlite:///{_BASE_DIR / 'crypto_analytics.db'}"
@@ -12,9 +10,17 @@ class Settings(BaseSettings):
     # Database
     database_url: str = _DEFAULT_DB
 
+    # Admin
+    admin_token: str = ""
+    admin_username: str = ""
+    admin_password: str = ""
+    auth_secret_key: str = ""
+    access_token_ttl_minutes: int = 480
+
     # Telegram
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    telegram_alert_cooldown_seconds: int = 900
 
     # NovaDAX
     novadax_api_key: str = ""
@@ -48,7 +54,24 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
 
+    # Observability
+    sentry_dsn: str = ""
+    sentry_environment: str = "development"
+    log_aggregation_url: str = ""
+    log_aggregation_token: str = ""
+
+    # CORS
+    cors_allowed_origins: str = "http://localhost:3000"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+
+    @property
+    def effective_auth_secret(self) -> str:
+        return self.auth_secret_key or self.admin_token
 
 
 settings = Settings()

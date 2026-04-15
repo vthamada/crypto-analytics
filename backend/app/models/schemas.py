@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pydantic import BaseModel, Field
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Exchange(str, Enum):
@@ -27,7 +31,7 @@ class Ticker(BaseModel):
     volume_24h: float
     quote_volume_24h: float
     change_pct_24h: float
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utcnow)
 
 
 class OrderBookEntry(BaseModel):
@@ -40,7 +44,7 @@ class OrderBook(BaseModel):
     pair: str
     bids: list[OrderBookEntry]
     asks: list[OrderBookEntry]
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utcnow)
 
 
 class Trade(BaseModel):
@@ -75,8 +79,19 @@ class Opportunity(BaseModel):
     movement_type: MovementType
     last_price: float
     change_pct: float
-    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    detected_at: datetime = Field(default_factory=utcnow)
     duration_minutes: float = 0.0
+    cross_exchange_gap_pct: float = 0.0
+    cross_exchange_reference_exchange: Exchange | None = None
+    cross_exchange_reference_price: float | None = None
+    arbitrage_available: bool = False
+    historical_confidence: float = 1.0
+    volatility_score: float = 0.0
+    volume_score: float = 0.0
+    liquidity_score: float = 0.0
+    spread_score: float = 0.0
+    repetition_score: float = 0.0
+    movement_multiplier: float = 1.0
     klines: list[Kline] = []
 
 
@@ -136,6 +151,7 @@ class DashboardStats(BaseModel):
     total_volume_24h: float
     best_score: float
     exchanges_online: int
+    arbitrage_opportunities: int = 0
     last_scan: datetime | None = None
 
 
@@ -152,3 +168,32 @@ class HistoryRecord(BaseModel):
     last_price: float
     detected_at: datetime
     duration_minutes: float
+    cross_exchange_gap_pct: float = 0.0
+    cross_exchange_reference_exchange: Exchange | None = None
+    cross_exchange_reference_price: float | None = None
+    arbitrage_available: bool = False
+    historical_confidence: float = 1.0
+    volatility_score: float = 0.0
+    volume_score: float = 0.0
+    liquidity_score: float = 0.0
+    spread_score: float = 0.0
+    repetition_score: float = 0.0
+    movement_multiplier: float = 1.0
+
+
+class WorkspaceSummary(BaseModel):
+    id: str
+    slug: str
+    name: str
+    role: str
+    is_active: bool = True
+
+
+class UserSessionResponse(BaseModel):
+    user_id: str
+    username: str
+    role: str
+    token_version: int
+    auth_mode: str
+    password_last_changed_at: datetime | None = None
+    workspaces: list[WorkspaceSummary] = []

@@ -50,7 +50,7 @@ export function SignalDetailModal({
 }: SignalDetailModalProps) {
   if (!opp) return null;
 
-  const chartData = (opp.klines || []).map((k, i) => ({
+  const chartData = (opp.klines || []).map((k) => ({
     time: new Date(k.open_time).toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
@@ -91,6 +91,11 @@ export function SignalDetailModal({
           <DetailCard label="Volume 24h" value={`R$ ${(opp.quote_volume_24h / 1000).toFixed(0)}K`} />
           <DetailCard label="Liquidez" value={`${opp.liquidity_units.toLocaleString("pt-BR")} un.`} />
           <DetailCard
+            label="Gap Cross"
+            value={`${opp.cross_exchange_gap_pct.toFixed(2)}%`}
+            valueClass={opp.arbitrage_available ? "text-blue-500" : undefined}
+          />
+          <DetailCard
             label="Movimento"
             value={opp.movement_type.replace("_", " ")}
           />
@@ -99,6 +104,30 @@ export function SignalDetailModal({
             value={new Date(opp.detected_at).toLocaleTimeString("pt-BR")}
           />
         </div>
+
+        {opp.cross_exchange_reference_exchange || opp.cross_exchange_reference_price ? (
+          <>
+            <Separator className="my-2" />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <DetailCard
+                label="Exchange referencia"
+                value={opp.cross_exchange_reference_exchange ?? "-"}
+              />
+              <DetailCard
+                label="Preco referencia"
+                value={
+                  opp.cross_exchange_reference_price
+                    ? `R$ ${opp.cross_exchange_reference_price.toLocaleString("pt-BR")}`
+                    : "-"
+                }
+              />
+              <DetailCard
+                label="Confianca historica"
+                value={`${(opp.historical_confidence * 100).toFixed(1)}%`}
+              />
+            </div>
+          </>
+        ) : null}
 
         <Separator className="my-2" />
 

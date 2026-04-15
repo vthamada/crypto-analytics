@@ -27,6 +27,11 @@ export interface Opportunity {
   change_pct: number;
   detected_at: string;
   duration_minutes: number;
+  cross_exchange_gap_pct: number;
+  cross_exchange_reference_exchange?: Exchange | null;
+  cross_exchange_reference_price?: number | null;
+  arbitrage_available: boolean;
+  historical_confidence: number;
   klines?: Kline[];
 }
 
@@ -37,6 +42,7 @@ export interface DashboardStats {
   total_volume_24h: number;
   best_score: number;
   exchanges_online: number;
+  arbitrage_opportunities: number;
   last_scan: string | null;
 }
 
@@ -88,6 +94,11 @@ export interface HistoryRecord {
   change_pct: number;
   detected_at: string;
   duration_minutes: number;
+  cross_exchange_gap_pct: number;
+  cross_exchange_reference_exchange?: Exchange | null;
+  cross_exchange_reference_price?: number | null;
+  arbitrage_available: boolean;
+  historical_confidence: number;
 }
 
 export interface Analytics {
@@ -95,4 +106,37 @@ export interface Analytics {
   top_pairs: { pair: string; count: number }[];
   avg_score_by_exchange: { exchange: string; avg_score: number }[];
   score_distribution: Record<string, number>;
+  movement_distribution: Record<string, number>;
+  hourly_distribution: Record<string, number>;
+  arbitrage_count: number;
+  avg_cross_exchange_gap_pct: number;
+}
+
+export interface WorkspaceSummary {
+  id: string;
+  slug: string;
+  name: string;
+  role: string;
+  is_active: boolean;
+}
+
+export interface AdminSessionInfo {
+  user_id: string;
+  username: string;
+  role: string;
+  auth_mode: string;
+  token_version: number;
+  password_last_changed_at: string | null;
+  workspaces: WorkspaceSummary[];
+}
+
+export interface AuditLogEntry {
+  id: string;
+  actor_user_id?: string | null;
+  actor_username: string | null;
+  workspace_id?: string | null;
+  action: string;
+  status: string;
+  details: Record<string, unknown>;
+  created_at: string;
 }

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import abc
 import logging
-from datetime import datetime
+import time
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.models.schemas import Exchange, Ticker, OrderBook, Trade, Kline
+from app.services.monitoring import scan_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +42,61 @@ class ExchangeProvider(abc.ABC):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((httpx.HTTPStatusError, RateLimitError)),
+        retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError, RateLimitError)),
     )
     async def _request(self, method: str, path: str, **kwargs) -> dict | list:
         client = await self._get_client()
-        response = await client.request(method, path, **kwargs)
-        if response.status_code == 429:
-            logger.warning(f"[{self.exchange}] Rate limit hit on {path}")
-            raise RateLimitError(f"Rate limit on {path}")
-        response.raise_for_status()
-        return response.json()
+        started = time.perf_counter()
+
+        try:
+            response = await client.request(method, path, **kwargs)
+            latency_ms = (time.perf_counter() - started) * 1000
+
+            if response.status_code == 429:
+                scan_monitor.record_provider_failure(
+                    self.exchange.value,
+                    f"Rate limit on {path}",
+                    latency_ms,
+                    rate_limited=True,
+                )
+                logger.warning("[%s] rate_limit path=%s latency_ms=%.2f", self.exchange.value, path, latency_ms)
+                raise RateLimitError(f"Rate limit on {path}")
+
+            response.raise_for_status()
+            scan_monitor.record_provider_success(self.exchange.value, latency_ms)
+            logger.debug("[%s] request_ok path=%s latency_ms=%.2f", self.exchange.value, path, latency_ms)
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            latency_ms = (time.perf_counter() - started) * 1000
+            status_code = exc.response.status_code if exc.response else "unknown"
+            scan_monitor.record_provider_failure(
+                self.exchange.value,
+                f"HTTP {status_code} on {path}",
+                latency_ms,
+            )
+            logger.warning(
+                "[%s] request_http_error path=%s status=%s latency_ms=%.2f",
+                self.exchange.value,
+                path,
+                status_code,
+                latency_ms,
+            )
+            raise
+        except httpx.RequestError as exc:
+            latency_ms = (time.perf_counter() - started) * 1000
+            scan_monitor.record_provider_failure(
+                self.exchange.value,
+                f"{exc.__class__.__name__} on {path}",
+                latency_ms,
+            )
+            logger.warning(
+                "[%s] request_transport_error path=%s error=%s latency_ms=%.2f",
+                self.exchange.value,
+                path,
+                exc.__class__.__name__,
+                latency_ms,
+            )
+            raise
 
     @abc.abstractmethod
     async def get_ticker(self, pair: str) -> Ticker: ...

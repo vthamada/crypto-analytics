@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend
 
-## Getting Started
+Aplicacao Next.js do painel `Crypto Analytics`.
 
-First, run the development server:
+## Responsabilidades
+
+- Exibir dashboard em tempo real com oportunidades detectadas.
+- Exibir historico e analytics agregados.
+- Permitir ajuste de configuracoes operacionais protegidas por token administrativo.
+
+## Requisitos
+
+- Node.js 20+
+- Backend rodando em `http://localhost:8000` por padrao
+
+## Variaveis de ambiente
+
+Crie um arquivo `.env.local` com:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000/api
+NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+```
+
+## Desenvolvimento
+
+Instalacao:
+
+```bash
+npm install
+```
+
+Subir em modo desenvolvimento:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Aplicacao disponivel em:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Scripts
 
-## Learn More
+- `npm run dev`: servidor de desenvolvimento
+- `npm run build`: build de producao
+- `npm run start`: sobe a build gerada
+- `npm run lint`: analise estatico com ESLint
 
-To learn more about Next.js, take a look at the following resources:
+## Estrutura Principal
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `src/app/page.tsx`: dashboard principal
+- `src/app/history/page.tsx`: historico e analytics
+- `src/app/settings/page.tsx`: configuracoes administrativas
+- `src/components/`: componentes de interface
+- `src/hooks/use-opportunities.ts`: integracao de dashboard com REST + WebSocket
+- `src/lib/api.ts`: cliente HTTP do backend
+- `src/lib/websocket.ts`: cliente WebSocket com reconexao
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Observacoes Operacionais
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- A pagina de configuracoes exige `ADMIN_TOKEN` configurado no backend.
+- O frontend nao recebe de volta segredos armazenados no backend; campos sensiveis sao de escrita pontual.
+- O build Docker espera `output: "standalone"` no Next, ja configurado em `next.config.ts`.

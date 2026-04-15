@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -10,6 +11,7 @@ from app.models.schemas import Opportunity
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API = "https://api.telegram.org"
+_last_alert_sent_at: dict[str, datetime] = {}
 
 
 def _format_opportunity(opp: Opportunity) -> str:
@@ -34,6 +36,28 @@ def _format_opportunity(opp: Opportunity) -> str:
     )
 
 
+def _alert_key(opp: Opportunity) -> str:
+    return f"{opp.exchange.value}:{opp.pair}"
+
+
+def _filter_by_cooldown(opportunities: list[Opportunity]) -> list[Opportunity]:
+    cooldown = max(settings.telegram_alert_cooldown_seconds, 0)
+    if cooldown == 0:
+        return opportunities
+
+    now = datetime.now(timezone.utc)
+    eligible: list[Opportunity] = []
+
+    for opp in opportunities:
+        key = _alert_key(opp)
+        last_sent = _last_alert_sent_at.get(key)
+        if last_sent and now - last_sent < timedelta(seconds=cooldown):
+            continue
+        eligible.append(opp)
+
+    return eligible
+
+
 async def send_telegram_alert(
     opportunities: list[Opportunity],
     token: str = "",
@@ -54,7 +78,12 @@ async def send_telegram_alert(
     if not opportunities:
         return False
 
-    top = sorted(opportunities, key=lambda o: o.score, reverse=True)[:top_n]
+    eligible = _filter_by_cooldown(opportunities)
+    if not eligible:
+        logger.info("Telegram cooldown suppressed all candidate alerts")
+        return False
+
+    top = sorted(eligible, key=lambda o: o.score, reverse=True)[:top_n]
 
     lines = ["🔔 *Crypto Analytics - Novas Oportunidades*\n"]
     for opp in top:
@@ -76,6 +105,9 @@ async def send_telegram_alert(
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, json=payload, timeout=10)
             resp.raise_for_status()
+            now = datetime.now(timezone.utc)
+            for opp in top:
+                _last_alert_sent_at[_alert_key(opp)] = now
             logger.info("Telegram alert sent successfully")
             return True
     except Exception as e:

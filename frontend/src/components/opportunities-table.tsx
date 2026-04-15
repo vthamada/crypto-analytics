@@ -40,7 +40,7 @@ function movementBadge(type: string) {
     strong_range: { label: "📈 Forte", variant: "bg-emerald-500/15 text-emerald-500" },
     spike: { label: "⚡ Spike", variant: "bg-yellow-500/15 text-yellow-500" },
     weak: { label: "😐 Fraco", variant: "bg-muted text-muted-foreground" },
-    trap: { label: "⚠️ Armadilha", variant: "bg-red-500/15 text-red-500" },
+    trap: { label: "⚠ Armadilha", variant: "bg-red-500/15 text-red-500" },
   };
   const info = map[type] || { label: type, variant: "bg-muted text-muted-foreground" };
   return (
@@ -67,12 +67,32 @@ export function OpportunitiesTable({
   const [search, setSearch] = useState("");
   const [exchangeFilter, setExchangeFilter] = useState<string>("all");
   const [movementFilter, setMovementFilter] = useState<string>("all");
+  const [minScore, setMinScore] = useState("0");
+  const [sortBy, setSortBy] = useState<string>("score");
+  const [arbitrageOnly, setArbitrageOnly] = useState(false);
 
-  const filtered = opportunities.filter((o) => {
-    if (search && !o.pair.toLowerCase().includes(search.toLowerCase())) return false;
-    if (exchangeFilter !== "all" && o.exchange !== exchangeFilter) return false;
-    if (movementFilter !== "all" && o.movement_type !== movementFilter) return false;
+  const filtered = opportunities.filter((opportunity) => {
+    if (search && !opportunity.pair.toLowerCase().includes(search.toLowerCase())) return false;
+    if (exchangeFilter !== "all" && opportunity.exchange !== exchangeFilter) return false;
+    if (movementFilter !== "all" && opportunity.movement_type !== movementFilter) return false;
+    if (Number(minScore) > 0 && opportunity.score < Number(minScore)) return false;
+    if (arbitrageOnly && !opportunity.arbitrage_available) return false;
     return true;
+  });
+
+  const sorted = [...filtered].sort((left, right) => {
+    switch (sortBy) {
+      case "gap":
+        return right.cross_exchange_gap_pct - left.cross_exchange_gap_pct;
+      case "volume":
+        return right.quote_volume_24h - left.quote_volume_24h;
+      case "volatility":
+        return right.volatility_pct - left.volatility_pct;
+      case "spread":
+        return left.spread_pct - right.spread_pct;
+      default:
+        return right.score - left.score;
+    }
   });
 
   return (
@@ -80,14 +100,21 @@ export function OpportunitiesTable({
       <CardHeader className="pb-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-lg">Oportunidades Detectadas</CardTitle>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Input
               placeholder="Buscar par..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(event) => setSearch(event.target.value)}
               className="h-9 w-40"
             />
-            <Select value={exchangeFilter} onValueChange={(v) => setExchangeFilter(v ?? "all")}>
+            <Input
+              placeholder="Score min."
+              type="number"
+              value={minScore}
+              onChange={(event) => setMinScore(event.target.value)}
+              className="h-9 w-28"
+            />
+            <Select value={exchangeFilter} onValueChange={(value) => setExchangeFilter(value ?? "all")}>
               <SelectTrigger className="h-9 w-36">
                 <SelectValue placeholder="Exchange" />
               </SelectTrigger>
@@ -98,7 +125,7 @@ export function OpportunitiesTable({
                 <SelectItem value="binance">Binance</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={movementFilter} onValueChange={(v) => setMovementFilter(v ?? "all")}>
+            <Select value={movementFilter} onValueChange={(value) => setMovementFilter(value ?? "all")}>
               <SelectTrigger className="h-9 w-36">
                 <SelectValue placeholder="Movimento" />
               </SelectTrigger>
@@ -110,6 +137,26 @@ export function OpportunitiesTable({
                 <SelectItem value="trap">Armadilha</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={sortBy} onValueChange={(value) => setSortBy(value ?? "score")}>
+              <SelectTrigger className="h-9 w-36">
+                <SelectValue placeholder="Ordenar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="score">Score</SelectItem>
+                <SelectItem value="gap">Gap</SelectItem>
+                <SelectItem value="volume">Volume</SelectItem>
+                <SelectItem value="volatility">Volatilidade</SelectItem>
+                <SelectItem value="spread">Spread</SelectItem>
+              </SelectContent>
+            </Select>
+            <label className="flex h-9 items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={arbitrageOnly}
+                onChange={(event) => setArbitrageOnly(event.target.checked)}
+              />
+              Arbitragem
+            </label>
           </div>
         </div>
       </CardHeader>
@@ -141,62 +188,72 @@ export function OpportunitiesTable({
                     ))}
                   </TableRow>
                 ))
-              ) : filtered.length === 0 ? (
+              ) : sorted.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
                     Nenhuma oportunidade encontrada
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((opp) => (
+                sorted.map((opportunity) => (
                   <TableRow
-                    key={opp.id}
+                    key={opportunity.id}
                     className={cn(
                       "cursor-pointer transition-colors",
-                      opp.score >= 70 && "bg-emerald-500/5 hover:bg-emerald-500/10",
-                      opp.score >= 40 && opp.score < 70 && "hover:bg-yellow-500/5",
+                      opportunity.score >= 70 && "bg-emerald-500/5 hover:bg-emerald-500/10",
+                      opportunity.score >= 40 && opportunity.score < 70 && "hover:bg-yellow-500/5",
+                      opportunity.arbitrage_available && "ring-1 ring-blue-500/20",
                     )}
-                    onClick={() => onSelect?.(opp)}
+                    onClick={() => onSelect?.(opportunity)}
                   >
                     <TableCell>
                       <Badge
                         variant="outline"
-                        className={cn("font-bold tabular-nums", scoreColor(opp.score))}
+                        className={cn("font-bold tabular-nums", scoreColor(opportunity.score))}
                       >
-                        {opp.score}
+                        {opportunity.score}
                       </Badge>
                     </TableCell>
-                    <TableCell className="font-medium">{opp.pair}</TableCell>
+                    <TableCell className="font-medium">{opportunity.pair}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {exchangeLabel(opp.exchange)}
+                      {exchangeLabel(opportunity.exchange)}
                     </TableCell>
                     <TableCell className="tabular-nums">
-                      R$ {opp.last_price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                      R$ {opportunity.last_price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell>
                       <span
                         className={cn(
                           "tabular-nums font-medium",
-                          opp.change_pct >= 0 ? "text-emerald-500" : "text-red-500"
+                          opportunity.change_pct >= 0 ? "text-emerald-500" : "text-red-500"
                         )}
                       >
-                        {opp.change_pct >= 0 ? "+" : ""}
-                        {opp.change_pct.toFixed(2)}%
+                        {opportunity.change_pct >= 0 ? "+" : ""}
+                        {opportunity.change_pct.toFixed(2)}%
                       </span>
                     </TableCell>
                     <TableCell className="tabular-nums">
-                      {opp.volatility_pct.toFixed(2)}%
+                      {opportunity.volatility_pct.toFixed(2)}%
                     </TableCell>
                     <TableCell className="tabular-nums">
-                      R$ {(opp.quote_volume_24h / 1000).toFixed(0)}K
+                      R$ {(opportunity.quote_volume_24h / 1000).toFixed(0)}K
                     </TableCell>
                     <TableCell className="tabular-nums">
-                      {opp.liquidity_units.toLocaleString("pt-BR")}
+                      {opportunity.liquidity_units.toLocaleString("pt-BR")}
                     </TableCell>
                     <TableCell className="tabular-nums">
-                      {opp.spread_pct.toFixed(4)}%
+                      {opportunity.spread_pct.toFixed(4)}%
                     </TableCell>
-                    <TableCell>{movementBadge(opp.movement_type)}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        {movementBadge(opportunity.movement_type)}
+                        {opportunity.arbitrage_available ? (
+                          <span className="text-[11px] font-medium text-blue-500">
+                            Gap {opportunity.cross_exchange_gap_pct.toFixed(2)}%
+                          </span>
+                        ) : null}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))
               )}
