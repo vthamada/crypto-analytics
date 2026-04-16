@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     scan_interval_seconds: int = 30
     history_retention_days: int = 90
     history_retention_check_minutes: int = 60
+    scanner_enabled: bool = True
 
     # Default filter thresholds
     min_volatility_pct: float = 2.0

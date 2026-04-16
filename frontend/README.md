@@ -6,7 +6,7 @@ Aplicacao Next.js do painel `Crypto Analytics`.
 
 - Exibir dashboard em tempo real com oportunidades detectadas.
 - Exibir historico e analytics agregados.
-- Permitir ajuste de configuracoes operacionais protegidas por token administrativo.
+- Permitir ajuste de configuracoes operacionais para administradores do workspace ativo.
 
 ## Requisitos
 
@@ -48,6 +48,7 @@ http://localhost:3000
 - `npm run build`: build de producao
 - `npm run start`: sobe a build gerada
 - `npm run lint`: analise estatico com ESLint
+- `npm run e2e`: executa a suite Playwright
 
 ## Estrutura Principal
 
@@ -61,6 +62,6 @@ http://localhost:3000
 
 ## Observacoes Operacionais
 
-- A pagina de configuracoes exige `ADMIN_TOKEN` configurado no backend.
+- A pagina de configuracoes exige sessao autenticada e role administrativa no workspace ativo; o fallback legado com `ADMIN_TOKEN` ainda e aceito pelo backend.
 - O frontend nao recebe de volta segredos armazenados no backend; campos sensiveis sao de escrita pontual.
 - O build Docker espera `output: "standalone"` no Next, ja configurado em `next.config.ts`.

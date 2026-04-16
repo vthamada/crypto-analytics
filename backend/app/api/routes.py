@@ -55,6 +55,7 @@ from app.services.auth import (
 from app.services.monitoring import scan_monitor
 from app.services.pairs import get_available_pairs_catalog
 from app.services.exchange_credentials import validate_exchange_credentials
+from app.services.shared_state import get_scanner_runtime_state, read_opportunity_snapshots
 from app.services.persistence import (
     DEFAULT_WORKSPACE_ID,
     get_filtered_analytics,
@@ -281,6 +282,9 @@ class ConfigUpdate(BaseModel):
     telegram_enabled: bool | None = None
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    telegram_alert_threshold: float | None = None
+    telegram_alert_cooldown_seconds: int | None = None
+    telegram_alert_types: list[str] | None = None
     novadax_api_key: str | None = None
     novadax_api_secret: str | None = None
     mb_api_key: str | None = None
@@ -607,13 +611,28 @@ async def admin_audit_log(
     return await list_audit_logs(workspace_id=workspace.id, limit=limit)
 
 
+async def _effective_opportunities() -> list[Opportunity]:
+    """Return in-memory state or fall back to DB snapshots (API-only / worker mode)."""
+    if _current_opportunities:
+        return list(_current_opportunities)
+    snapshots = await read_opportunity_snapshots()
+    result = []
+    for snap in snapshots:
+        try:
+            result.append(Opportunity(**snap))
+        except Exception:
+            pass
+    return result
+
+
 @router.get("/dashboard/stats", response_model=DashboardStats)
 async def dashboard_stats(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
-    opps = [project_workspace_opportunity(opportunity, config) for opportunity in _current_opportunities]
+    base_opportunities = await _effective_opportunities()
+    opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
     filtered_opportunities = [opportunity for opportunity in opps if opportunity is not None]
     exchanges_online = len({opportunity.exchange for opportunity in filtered_opportunities})
     return DashboardStats(
@@ -642,7 +661,8 @@ async def list_opportunities(
 ):
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
 
-    opps = [project_workspace_opportunity(opportunity, config) for opportunity in _current_opportunities]
+    base_opportunities = await _effective_opportunities()
+    opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
     visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
 
     if exchange:
@@ -676,7 +696,8 @@ async def get_opportunity(
     session_info: UserSession = Depends(require_user_session),
 ):
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
-    for opportunity in _current_opportunities:
+    base_opportunities = await _effective_opportunities()
+    for opportunity in base_opportunities:
         if opportunity.id == opp_id:
             return project_workspace_opportunity(opportunity, config)
     return None
@@ -819,11 +840,15 @@ async def test_telegram_endpoint(
 @router.get("/health")
 async def health():
     runtime = scan_monitor.snapshot()
+    scanner_state = await get_scanner_runtime_state()
+    has_local_scanner = _last_scan is not None
     return {
         "status": "ok",
+        "mode": "scanner" if has_local_scanner else "api_only",
         "last_scan": _last_scan.isoformat() if _last_scan else None,
         "opportunities_count": len(_current_opportunities),
         "scanner": runtime,
+        "scanner_state": scanner_state,
         "websocket_connections": manager.connection_count,
         "scan_configured_exchanges": [exchange.value for exchange in _scan_config.enabled_exchanges],
     }

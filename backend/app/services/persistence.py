@@ -105,6 +105,8 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "exchange": record.exchange,
         "pair": record.pair,
         "score": workspace_score,
+        "technical_score": getattr(record, "technical_score", None),
+        "score_version": getattr(record, "score_version", "v1"),
         "volatility_pct": record.volatility_pct,
         "volume_24h": record.volume_24h,
         "quote_volume_24h": record.quote_volume_24h,
@@ -231,6 +233,9 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
                 spread_score=opp.spread_score,
                 repetition_score=opp.repetition_score,
                 movement_multiplier=opp.movement_multiplier,
+                technical_score=opp.technical_score,
+                score_version=opp.score_version,
+                technical_signal_id=opp.technical_signal_id,
             )
             session.add(record)
             recent_keys.add(key)  # evita duplicata dentro do mesmo lote

@@ -4,7 +4,6 @@
 
 O sistema deve funcionar como um **assistente inteligente de operações**, monitorando automaticamente pares de criptomoedas nas exchanges NovaDAX, Mercado Bitcoin e Binance. Ele deve coletar dados de mercado em tempo quase real, aplicar filtros de volatilidade/volume/liquidez, classificar as oportunidades conforme a capacidade de execução e notificar o operador via Telegram e painel web. Também deve manter histórico e permitir evolução futura para integração de IA e automação de ordens.
 
-
 ## 1. Integração com APIs
 
 A infraestrutura deve abstrair as diferenças entre as APIs das exchanges para permitir coleta unificada. As classes `NovaDaxProvider`, `MercadoBitcoinProvider` e `BinanceProvider` deverão fornecer interface comum:
@@ -56,57 +55,59 @@ class ExchangeProvider:
 ## 2. Módulos essenciais
 
 ### 2.5 Painel web
-- **Tecnologia**: Next.js/React com TypeScript; shadcn/ui para componentes; Tailwind CSS. 
+- **Tecnologia**: Next.js/React com TypeScript; shadcn/ui para componentes; Tailwind CSS.
 - **Layout**:
-  - **Dashboard principal**: cards coloridos com KPIs (nº de oportunidades, pares monitorados, volumetria total). 
-  - **Tabela de oportunidades**: listagem das melhores oportunidades com filtros (corretora, par, score, tipo). Linhas destacadas conforme a cor do score (verde intenso = excelente, amarelo = moderado). 
-  - **Detalhes do sinal**: ao clicar, modal com gráfico de preço recente (recharts), volume, liquidez, spread, tempo de vida. 
+  - **Dashboard principal**: cards coloridos com KPIs (nº de oportunidades, pares monitorados, volumetria total).
+  - **Tabela de oportunidades**: listagem das melhores oportunidades com filtros (corretora, par, score, tipo). Linhas destacadas conforme a cor do score (verde intenso = excelente, amarelo = moderado).
+  - **Detalhes do sinal**: ao clicar, modal com gráfico de preço recente (recharts), volume, liquidez, spread, tempo de vida.
   - **Filtros**: controles para ajustar thresholds de volume/volatilidade, escolher corretoras, intervalos de tempo.
-- **Interatividade**: WebSockets (Ex. `socket.io`) para atualizações em tempo real; charts com zoom; dark/light mode.
+- **Interatividade**: WebSocket para atualizações em tempo real; charts com zoom; dark/light mode.
 - **Design system**: basear‑se em fintechs modernas (Nubank, C6) com paleta de cores suaves, tipografia clara, ícones simples. Evitar gridlines; usar cards com bordas arredondadas (radius 2xl), sombras suaves, emojis nos KPIs para enfatizar alegria/urgência (ex.: 📈, ⚠️).
 
 ### 2.6 Histórico e analytics
-- Registrar cada oportunidade detectada com timestamp, exchange, par, score, volume, liquidez, tipo de movimento, spread, duração. 
-- Permitir relatórios: “top moedas por oportunidades boas”, “horários com mais sinais”, “distribuição de scores”. 
+- Registrar cada oportunidade detectada com timestamp, exchange, par, score, volume, liquidez, tipo de movimento, spread, duração.
+- Permitir relatórios: “top moedas por oportunidades boas”, “horários com mais sinais”, “distribuição de scores”.
 - Persistir no banco para análise futura e ajuste de parâmetros.
 
 ### 2.7 Configurações e parâmetros
-- Interface de administração para ajustar thresholds (volume mínimo, variação mínima, limite de alertas) sem alterar código. 
+- Interface de administração para ajustar thresholds (volume mínimo, variação mínima, limite de alertas) sem alterar código.
 - Permitir ativar/desativar exchanges ou pares individuais.
 
 ## 3. Módulos de evolução (versões futuras)
 
 ### 3.1 Componente de inteligência adaptativa
-Implementar algoritmos que ajustem automaticamente os thresholds com base no histórico de sucesso. Possibilidades:
-- **Aprendizado supervisionado**: treinar modelo (e.g., Random Forest, Gradient Boosted Trees) com features calculadas (volatilidade, volume, liquidez, spread, tipo de movimento, horários) e rótulos (operação deu lucro ou não). A saída seria um score refinado.
-- **Modelos de previsão de volatilidade**: usar GARCH/ARCH ou redes neurais (LSTM) para estimar volatilidade futura. 
-- **Classificação de armadilhas**: usar clustering (DBSCAN, k‑means) com features de profundidade de livro e variação para separar sinais falsos.
+Implementar algoritmos que ajustem automaticamente os thresholds com base no histórico de sucesso. Possibilidades organizadas por niveis:
+- **Nivel 1 — Indicadores tecnicos classicos**: adicionar RSI, MACD, Bollinger Bands, EMA crossover e OBV para refinar score e reduzir falsos positivos com baixo custo operacional.
+- **Nivel 2 — Confirmacao multi-timeframe**: exigir concordancia minima entre timeframes como 5m, 1h e 4h antes de elevar score ou disparar alerta.
+- **Nivel 3 — Mean reversion com z-score**: usar distancia da media e bandas de desvio para capturar reversao em pares que operam em range.
+- **Nivel 4 — Filtro de regime e classificacao de armadilhas**: usar ADX ou Aroon para decidir quando o mercado favorece momentum ou reversao, e complementar com clustering (DBSCAN, k-means) para separar sinais falsos.
+- **Nivel 5 — Inteligencia adaptativa supervisionada**: treinar modelo (e.g., Random Forest, Gradient Boosted Trees, LightGBM ou XGBoost) com features calculadas (volatilidade, volume, liquidez, spread, tipo de movimento, horarios) e rotulos de outcome real. Modelos de previsao de volatilidade como GARCH/ARCH ou LSTM entram aqui como features auxiliares, nao como prerequisito do MVP.
 
 ### 3.2 Análise cross‑exchange
-- Verificar se um movimento ocorre apenas em uma exchange ou em várias. 
-- Calcular arbitragem simples (diferença de preço). 
-- Ajustar score se houver convergência divergente (movimento só local → menor score). 
+- Verificar se um movimento ocorre apenas em uma exchange ou em várias.
+- Calcular arbitragem simples (diferença de preço).
+- Ajustar score se houver convergência divergente (movimento só local → menor score).
 
 ### 3.3 Sinais de deterioração
-- Monitorar sinais em curso; enviar aviso quando volume cair, liquidez diminuir, spread piorar ou o tempo de vida ultrapassar limite (ex.: 2 horas). 
+- Monitorar sinais em curso; enviar aviso quando volume cair, liquidez diminuir, spread piorar ou o tempo de vida ultrapassar limite (ex.: 2 horas).
 - Recomendar saída ou pausa.
 
 ### 3.4 Execução assistida
-- Integração parcial com APIs privadas para enviar ordens (somente após validação legal). 
-- Implementar “botão de teste” no painel que aciona ordem mínima via API, com confirmação. 
-- Calcular valor de entrada sugerido com base em liquidez e perfil do usuário. 
+- Integração parcial com APIs privadas para enviar ordens (somente após validação legal).
+- Implementar “botão de teste” no painel que aciona ordem mínima via API, com confirmação.
+- Calcular valor de entrada sugerido com base em liquidez e perfil do usuário.
 
 ### 3.5 App móvel e notificações push
-- Desenvolver versão móvel (React Native ou Flutter). 
-- Integrar com notificações push (OneSignal, Firebase). 
+- Desenvolver versão móvel (React Native ou Flutter).
+- Integrar com notificações push (OneSignal, Firebase).
 
 ### 3.6 Customização de perfis
-- Permitir múltiplos usuários com parâmetros diferentes. 
-- Permitir definir perfil “conservador” (prioriza liquidez) ou “agressivo” (aceita spikes). 
+- Permitir múltiplos usuários com parâmetros diferentes.
+- Permitir definir perfil “conservador” (prioriza liquidez) ou “agressivo” (aceita spikes).
 
 ## 4. Tecnologias e algoritmos úteis
 
-- **Linguagem**: Python 3.11 para backend e algoritmos.
+- **Linguagem**: Python 3.11+ para backend e algoritmos.
 - **Bibliotecas**: `pandas` e `numpy` para manipulação de dados; `statsmodels` para modelos GARCH; `ta` (Technical Analysis library) para indicadores; `scikit‑learn` para modelos supervisionados; `sqlalchemy` para ORM; `aiohttp` ou `httpx` para HTTP assíncrono; `python-telegram-bot` para integração com Telegram.
 - **Banco de dados**: Supabase (PostgreSQL) com Row Level Security para isolar dados por usuário; pgbouncer para pooling; triggers para limpeza de dados antigos.
 - **Infraestrutura**: deploy no Railway ou Render para backend Python; Vercel para front end; monitoramento com Logtail e Sentry; containerização com Docker.
@@ -130,6 +131,6 @@ Implementar algoritmos que ajustem automaticamente os thresholds com base no his
 
 ## 6. Considerações finais
 
-Este documento serve como base para implementação por ferramentas de code generation (Codex/Claude Code). Algumas referências de design e ambiente de pesquisa foram registradas【505120507351886†screenshot】. Para detalhes específicos dos endpoints das exchanges, consulte a documentação oficial de cada API na fase de desenvolvimento. 
+Este documento serve como base para implementação por ferramentas de code generation (Codex/Claude Code). Para detalhes específicos dos endpoints das exchanges, consulte a documentação oficial de cada API na fase de desenvolvimento.
 
 A arquitetura sugerida oferece flexibilidade para evoluir de um scanner simples para um **assistente operacional inteligente**, com possibilidade de automação gradual, aprendizado de máquina e integração com corretoras. O foco inicial deverá ser a **utilidade imediata para o usuário**, priorizando detecção de oportunidades reais, filtros robustos e experiência de uso fluida.

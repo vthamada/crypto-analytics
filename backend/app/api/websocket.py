@@ -71,6 +71,10 @@ class ConnectionManager:
     def connection_count(self) -> int:
         return sum(len(connections) for connections in self._connections_by_workspace.values())
 
+    @property
+    def workspace_ids(self) -> set[str]:
+        return set(self._connections_by_workspace.keys())
+
 
 manager = ConnectionManager()
 

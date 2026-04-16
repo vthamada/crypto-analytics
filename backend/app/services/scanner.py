@@ -14,6 +14,7 @@ from app.providers.novadax import NovaDaxProvider
 from app.providers.mercado_bitcoin import MercadoBitcoinProvider
 from app.providers.binance import BinanceProvider
 from app.services.pairs import get_scannable_pairs_by_exchange
+from app.services.shared_state import calculate_technical_score, SCORE_VERSION
 from app.filters.volatility import calculate_volatility, passes_volatility_filter, calculate_recent_change
 from app.filters.volume import passes_volume_filter, volume_score
 from app.filters.liquidity import calculate_liquidity, passes_liquidity_filter, liquidity_score
@@ -44,6 +45,10 @@ class Scanner:
         self._running = False
 
         self._init_providers()
+
+    def load_repetition_counts(self, counts: dict[str, int]) -> None:
+        """Restore repetition counts from persistent storage."""
+        self._repetition_counts.update(counts)
 
     def _init_providers(self) -> None:
         provider_map: dict[Exchange, type[ExchangeProvider]] = {
@@ -143,11 +148,23 @@ class Scanner:
             historical_confidence = self._historical_calibration.get(pair, {}).get("factor", 1.0)
             score = min(max(round(score * historical_confidence, 1), 0), 100)
 
+            technical_score = calculate_technical_score(
+                volatility_score=volatility_component,
+                volume_score=volume_component,
+                liquidity_score=liquidity_component,
+                spread_score=spread_component,
+                repetition_score=repetition_component,
+                movement_multiplier=movement_multiplier,
+                historical_confidence=historical_confidence,
+            )
+
             return Opportunity(
                 id=str(uuid.uuid4()),
                 exchange=provider.exchange,
                 pair=pair,
                 score=score,
+                technical_score=technical_score,
+                score_version=SCORE_VERSION,
                 volatility_pct=round(volatility_pct, 2),
                 volume_24h=ticker.volume_24h,
                 quote_volume_24h=ticker.quote_volume_24h,

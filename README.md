@@ -1,28 +1,36 @@
 # Crypto Analytics
 
-Monorepo de monitoramento de oportunidades em criptomoedas com backend FastAPI e frontend Next.js.
+Monorepo de monitoramento de oportunidades em criptomoedas com backend FastAPI, worker dedicado de scan e frontend Next.js.
 
 ## Estrutura
 
-- `backend/`: scanner, API, persistencia e alertas
-- `frontend/`: dashboard, historico e configuracoes
-- `SPEC.md`: escopo funcional
-- `ARCHITECTURE.md`: visao tecnica
+- `backend/`: API, worker, persistencia, autenticacao e alertas
+- `frontend/`: dashboard, historico, analytics e configuracoes
+- `SPEC.md`: especificacao funcional e direcao de produto
+- `ARCHITECTURE.md`: visao arquitetural de alto nivel
+- `SYSTEM_STATE.md`: melhor retrato do runtime atual e do fluxo real de geracao de sinais
 - `DEPLOY.md`: deploy e operacao
 - `BACKLOG.md`: prioridades abertas
 
-## Setup Rapido
+## Modos de operacao
+
+- Desenvolvimento simples: `uvicorn app.main:app --reload` sobe a API com scanner local
+- Fluxo padrao do repositorio: `docker-compose.yml` sobe `backend` em modo API-only e `worker` como produtor principal do scan
+
+## Setup rapido
 
 ### 1. Configuracao
 
-Use [`.env.example`](</c:/Users/vtham/OneDrive/Área de Trabalho/crypto-analytics/.env.example>) como base para seu `.env`.
+Use [.env.example](.env.example) como base para seu `.env` na raiz e [backend/.env.example](backend/.env.example) como referencia para o backend.
 
 Campos importantes:
-- `ADMIN_TOKEN`
 - `DATABASE_URL`
+- `AUTH_SECRET_KEY` ou `ADMIN_TOKEN` como fallback legado
 - `NEXT_PUBLIC_API_URL`
 - `NEXT_PUBLIC_WS_URL`
-- `SENTRY_DSN` (opcional)
+- `SCANNER_ENABLED`
+- `CORS_ALLOWED_ORIGINS`
+- `SENTRY_DSN` e `LOG_AGGREGATION_URL` opcionais
 
 ### 2. Backend
 
@@ -40,13 +48,20 @@ npm install
 npm run dev
 ```
 
-## Comandos Uteis
+### 4. Stack separada via Docker Compose
+
+```bash
+docker compose up --build
+```
+
+## Comandos uteis
 
 ### Backend
 
 ```bash
-python -m pytest backend/tests -q -p no:cacheprovider
-python -m compileall backend/app
+cd backend
+python -m pytest tests -q
+python -m compileall app tests
 ```
 
 ### Frontend
@@ -54,23 +69,22 @@ python -m compileall backend/app
 ```bash
 npm --prefix frontend run lint
 npm --prefix frontend run build
+npm --prefix frontend run e2e
 ```
 
-## Estado Atual
+## Estado atual
 
-- Configuracao administrativa protegida por token.
-- Scanner com reconfiguracao em runtime.
-- Cooldown de alertas Telegram.
-- Analytics filtrados por periodo.
-- CI inicial em `.github/workflows/ci.yml`.
-- Suite inicial de testes do backend adicionada.
-- Health check enriquecido com metricas de scanner e providers.
-- Integracao opcional com Sentry no backend.
+- Scanner global com projecao posterior por workspace
+- `technical_score` neutro com `score_version`
+- `technical_signals`, `workspace_signal_projections` e `signal_outcomes`
+- API capaz de operar sem scanner local via `opportunity_snapshots`
+- Worker dedicado como fluxo padrao de scan
+- Politica de Telegram configuravel por workspace
+- Health check com `mode` (`scanner` ou `api_only`) e `scanner_state`
+- Suite backend e E2E frontend ativas no repositorio
 
-## Proximos Passos
+## Leitura recomendada
 
-Os itens restantes estao em [BACKLOG.md](</c:/Users/vtham/OneDrive/Área de Trabalho/crypto-analytics/BACKLOG.md>), com foco em:
-- ampliar cobertura de testes
-- endurecer autenticacao/autorizacao
-- melhorar observabilidade
-- evoluir analytics e regras de negocio
+- Runtime e comportamento atual: [SYSTEM_STATE.md](SYSTEM_STATE.md)
+- Prioridades e roadmap: [BACKLOG.md](BACKLOG.md)
+- Deploy: [DEPLOY.md](DEPLOY.md)

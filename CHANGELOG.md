@@ -12,6 +12,41 @@ Convencao deste repositorio:
 
 - Nenhuma entrada em aberto.
 
+## [2026-04-16]
+
+### Added
+- `backend/app/services/shared_state.py` com contrato compartilhado entre scanner/worker e API: runtime state, snapshots de oportunidades, sinais tecnicos, projecoes por workspace, outcome tracking e repeticao persistente.
+- Migracao `0006_p2_robustness_tables` criando 6 tabelas: `scanner_runtime_state`, `opportunity_snapshots`, `technical_signals`, `workspace_signal_projections`, `signal_outcomes` e `repetition_counts`, alem de 3 colunas em `opportunities` (`technical_score`, `score_version`, `technical_signal_id`).
+- `technical_score` neutro (pesos fixos default, sem dependencia de `configs[0].weights`) com `score_version` para versionamento do motor de score.
+- Dual-write de `technical_signals` com deduplicacao por janela de 5 minutos; cada oportunidade persistida recebe `technical_signal_id`.
+- `workspace_signal_projections` materializado por ciclo de scan, com `workspace_score`, `visible`, `alert_eligible` e `projection_reason`.
+- `signal_outcomes` com campos para avaliacao temporal em 5m, 15m, 1h e 4h.
+- `backend/app/services/outcome_evaluator.py` — job que busca preco atual para outcomes pendentes e preenche campos de 5m/15m/1h/4h com calculo de `outcome_pct`.
+- `repetition_counts` persistido em banco, com decay automatico de contagens inativas ha mais de 30 minutos.
+- Fallback da API para snapshots do banco quando nao ha scanner local (`_effective_opportunities`), permitindo modo API-only.
+- `SCANNER_ENABLED` em `Settings` — permite desligar o scan loop para rodar a API em modo API-only.
+- Campo `mode` no `/api/health` (`scanner` ou `api_only`) e `scanner_state` com estado do ultimo ciclo vindo do banco.
+- `telegram_alert_threshold`, `telegram_alert_cooldown_seconds` e `telegram_alert_types` em `AppConfig` e `ConfigUpdate`.
+- `backend/tests/test_contract_integration.py` com 10 testes de contrato cobrindo `/api/dashboard/stats`, `/api/opportunities`, `/api/health` e `/api/config` incluindo fallback para snapshots, campos tecnicos e politica de Telegram.
+- `backend/tests/test_outcome_evaluator.py` com 8 testes cobrindo janelas temporais e avaliacao de outcomes com mocks de providers.
+- Metodo `Scanner.load_repetition_counts()` para restaurar contagens persistidas na inicializacao.
+
+### Changed
+- Documentacao operacional e arquitetural alinhada ao runtime atual: `README.md`, `ARCHITECTURE.md`, `SYSTEM_STATE.md`, `HANDOFF.md`, `DEPLOY.md`, `SPEC.md` e `frontend/README.md` agora refletem o fluxo padrao com API em modo `api_only` + worker dedicado, health check com `mode`, autenticacao por sessao/workspace e outcome evaluator ativo.
+- `docker-compose.yml` agora separa API (com `SCANNER_ENABLED=false`) e worker (`python -m app.worker`) em servicos distintos.
+- `main.py` e `api/websocket.py` agora repropagam snapshots persistidos para clientes WebSocket conectados mesmo quando a API roda em `api_only` e o scan fica em um worker separado.
+- `scan_loop()` em `main.py` passou a escrever snapshots, sinais tecnicos, projecoes, outcomes e repeticao a cada ciclo, a registrar `scanner_runtime_state` com inicio, duracao, erro e sucesso, e a executar `evaluate_pending_outcomes` a cada ciclo.
+- `worker.py` recebeu a mesma integracao de `shared_state` que `main.py`, tornando-o produtor equivalente do scan, incluindo avaliacao de outcomes.
+- `scanner.py` passou a computar `technical_score` e `score_version` em cada oportunidade e a aceitar contagens de repeticao vindas do banco.
+- `persistence.py` passou a persistir `technical_score`, `score_version` e `technical_signal_id` em `OpportunityRecord`, e `serialize_history_record` inclui os novos campos.
+- `routes.py` passou a usar `_effective_opportunities()` em `/api/dashboard/stats`, `/api/opportunities` e `/api/opportunities/{id}`, caindo para snapshots do banco quando nao ha estado local.
+- Alertas Telegram no scan loop passaram a usar `telegram_alert_threshold` configurado por workspace em vez do corte fixo `score >= 60`.
+- Logs de fim de ciclo passaram a incluir `signals_saved`, `projections_saved`, `alerts_sent` e `alerts_suppressed`.
+- `DEPLOY.md` foi reescrito para priorizar a topologia `Supabase + Render + Vercel`, com API em `api_only`, worker dedicado e checklist de smoke test aderente ao runtime atual.
+
+### Removed
+- `refatoracao_implementacao.md` removido para evitar drift documental apos o plano ter sido absorvido por `BACKLOG.md`, `SYSTEM_STATE.md` e demais documentos ativos.
+
 ## [2026-04-15]
 
 ### Added

@@ -50,6 +50,9 @@ class OpportunityRecord(Base):
     spread_score = Column(Float, default=0.0)
     repetition_score = Column(Float, default=0.0)
     movement_multiplier = Column(Float, default=1.0)
+    technical_score = Column(Float, nullable=True)
+    score_version = Column(String, nullable=True, default="v1")
+    technical_signal_id = Column(String, nullable=True)
 
 
 class ConfigRecord(Base):
@@ -167,6 +170,129 @@ class AuditLogRecord(Base):
     created_at = Column(DateTime, nullable=False, default=utcnow, index=True)
 
 
+class ScannerRuntimeStateRecord(Base):
+    __tablename__ = "scanner_runtime_state"
+
+    id = Column(String, primary_key=True, default="singleton")
+    last_cycle_started_at = Column(DateTime, nullable=True)
+    last_cycle_completed_at = Column(DateTime, nullable=True)
+    last_cycle_duration_ms = Column(Float, nullable=True)
+    last_cycle_error = Column(Text, nullable=True)
+    last_success_at = Column(DateTime, nullable=True)
+    opportunities_count = Column(Integer, nullable=False, default=0)
+    score_version = Column(String, nullable=False, default="v1")
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class OpportunitySnapshotRecord(Base):
+    __tablename__ = "opportunity_snapshots"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    exchange = Column(String, nullable=False, index=True)
+    pair = Column(String, nullable=False, index=True)
+    score = Column(Float, nullable=False)
+    technical_score = Column(Float, nullable=False)
+    score_version = Column(String, nullable=False, default="v1")
+    volatility_pct = Column(Float, nullable=False)
+    volume_24h = Column(Float, nullable=False)
+    quote_volume_24h = Column(Float, nullable=False)
+    liquidity_units = Column(Float, nullable=False)
+    spread_pct = Column(Float, nullable=False)
+    movement_type = Column(String, nullable=False)
+    last_price = Column(Float, nullable=False)
+    change_pct = Column(Float, nullable=False)
+    detected_at = Column(DateTime, nullable=False, default=utcnow)
+    historical_confidence = Column(Float, default=1.0)
+    volatility_score = Column(Float, default=0.0)
+    volume_score = Column(Float, default=0.0)
+    liquidity_score = Column(Float, default=0.0)
+    spread_score = Column(Float, default=0.0)
+    repetition_score = Column(Float, default=0.0)
+    movement_multiplier = Column(Float, default=1.0)
+    cross_exchange_gap_pct = Column(Float, default=0.0)
+    cross_exchange_reference_exchange = Column(String, nullable=True)
+    cross_exchange_reference_price = Column(Float, nullable=True)
+    arbitrage_available = Column(Boolean, default=False)
+    snapshot_cycle_id = Column(String, nullable=False, index=True)
+
+
+class TechnicalSignalRecord(Base):
+    __tablename__ = "technical_signals"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    exchange = Column(String, nullable=False, index=True)
+    pair = Column(String, nullable=False, index=True)
+    technical_score = Column(Float, nullable=False, index=True)
+    score_version = Column(String, nullable=False, default="v1")
+    volatility_pct = Column(Float, nullable=False)
+    volatility_score = Column(Float, default=0.0)
+    volume_24h = Column(Float, nullable=False)
+    quote_volume_24h = Column(Float, nullable=False)
+    volume_score = Column(Float, default=0.0)
+    liquidity_units = Column(Float, nullable=False)
+    liquidity_score = Column(Float, default=0.0)
+    spread_pct = Column(Float, nullable=False)
+    spread_score = Column(Float, default=0.0)
+    repetition_score = Column(Float, default=0.0)
+    movement_type = Column(String, nullable=False)
+    movement_multiplier = Column(Float, default=1.0)
+    last_price = Column(Float, nullable=False)
+    change_pct = Column(Float, nullable=False)
+    historical_confidence = Column(Float, default=1.0)
+    cross_exchange_gap_pct = Column(Float, default=0.0)
+    cross_exchange_reference_exchange = Column(String, nullable=True)
+    cross_exchange_reference_price = Column(Float, nullable=True)
+    arbitrage_available = Column(Boolean, default=False, index=True)
+    detected_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+
+
+class WorkspaceSignalProjectionRecord(Base):
+    __tablename__ = "workspace_signal_projections"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    workspace_id = Column(String, nullable=False, index=True)
+    technical_signal_id = Column(String, nullable=False, index=True)
+    workspace_score = Column(Float, nullable=False)
+    visible = Column(Boolean, nullable=False, default=True)
+    alert_eligible = Column(Boolean, nullable=False, default=False)
+    projection_reason = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+
+
+class SignalOutcomeRecord(Base):
+    __tablename__ = "signal_outcomes"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    technical_signal_id = Column(String, nullable=False, index=True)
+    exchange = Column(String, nullable=False)
+    pair = Column(String, nullable=False, index=True)
+    entry_price = Column(Float, nullable=False)
+    price_after_5m = Column(Float, nullable=True)
+    price_after_15m = Column(Float, nullable=True)
+    price_after_1h = Column(Float, nullable=True)
+    price_after_4h = Column(Float, nullable=True)
+    max_price_1h = Column(Float, nullable=True)
+    min_price_1h = Column(Float, nullable=True)
+    outcome_pct_5m = Column(Float, nullable=True)
+    outcome_pct_15m = Column(Float, nullable=True)
+    outcome_pct_1h = Column(Float, nullable=True)
+    outcome_pct_4h = Column(Float, nullable=True)
+    evaluated_at = Column(DateTime, nullable=True)
+    signal_detected_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+
+
+class RepetitionCountRecord(Base):
+    __tablename__ = "repetition_counts"
+
+    id = Column(String, primary_key=True)  # "exchange:pair"
+    exchange = Column(String, nullable=False)
+    pair = Column(String, nullable=False)
+    count = Column(Integer, nullable=False, default=0)
+    last_seen_at = Column(DateTime, nullable=False, default=utcnow)
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
 # Engine setup
 engine = create_async_engine(
     settings.database_url,
@@ -227,6 +353,9 @@ async def ensure_schema_compatibility() -> None:
         "spread_score": "FLOAT DEFAULT 0.0",
         "repetition_score": "FLOAT DEFAULT 0.0",
         "movement_multiplier": "FLOAT DEFAULT 1.0",
+        "technical_score": "FLOAT",
+        "score_version": "VARCHAR DEFAULT 'v1'",
+        "technical_signal_id": "VARCHAR",
     }
 
     audit_columns = {
@@ -268,6 +397,12 @@ async def ensure_schema_compatibility() -> None:
             "workspace_memberships",
             "workspace_configs",
             "invites",
+            "scanner_runtime_state",
+            "opportunity_snapshots",
+            "technical_signals",
+            "workspace_signal_projections",
+            "signal_outcomes",
+            "repetition_counts",
         ):
             if table_name in existing_tables:
                 continue

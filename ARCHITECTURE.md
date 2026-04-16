@@ -1,195 +1,159 @@
 # Architecture
 
-## Visao Geral
+## Visao geral
 
 O projeto e um monorepo com dois blocos principais:
-- `backend/`: API FastAPI, scanner assincrono, persistencia e integracoes externas.
-- `frontend/`: aplicacao Next.js que consome REST e WebSocket para exibir o painel.
 
-Fluxo principal:
-1. O backend inicia, sobe o banco, garante bootstrap de usuario admin e workspace default.
-2. O backend monta uma configuracao de scan agregada a partir dos `workspace_configs`.
-3. Um loop de scan consulta exchanges e produz oportunidades com componentes de score.
-4. O backend persiste oportunidades globais e recalcula score/filtros por workspace nas leituras.
-5. O frontend consome dados iniciais por REST, seleciona o workspace ativo e recebe atualizacoes por WebSocket.
+- `backend/`: API FastAPI, worker dedicado de scan, persistencia e integracoes externas
+- `frontend/`: aplicacao Next.js que consome REST e WebSocket para exibir dashboard, historico, analytics e configuracoes
 
-## Estrutura de Diretorios
+No fluxo padrao do repositorio:
+
+1. a API sobe em modo `api_only`
+2. o worker executa o scan global usando configuracao agregada dos workspaces
+3. o worker grava snapshots, sinais tecnicos, projecoes e outcomes no banco
+4. a API le estado local quando existe e faz fallback para o estado compartilhado em banco
+5. o frontend consome REST, assina WebSocket e usa polling de fallback
+
+Para detalhes operacionais completos, use [SYSTEM_STATE.md](SYSTEM_STATE.md) como documento principal.
+
+## Estrutura de diretorios
 
 ### Backend
-- `backend/app/main.py`: bootstrap da aplicacao, lifespan, scanner loop, CORS.
-- `backend/app/api/routes.py`: endpoints REST para dashboard, oportunidades, historico, analytics e configuracao.
-- `backend/app/api/websocket.py`: gerenciamento de conexoes WebSocket.
-- `backend/app/services/scanner.py`: orquestracao da coleta, filtros e score.
-- `backend/app/services/persistence.py`: gravacao e leitura no banco.
-- `backend/app/services/telegram.py`: envio de alertas.
-- `backend/app/providers/`: adaptadores das exchanges.
-- `backend/app/filters/`: regras de filtragem e score.
-- `backend/app/models/`: schemas Pydantic e modelos SQLAlchemy.
-- `backend/app/config.py`: configuracao via ambiente.
+
+- `backend/app/main.py`: bootstrap da API, CORS, lifespan e scanner local opcional
+- `backend/app/worker.py`: processo dedicado de scan
+- `backend/app/api/routes.py`: endpoints REST operacionais e administrativos
+- `backend/app/api/websocket.py`: gerenciamento de conexoes WebSocket por workspace
+- `backend/app/services/scanner.py`: coleta, filtros, score e enriquecimento cross-exchange
+- `backend/app/services/shared_state.py`: contrato compartilhado entre worker e API
+- `backend/app/services/persistence.py`: historico, configuracoes, analytics e score por workspace
+- `backend/app/services/auth.py`: autenticacao, workspaces, memberships, convites e auditoria
+- `backend/app/services/telegram.py`: envio de alertas e cooldown por destino
+- `backend/app/providers/`: adaptadores das exchanges
+- `backend/app/filters/`: regras de filtragem e componentes do score
+- `backend/app/models/`: schemas Pydantic e modelos SQLAlchemy
 
 ### Frontend
-- `frontend/src/app/page.tsx`: dashboard principal.
-- `frontend/src/app/history/page.tsx`: historico e analytics.
-- `frontend/src/app/settings/page.tsx`: configuracoes operacionais.
-- `frontend/src/components/`: componentes de UI e dashboard.
-- `frontend/src/lib/api.ts`: cliente REST.
-- `frontend/src/lib/websocket.ts`: cliente WebSocket com reconexao.
-- `frontend/src/hooks/use-opportunities.ts`: carga inicial e sincronizacao de oportunidades.
 
-## Componentes Principais
+- `frontend/src/app/page.tsx`: dashboard principal
+- `frontend/src/app/history/page.tsx`: historico e analytics
+- `frontend/src/app/settings/page.tsx`: configuracoes e administracao do workspace
+- `frontend/src/hooks/use-opportunities.ts`: carga inicial, WebSocket e polling de fallback
+- `frontend/src/lib/api.ts`: cliente REST com sessao e refresh token
+- `frontend/src/lib/websocket.ts`: cliente WebSocket com reconexao
 
-### 1. Scanner
+## Componentes principais
 
-O scanner:
-- instancia providers por exchange habilitada
-- percorre os pares habilitados
+### 1. API
+
+A API e responsavel por:
+
+- autenticacao e contexto de workspace
+- leitura de oportunidades correntes, historico e analytics
+- configuracao operacional por workspace
+- auditoria, usuarios, convites e workspaces
+- distribuicao em tempo real via WebSocket
+
+### 2. Worker de scan
+
+O worker:
+
+- carrega configuracao agregada dos workspaces
+- instancia providers por exchange
 - coleta `ticker`, `order_book` e `klines`
-- aplica filtros de volatilidade, volume, liquidez e spread
-- classifica movimento
-- calcula score
-- gera objetos `Opportunity`
+- aplica filtros e calcula score
+- enriquece arbitragem cross-exchange
+- grava o estado compartilhado do ciclo
+- projeta oportunidades por workspace e dispara alertas Telegram
+- avalia outcomes pendentes de sinais anteriores
 
-Arquivo central:
-- `backend/app/services/scanner.py`
+### 3. Estado compartilhado
 
-## 2. Providers
+O contrato compartilhado entre API e worker usa banco para persistir:
 
-Cada provider implementa a interface comum:
-- `get_ticker`
-- `get_order_book`
-- `get_trades`
-- `get_klines`
-- `normalize_pair`
-- `get_available_pairs`
+- `scanner_runtime_state`
+- `opportunity_snapshots`
+- `technical_signals`
+- `workspace_signal_projections`
+- `signal_outcomes`
+- `repetition_counts`
 
-Objetivo:
-- esconder diferencas entre as APIs das exchanges
-- entregar contratos internos uniformes para o scanner
+Isso permite que a API opere sem scanner local e continue servindo leituras REST a partir do estado do worker.
 
-## 3. Persistencia
-
-Persistencia atual:
-- oportunidades em tabela `opportunities`
-- configuracao legada em tabela `config`
-- configuracao por tenant em `workspace_configs`
-- usuarios em `users`
-- workspaces em `workspaces`
-- memberships em `workspace_memberships`
-- auditoria em `audit_logs`
-
-Implementacao:
-- SQLAlchemy async
-- deduplicacao simples por `exchange + pair` numa janela curta para historico
-
-Arquivo central:
-- `backend/app/services/persistence.py`
-
-## 4. Multi-Tenant
+### 4. Multi-tenant
 
 O modelo atual separa:
+
 - autenticacao em nivel de usuario
-- configuracao e preferencias em nivel de workspace
+- configuracao e preferencia em nivel de workspace
+- unidade de cobranca em `Organization`
 - auditoria com escopo de workspace
 
-Desenho atual:
-- o scanner continua sendo um processo global
-- o scan usa configuracao mesclada de todos os workspaces para nao perder cobertura
-- score, filtros e visibilidade final sao recalculados por workspace nas rotas REST
+O scanner continua global e a visibilidade final e recalculada por workspace.
 
-Arquivos centrais:
-- `backend/app/services/auth.py`
-- `backend/app/api/routes.py`
-- `frontend/src/lib/api.ts`
-- `frontend/src/app/settings/page.tsx`
+## Modelo de dados principal
 
-## 4. API REST
+Entidades de runtime e API:
 
-Principais grupos de endpoints:
-- `/api/dashboard/stats`
-- `/api/opportunities`
-- `/api/history`
-- `/api/analytics`
-- `/api/config`
-- `/api/health`
-
-Caracteristicas:
-- dashboard atual usa estado em memoria para oportunidades correntes
-- historico e analytics usam banco
-- configuracao e persistida em banco
-
-## 5. WebSocket
-
-O backend mantem conexoes WebSocket em memoria e publica:
-- lista atual de oportunidades
-- timestamp do scan
-- quantidade de sinais
-
-O frontend:
-- abre conexao unica
-- reconecta em caso de falha
-- atualiza a tabela em tempo real
-
-## Modelo de Dados
-
-Entidades principais:
-- `Ticker`
-- `OrderBook`
-- `Trade`
-- `Kline`
 - `Opportunity`
 - `AppConfig`
 - `DashboardStats`
+- `WorkspaceSummary`
+- `UserSession`
 
-Persistido em banco:
+Entidades persistidas mais relevantes:
+
 - `OpportunityRecord`
-- `ConfigRecord`
+- `ScannerRuntimeStateRecord`
+- `OpportunitySnapshotRecord`
+- `TechnicalSignalRecord`
+- `WorkspaceSignalProjectionRecord`
+- `SignalOutcomeRecord`
+- `RepetitionCountRecord`
+- `WorkspaceConfigRecord`
+- `AuditLogRecord`
 
-## Decisoes Atuais de Arquitetura
+## Decisoes arquiteturais atuais
 
-### Escolhas boas para o estagio atual
-- separacao clara entre provider, filtro, servico e modelo
-- uso de Pydantic para contrato interno
+### Escolhas consistentes com o estagio atual
+
+- separacao entre API e worker no fluxo padrao do repositorio
+- `technical_score` neutro e versionado por `score_version`
+- fallback da API para snapshots compartilhados
+- WebSocket isolado por workspace
 - backend assincrono para IO externo
-- frontend tipado e alinhado com os contratos do backend
+- frontend tipado e alinhado com contratos do backend
 
-### Limitacoes atuais
-- scanner roda dentro do mesmo processo da API
-- estado de oportunidades correntes fica em memoria
-- configuracao administrativa nao tem autenticacao
-- segredo operacional pode ser exposto pela API/UI
-- sem testes automatizados cobrindo o comportamento principal
+### Limitacoes ainda abertas
 
-## Pontos de Atencao
+- o scanner continua global, nao isolado fisicamente por tenant
+- o WebSocket depende de memoria local da instancia da API
+- o `score` operacional do scanner ainda usa configuracao agregada com pesos do primeiro workspace carregado
+- nao ha barramento pub/sub dedicado; em `api_only` a API observa o estado compartilhado e repropaga snapshots, mas isso ainda nao equivale a broadcast distribuido entre multiplas replicas
 
-### Seguranca
-- `/api/config` hoje e um ponto sensivel
-- CORS esta permissivo
-- credenciais aparecem no modelo de configuracao
+## Pontos de atencao
 
 ### Escalabilidade
-- mais de um worker pode duplicar scanner e alertas
-- WebSocket atual nao esta preparado para broadcast entre multiplos processos
+
+- mais de um scanner ativo pode duplicar scan e alertas
+- WebSocket atual nao faz broadcast entre multiplas replicas da API
 
 ### Confiabilidade
-- providers dependem de APIs externas com limites e indisponibilidade eventual
-- Telegram ainda nao tem mecanismo robusto de deduplicacao de alerta
 
-## Evolucao Recomendada
+- providers dependem de APIs externas com rate limit e indisponibilidade eventual
+- o frontend depende de polling de fallback quando nao recebe broadcast em tempo real
 
-### Curto prazo
-1. Adicionar autenticacao para rotas administrativas.
-2. Corrigir reconfiguracao do scanner em runtime.
-3. Ajustar cooldown dos alertas.
-4. Alinhar build Docker do frontend.
-5. Corrigir dependencias do backend.
+### Multi-tenant
 
-### Medio prazo
-1. Extrair scanner para worker dedicado.
-2. Adotar migracoes com Alembic.
-3. Adicionar testes de integracao e unitarios.
-4. Melhorar observabilidade.
+- historico bruto continua global
+- projecao por workspace acontece depois da deteccao
 
-### Longo prazo
-1. Introduzir analytics cross-exchange.
-2. Evoluir score com calibracao historica.
-3. Separar estado em memoria de um barramento/event stream mais robusto.
+## Evolucao recomendada
+
+Os proximos passos arquiteturais estao em [BACKLOG.md](BACKLOG.md), com foco principal em:
+
+1. feature gates e monetizacao por plano
+2. endurecimento de deploy e operacao
+3. melhoria do transporte em tempo real entre worker e API
+4. evolucao incremental do motor de sinais com indicadores adicionais e outcomes

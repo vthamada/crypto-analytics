@@ -72,6 +72,9 @@ class Opportunity(BaseModel):
     exchange: Exchange
     pair: str
     score: float = Field(ge=0, le=100)
+    technical_score: float | None = None
+    score_version: str = "v1"
+    technical_signal_id: str | None = None
     volatility_pct: float
     volume_24h: float
     quote_volume_24h: float
@@ -123,6 +126,9 @@ class AppConfig(BaseModel):
     enabled_pairs: list[str] = Field(default_factory=list)
     scan_interval_seconds: int = 30
     telegram_enabled: bool = True
+    telegram_alert_threshold: float = 60.0
+    telegram_alert_cooldown_seconds: int = 900
+    telegram_alert_types: list[str] = Field(default_factory=lambda: ["high_score", "arbitrage"])
     # Credenciais (sobrepõem variáveis de ambiente quando preenchidas)
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
@@ -150,6 +156,8 @@ class HistoryRecord(BaseModel):
     exchange: Exchange
     pair: str
     score: float
+    technical_score: float | None = None
+    score_version: str = "v1"
     volatility_pct: float
     volume_24h: float
     liquidity_units: float

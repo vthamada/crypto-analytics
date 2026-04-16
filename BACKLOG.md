@@ -1,6 +1,6 @@
 # Backlog
 
-Ultima revisao: 2026-04-15
+Ultima revisao: 2026-04-16
 
 Legenda: `[x]` concluido · `[ ]` pendente · `[~]` parcialmente feito
 
@@ -117,7 +117,7 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 
 ---
 
-## P2 — Qualidade e confiabilidade
+## P2 — Qualidade, confiabilidade e robustez do motor
 
 - [x] **Politica de retencao do historico** — scanner e worker agora executam limpeza periodica configuravel (`HISTORY_RETENTION_DAYS`, `HISTORY_RETENTION_CHECK_MINUTES`) para remover registros antigos sem depender de manutencao manual.
 
@@ -126,6 +126,60 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 - [x] **Testes de workspace e membership no backend** — cobertura agora valida isolamento de config por tenant, membership por workspace e projecao de score recalculada por workspace.
 
 - [x] **Tratamento de erros no frontend** — app ganhou `error.tsx`, `global-error.tsx`, toaster global para falhas de API/WebSocket/runtime e estados inline de erro no dashboard e historico.
+
+### Backlog tecnico derivado do plano de refatoracao
+
+- [x] **Congelar contratos operacionais atuais**
+  Adicionar testes de integracao cobrindo os contratos observados hoje em `/api/dashboard/stats`, `/api/opportunities`, `/api/history`, `/api/analytics`, `/api/health` e `/ws`, incluindo carga inicial do dashboard, filtro de workspace no historico e recebimento de `opportunities_update` no WebSocket.
+  *Sem isso, o desacoplamento do scanner vira regressao dificil de detectar.*
+
+- [x] **Criar contrato compartilhado do estado corrente entre worker e API**
+  Extrair `scan_once()` / `scan_loop()` para servico reutilizavel e criar base para a API operar sem scanner local obrigatorio.
+  Entregas minimas:
+  - `scanner_runtime_state` para ultimo ciclo, falha, duracao e ultimo sucesso
+  - `current_opportunity_snapshots` ou store equivalente para o snapshot atual das oportunidades
+  - fallback temporario da API para manter compatibilidade enquanto o contrato amadurece
+
+- [x] **Desacoplar scanner da API sem quebrar dashboard e tempo real**
+  Tornar o worker o produtor principal do scan, mantendo a API como camada de leitura, autenticacao, configuracao e streaming.
+  Criterio de aceite:
+  - API sobe sem rodar scanner interno
+  - dashboard continua funcional
+  - WebSocket continua entregando atualizacoes com base no estado compartilhado
+
+- [x] **Neutralizar o score tecnico e versionar o motor**
+  Introduzir `technical_score` e `score_version`, removendo a dependencia atual de `weights=configs[0].weights` no motor global.
+  `workspace_score` continua existindo como derivacao posterior por workspace.
+  *Nao criar UI de configuracao global do motor nesta fase; pesos tecnicos devem ser controlados por release/versionamento.*
+
+- [x] **Dar identidade semantica ao sinal tecnico**
+  Criar `technical_signals` e iniciar dual-write com a tabela `opportunities`, registrando `technical_signal_id`, `technical_score`, componentes do score, `score_version`, fator historico e contexto cross-exchange.
+  *Pre-requisito para explicabilidade mais forte e qualquer outcome tracking futuro.*
+
+- [x] **Estabilizar a semantica de repeticao fora da memoria efemera**
+  Parar de depender apenas de `_repetition_counts` em memoria do processo. A repeticao deve vir de janela recente persistida ou cache compartilhado para o score ser reproduzivel entre reinicios.
+
+- [x] **Materializar projecoes por workspace quando houver ganho real**
+  Criar `workspace_signal_projections` para auditoria, analytics de produto e explicabilidade por workspace quando isso passar a ser requisito operacional claro.
+  Campos minimos: `workspace_id`, `technical_signal_id`, `workspace_score`, `visible`, `alert_eligible`, `projection_reason`, `created_at`.
+
+- [x] **Criar outcome tracking apenas depois da identidade do sinal ficar estavel**
+  Criar `signal_outcomes` e jobs de avaliacao temporal somente depois que `technical_signal_id` estiver confiavel.
+  *Nao antecipar esta fase antes da nova semantica de sinal existir de forma duravel.*
+
+- [x] **Tornar a politica de Telegram configuravel por workspace**
+  Evoluir do corte fixo `score >= 60` para threshold configuravel, tipos de alerta, cooldown por politica e auditoria de alteracoes.
+
+- [x] **Evoluir observabilidade antes de adotar barramento distribuido**
+  Separar health de API e worker, medir oportunidades projetadas por workspace, alertas enviados/suprimidos e decidir Redis/NATS/event bus apenas quando houver evidencia concreta de necessidade de multiplas instancias ou gargalo do contrato compartilhado.
+
+### Nao priorizar antes da base acima
+
+- [ ] **`raw_market_events` como fundacao obrigatoria**
+  So considerar depois de medir throughput real, custo, valor analitico e politica de TTL/compactacao.
+
+- [ ] **`execution_score` / slippage / depth como P0**
+  So avancar depois que outcome tracking existir; antes disso a camada ainda e hipotese de produto.
 
 ---
 
@@ -168,9 +222,8 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
   - `admin`: configura thresholds, pares, Telegram e auditoria
   - `owner`: + gerencia membros e convites do workspace
 
-- [ ] **Scanner dedicado por worker**
-  Extrair scanner de `backend/app/worker.py` (scaffold ja existe) para processo separado.
-  Comunicacao via banco ou Redis pub/sub.
+- [x] **Scanner dedicado por worker**
+  `backend/app/worker.py` agora integra o contrato compartilhado completo: `scanner_runtime_state`, `opportunity_snapshots`, `technical_signals`, `workspace_signal_projections`, `signal_outcomes`, repeticao persistente e threshold Telegram configuravel. A API pode servir dashboard e WebSocket sem scanner local, lendo do estado compartilhado.
   Obrigatorio antes de ter dezenas de tenants ativos.
 
 - [x] **Notificacoes por workspace**
@@ -236,16 +289,40 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 
 ## Proximos passos (ordem de implementacao)
 
-1. **P3** — Feature gates por plano + Stripe
+1. ~~**P2 residual** — Job de avaliacao de `signal_outcomes`~~ ✅ Concluido
+  *`outcome_evaluator.py` preenche `price_after_5m/15m/1h/4h` e `outcome_pct` a cada ciclo de scan.*
+
+2. ~~**P2 residual** — Separar API e worker no `docker-compose.yml`~~ ✅ Concluido
+  *`SCANNER_ENABLED=false` no backend, worker como servico separado. `docker-compose.yml` atualizado.*
+
+3. **P3** — Feature gates por plano + Stripe
   *Liga monetizacao em cima da arquitetura de Organization ja implantada*
 
-2. **P3** — Scanner dedicado por worker
-  *Isola carga operacional do app web antes de escalar tenants e frequencia de scans*
-
-3. **P3** — Autoregistro aberto com Free tier
+4. **P3** — Autoregistro aberto com Free tier
   *Abre a entrada self-service do produto sem depender de convite manual para o plano inicial*
 
-4. **P3** — Deploy de producao endurecido
+5. **P3** — Deploy de producao endurecido
   *Fecha os requisitos operacionais minimos antes de tratar o ambiente como producao real*
 
-5. **P4** — Paper trading → execucao manual → automatica (nao pula fases)
+6. **P4** — Paper trading → execucao manual → automatica (nao pula fases)
+
+---
+
+## Roadmap incremental de robustez dos sinais
+
+Executar somente depois da base P2/P3 estar estavel e com dados reais suficientes para calibracao.
+
+- [ ] **Nivel 1 — Indicadores tecnicos classicos**
+  Adicionar RSI, Bollinger Bands, EMA crossover, MACD e OBV ao motor tecnico versionado. Cada mudanca entra com novo `score_version`, sem liberar ajuste arbitrario de pesos por UI nesta fase.
+
+- [ ] **Nivel 2 — Confirmacao multi-timeframe**
+  Cruzar 5m com timeframes maiores e exigir confluencia minima antes de publicar ou alertar um sinal com score alto.
+
+- [ ] **Nivel 3 — Mean reversion com z-score**
+  Criar leitura de desvio da media para pares em range, reduzindo falso positivo de continuidade quando o mercado esta lateral.
+
+- [ ] **Nivel 4 — Filtro de regime com ADX**
+  Detectar se o mercado esta lateral ou tendencial para alternar regras de momentum e reversao no motor tecnico.
+
+- [ ] **Nivel 5 — Modelo supervisionado com outcomes**
+  Treinar modelo apenas depois de 4-8 semanas de `signal_outcomes` confiaveis, usando features tecnicas e rotulo de outcome para refinar o ranking final.

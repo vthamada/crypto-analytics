@@ -1,339 +1,340 @@
-# Guia de Deploy — Crypto Analytics
+# Guia de Deploy - Crypto Analytics
 
-Este guia cobre o deploy completo do sistema em produção usando serviços gerenciados (gratuitos ou de baixo custo). Tempo estimado: **30–45 minutos** na primeira vez.
+Este guia descreve o caminho recomendado de deploy para o estado atual do projeto:
+
+- frontend em `Vercel`
+- API em `Render` como `Web Service`
+- scanner em `Render` como `Background Worker`
+- banco em `Supabase`
+
+Essa topologia e a mais alinhada ao repositorio hoje porque o fluxo padrao ja separa API e worker em `docker-compose.yml`.
 
 Arquitetura alvo:
 
-```
-┌──────────────┐      ┌──────────────┐      ┌──────────────┐
-│   Vercel     │ ───► │   Railway    │ ───► │   Supabase   │
-│ (frontend)   │ HTTP │  (backend)   │  DB  │ (PostgreSQL) │
-│  Next.js     │  WS  │  FastAPI     │      │              │
-└──────────────┘      └──────┬───────┘      └──────────────┘
-                             │
-                             ▼
-                       ┌──────────┐
-                       │ Telegram │
-                       │   Bot    │
-                       └──────────┘
-```
-
----
-
-## Pré-requisitos
-
-Crie contas nos seguintes serviços (todos têm plano gratuito):
-
-- [Supabase](https://supabase.com) — banco PostgreSQL gerenciado
-- [Railway](https://railway.app) — hospedagem do backend (alternativas: [Render](https://render.com) ou [Fly.io](https://fly.io))
-- [Vercel](https://vercel.com) — hospedagem do frontend
-- [GitHub](https://github.com) — hospedagem do código (os deploys puxam do Git)
-- [Telegram](https://telegram.org) — para criar o bot de alertas
-
-Tenha instalado localmente:
-
-- `git`
-- Conta GitHub com o repositório `crypto-analytics` enviado (`git push origin main`)
-
----
-
-## Passo 1 — Criar o banco de dados (Supabase)
-
-1. Entre em [supabase.com](https://supabase.com) → **New Project**
-2. Preencha:
-   - **Name**: `crypto-analytics`
-   - **Database Password**: gere uma senha forte (**guarde — você vai precisar**)
-   - **Region**: `South America (São Paulo)` (mais próximo das exchanges BR)
-   - **Plan**: Free
-3. Aguarde ~2 minutos até o banco provisionar
-4. Vá em **Project Settings → Database → Connection string → URI**
-5. Copie a string e **substitua** `[YOUR-PASSWORD]` pela senha real:
-
-```
-postgresql://postgres.xxxxxxxxxxxx:SUA_SENHA@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
+```text
+┌──────────────┐      ┌──────────────────────┐      ┌──────────────┐
+│    Vercel    │ ───► │ Render Web Service   │ ───► │   Supabase   │
+│  frontend    │ HTTP │ FastAPI API-only     │  DB  │ PostgreSQL   │
+│   Next.js    │  WS  │ /api + /ws           │      │              │
+└──────────────┘      └──────────┬───────────┘      └──────────────┘
+                                 │
+                                 ▼
+                       ┌──────────────────────┐
+                       │ Render Worker        │
+                       │ python -m app.worker │
+                       └──────────┬───────────┘
+                                  │
+                                  ▼
+                            ┌──────────┐
+                            │ Telegram │
+                            └──────────┘
 ```
 
-6. Troque o prefixo para `postgresql+asyncpg://` (necessário para o SQLAlchemy async):
+## Antes de subir
 
-```
-postgresql+asyncpg://postgres.xxxxxxxxxxxx:SUA_SENHA@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
-```
+Valide localmente antes do primeiro deploy:
 
-Guarde essa URL — ela é o valor de `DATABASE_URL` do backend.
-
-> **Observação**: as tabelas são criadas automaticamente na primeira inicialização via `init_db()` em [backend/app/models/database.py](backend/app/models/database.py). Nenhum passo manual de migração.
-
----
-
-## Passo 2 — Criar o bot do Telegram
-
-1. Abra o Telegram e busque **@BotFather**
-2. Envie `/newbot` e siga as instruções (escolha nome e username)
-3. Copie o **token** retornado (formato `123456789:AAH...`)
-4. Envie qualquer mensagem para o seu novo bot (ex: `/start`)
-5. Abra no navegador:
-   ```
-   https://api.telegram.org/bot<SEU_TOKEN>/getUpdates
-   ```
-6. Procure o campo `chat.id` na resposta JSON — esse é o seu `TELEGRAM_CHAT_ID`
-
-Guarde os dois valores:
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
-
-> Dica: se quiser receber em grupo, adicione o bot ao grupo, envie uma mensagem no grupo e o `chat.id` do grupo aparecerá no mesmo endpoint (será negativo, ex: `-1001234567890`).
-
----
-
-## Passo 3 — Deploy do backend (Railway)
-
-1. Entre em [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**
-2. Selecione o repositório `crypto-analytics`
-3. Na tela de configuração do serviço:
-   - **Root Directory**: `backend`
-   - **Build**: detecta `Dockerfile` automaticamente (não precisa alterar)
-4. Vá em **Variables** e adicione:
-
-| Variável | Valor |
-|---|---|
-| `DATABASE_URL` | URL do Supabase do Passo 1 |
-| `TELEGRAM_BOT_TOKEN` | token do Passo 2 |
-| `TELEGRAM_CHAT_ID` | chat id do Passo 2 |
-| `SCAN_INTERVAL_SECONDS` | `30` |
-| `LOG_LEVEL` | `INFO` |
-| `PORT` | `8000` |
-
-5. Em **Settings → Networking** clique em **Generate Domain** — anote a URL gerada (ex: `crypto-analytics-production.up.railway.app`)
-6. Em **Settings → Deploy** confirme o **Start Command**:
-
-```
-uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
-```
-
-> **⚠️ CRÍTICO — mantenha `--workers 1`.** O scan loop roda em background via `asyncio.create_task` no lifespan da FastAPI. Com mais de um worker, cada réplica roda um scanner independente, gerando **alertas duplicados** no Telegram e **requisições redundantes** às APIs das exchanges (risco de rate-limit 429). Se precisar escalar, extraia o scanner para um worker separado (ver seção *Evolução futura*).
-
-7. Aguarde o primeiro deploy (~3 min). Em **Deployments → View Logs** confirme:
-
-```
-INFO:     Application startup complete.
-app.main: Scanner started
-```
-
-### Verificação do backend
-
-Abra no navegador (troque pelo seu domínio Railway):
-
-```
-https://seu-dominio.up.railway.app/api/health
-```
-
-Deve responder:
-
-```json
-{"status": "ok"}
-```
-
----
-
-## Passo 4 — Deploy do frontend (Vercel)
-
-1. Entre em [vercel.com](https://vercel.com) → **Add New → Project**
-2. Importe o repositório `crypto-analytics`
-3. Configure:
-   - **Framework Preset**: Next.js (detecta automático)
-   - **Root Directory**: `frontend`
-   - **Build Command**: deixe padrão (`next build`)
-4. Em **Environment Variables** adicione:
-
-| Variável | Valor |
-|---|---|
-| `NEXT_PUBLIC_API_URL` | `https://seu-dominio.up.railway.app/api` |
-| `NEXT_PUBLIC_WS_URL` | `wss://seu-dominio.up.railway.app/ws` |
-
-> **Atenção**: em produção use `https` e `wss` (com SSL). O Railway provê HTTPS por padrão no domínio gerado.
-
-5. Clique em **Deploy**. Aguarde ~2 min
-6. A Vercel gera um domínio tipo `crypto-analytics.vercel.app`
-
-### Verificação do frontend
-
-1. Acesse `https://seu-projeto.vercel.app`
-2. Abra o DevTools → **Network** → **WS** e confirme a conexão `wss://.../ws` com status **101 Switching Protocols**
-3. Após o primeiro ciclo de scan (~30s), as oportunidades devem aparecer na tabela
-
----
-
-## Passo 5 — Atualizar o CORS do backend
-
-Por padrão o CORS do backend aceita `*` (qualquer origem). Para produção, restrinja em [backend/app/main.py](backend/app/main.py):
-
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://seu-projeto.vercel.app",
-        "http://localhost:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
-
-Faça commit → push → o Railway redeploya sozinho.
-
----
-
-## Variáveis de ambiente — resumo
-
-### Backend (Railway)
-
-```env
-DATABASE_URL=postgresql+asyncpg://postgres.xxx:senha@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
-TELEGRAM_BOT_TOKEN=123456:AAH...
-TELEGRAM_CHAT_ID=987654321
-SCAN_INTERVAL_SECONDS=30
-LOG_LEVEL=INFO
-PORT=8000
-
-# Opcionais (rotas públicas das exchanges não exigem):
-NOVADAX_API_KEY=
-NOVADAX_API_SECRET=
-MB_API_KEY=
-MB_API_SECRET=
-BINANCE_API_KEY=
-BINANCE_API_SECRET=
-```
-
-### Frontend (Vercel)
-
-```env
-NEXT_PUBLIC_API_URL=https://seu-backend.up.railway.app/api
-NEXT_PUBLIC_WS_URL=wss://seu-backend.up.railway.app/ws
-```
-
----
-
-## Troubleshooting
-
-### Frontend carrega mas tabela vazia / "Failed to fetch"
-
-- Confira `NEXT_PUBLIC_API_URL` na Vercel (precisa `https`, não `http`)
-- Abra DevTools → Console — se aparecer `CORS blocked`, volte ao Passo 5
-- Teste o endpoint direto: `curl https://seu-backend.up.railway.app/api/health`
-
-### WebSocket não conecta (status ficando "Connecting...")
-
-- URL precisa ser `wss://` (com SSL) em produção, não `ws://`
-- Railway suporta WebSockets nativamente, não precisa configuração extra
-- Se persistir, confira os logs do Railway — erros de upgrade aparecem ali
-
-### Alertas duplicados no Telegram
-
-- Você tem mais de 1 worker rodando. Em **Railway → Settings → Deploy** force `--workers 1`
-- Verifique também se há mais de uma réplica do serviço em **Settings → Replicas** (deve ser 1)
-
-### `asyncpg.exceptions.InvalidPasswordError` nos logs
-
-- Senha do Supabase está errada ou contém caracteres especiais não-URL-encodados
-- Re-gere a senha sem `@ : / #` ou use `urllib.parse.quote_plus` antes de colar
-
-### Scanner não inicia / nenhuma oportunidade após minutos
-
-- Confira logs — procure `Scanner started`
-- Teste uma exchange manualmente: `curl https://seu-backend.up.railway.app/api/opportunities`
-- Exchanges podem estar temporariamente indisponíveis (veja [status.novadax.com](https://status.novadax.com) etc)
-
-### "application exited with status 1" logo na inicialização
-
-- Quase sempre é `DATABASE_URL` inválida — valide se o prefixo é `postgresql+asyncpg://`
-- Se apontar pro Supabase, use o **Connection Pooler** (porta `6543`), não a conexão direta (`5432`) — planos gratuitos limitam conexões diretas
-
----
-
-## Atualizações futuras
-
-Ambos os serviços fazem **deploy automático** em cada `git push origin main`:
-
-```bash
-git add .
-git commit -m "feat: nova funcionalidade"
-git push origin main
-```
-
-- Railway: rebuilda o Dockerfile e redeploya (~2 min)
-- Vercel: rebuilda o Next.js e redeploya (~1 min)
-
-Para rollback, use a UI de cada plataforma — ambos mantêm histórico de deploys.
-
----
-
-## Custos estimados
-
-| Serviço | Plano | Custo mensal | Limites relevantes |
-|---|---|---|---|
-| **Supabase** | Free | R$ 0 | 500 MB DB, 2 GB transfer |
-| **Railway** | Hobby | ~R$ 25 (US$ 5) | 500h execução, 8 GB RAM |
-| **Vercel** | Hobby | R$ 0 | 100 GB bandwidth |
-| **Telegram** | — | R$ 0 | ilimitado |
-| **Total** | | **~R$ 25/mês** | |
-
-Quando precisar escalar (tráfego alto, mais exchanges, histórico longo):
-
-| Serviço | Plano | Custo mensal |
-|---|---|---|
-| Supabase Pro | | ~R$ 125 (US$ 25) |
-| Railway Pro | | ~R$ 100 (US$ 20) |
-| Vercel Pro | | ~R$ 100 (US$ 20) |
-| **Total** | | **~R$ 325/mês** |
-
----
-
-## Evolução futura
-
-Quando o sistema crescer, considere estes próximos passos:
-
-### 1. Separar scanner em worker dedicado
-
-Hoje o scanner roda no mesmo processo do FastAPI. Para escalar horizontalmente a API sem duplicar o scanner:
-
-- Criar `backend/app/worker.py` que só roda o `scan_loop`
-- Railway: criar segundo serviço apontando pro mesmo repo com start command diferente
-- Scanner grava no DB, API lê do DB — WebSocket usa Redis pub/sub pra broadcast cross-process
-
-### 2. Migrações com Alembic
-
-Hoje `init_db()` cria tabelas se não existirem, mas não versiona mudanças de schema. Quando for alterar tabelas em produção:
+### Backend
 
 ```bash
 cd backend
-alembic init alembic
-alembic revision --autogenerate -m "initial"
-alembic upgrade head
+python -m pytest tests -q
+alembic heads
 ```
 
-### 3. Observabilidade
+### Frontend
 
-- [Sentry](https://sentry.io) — erros em produção (adicionar `sentry-sdk[fastapi]`)
-- [Logtail](https://logtail.com) — agregador de logs estruturados
-- [UptimeRobot](https://uptimerobot.com) — ping no `/api/health` a cada 5 min, grátis
+```bash
+cd frontend
+npm run lint
+npm run build
+```
 
-### 4. CI/CD
+## Pre-requisitos
 
-- GitHub Actions rodando `pytest` e `tsc --noEmit` antes de aceitar PRs
-- Deploy pra staging em branch `develop`, produção em `main`
+Crie contas em:
 
----
+- [Supabase](https://supabase.com)
+- [Render](https://render.com)
+- [Vercel](https://vercel.com)
+- [GitHub](https://github.com)
+- [Telegram](https://telegram.org)
 
-## Checklist final
+Tenha o repositorio publicado no GitHub e a branch principal pronta para deploy.
 
-Antes de considerar o deploy concluído, valide:
+## Passo 1 - Criar o banco no Supabase
 
-- [ ] `https://seu-backend.up.railway.app/api/health` retorna `{"status":"ok"}`
-- [ ] `https://seu-projeto.vercel.app` carrega o dashboard
-- [ ] Oportunidades aparecem na tabela após ~30s
-- [ ] WebSocket conecta (status "Connected" na UI ou no Network → WS)
-- [ ] Alerta de teste chega no Telegram
-- [ ] `SELECT count(*) FROM opportunities;` no Supabase SQL Editor retorna > 0 após alguns minutos
-- [ ] CORS restrito ao domínio da Vercel (não `*`)
-- [ ] `--workers 1` confirmado no start command do Railway
+1. Entre em [supabase.com](https://supabase.com) e crie um projeto novo.
+2. Escolha uma senha forte para o banco e guarde.
+3. Aguarde o provisionamento.
+4. Em `Project Settings -> Database -> Connection string -> URI`, copie a string do pooler.
+5. Use a variante assincrona trocando o prefixo para `postgresql+asyncpg://`.
+
+Exemplo:
+
+```text
+postgresql+asyncpg://postgres.xxxxxxxxxxxx:SUA_SENHA@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
+```
+
+Use a porta `6543` do pooler, nao a conexao direta `5432`, para evitar limites mais agressivos em planos pequenos.
+
+Esse valor sera o `DATABASE_URL` usado pela API e pelo worker.
+
+## Passo 2 - Criar o bot do Telegram
+
+1. No Telegram, abra `@BotFather`.
+2. Rode `/newbot`.
+3. Guarde o token retornado.
+4. Envie uma mensagem para o bot.
+5. Abra:
+
+```text
+https://api.telegram.org/bot<SEU_TOKEN>/getUpdates
+```
+
+6. Copie o `chat.id`.
+
+Valores a guardar:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+
+Esses campos podem ser configurados globalmente por ambiente ou depois na UI por workspace.
+
+## Passo 3 - Deploy da API no Render
+
+Crie um `Web Service` no Render a partir do repositorio GitHub.
+
+Configuracao recomendada:
+
+| Campo | Valor |
+|---|---|
+| Service Type | `Web Service` |
+| Runtime | `Python` |
+| Root Directory | `backend` |
+| Build Command | `pip install .` |
+| Pre-Deploy Command | `alembic upgrade head` |
+| Start Command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1` |
+| Health Check Path | `/api/health` |
+
+Variaveis de ambiente minimas da API:
+
+| Variavel | Valor |
+|---|---|
+| `DATABASE_URL` | URL async do Supabase |
+| `AUTH_SECRET_KEY` | segredo longo e aleatorio |
+| `SCANNER_ENABLED` | `false` |
+| `LOG_LEVEL` | `INFO` |
+| `CORS_ALLOWED_ORIGINS` | ajuste depois que a URL da Vercel existir |
+
+Variaveis opcionais:
+
+| Variavel | Uso |
+|---|---|
+| `ADMIN_TOKEN` | fallback legado para auth |
+| `ADMIN_USERNAME` | bootstrap inicial opcional |
+| `ADMIN_PASSWORD` | bootstrap inicial opcional |
+| `SENTRY_DSN` | observabilidade |
+| `LOG_AGGREGATION_URL` | agregacao de logs |
+| `LOG_AGGREGATION_TOKEN` | autenticacao do agregador |
+
+Resultado esperado nos logs da API:
+
+```text
+Loaded workspace scan configuration
+Scanner disabled (SCANNER_ENABLED=false) - running in API-only mode
+```
+
+Verificacao minima:
+
+```text
+https://seu-servico-api.onrender.com/api/health
+```
+
+Resposta esperada:
+
+```json
+{"status":"ok","mode":"api_only"}
+```
+
+## Passo 4 - Deploy do worker no Render
+
+Crie um segundo servico no mesmo repositorio, agora como `Background Worker`.
+
+Configuracao recomendada:
+
+| Campo | Valor |
+|---|---|
+| Service Type | `Background Worker` |
+| Runtime | `Python` |
+| Root Directory | `backend` |
+| Build Command | `pip install .` |
+| Pre-Deploy Command | `alembic upgrade head` |
+| Start Command | `python -m app.worker` |
+
+Variaveis de ambiente minimas do worker:
+
+| Variavel | Valor |
+|---|---|
+| `DATABASE_URL` | URL async do Supabase |
+| `AUTH_SECRET_KEY` | mesmo valor da API |
+| `LOG_LEVEL` | `INFO` |
+| `SCAN_INTERVAL_SECONDS` | `30` |
+
+Variaveis opcionais do worker:
+
+| Variavel | Uso |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | fallback global para alertas |
+| `TELEGRAM_CHAT_ID` | fallback global para alertas |
+| `ADMIN_USERNAME` | bootstrap inicial opcional |
+| `ADMIN_PASSWORD` | bootstrap inicial opcional |
+| `SENTRY_DSN` | observabilidade |
+| `LOG_AGGREGATION_URL` | agregacao de logs |
+| `LOG_AGGREGATION_TOKEN` | autenticacao do agregador |
+
+Resultado esperado nos logs do worker:
+
+- inicializacao sem erro
+- ciclos de scan completos
+- gravacao de snapshots e sinais no banco
+
+Exemplo de linha saudavel:
+
+```text
+scan_cycle_complete opportunities=... signals_saved=... projections_saved=...
+```
+
+## Passo 5 - Deploy do frontend na Vercel
+
+Crie um projeto na Vercel a partir do mesmo repositorio.
+
+Configuracao recomendada:
+
+| Campo | Valor |
+|---|---|
+| Framework | `Next.js` |
+| Root Directory | `frontend` |
+| Build Command | `next build` |
+
+Variaveis de ambiente da Vercel:
+
+| Variavel | Valor |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | `https://seu-servico-api.onrender.com/api` |
+| `NEXT_PUBLIC_WS_URL` | `wss://seu-servico-api.onrender.com/ws` |
+
+O frontend ja esta preparado para build de producao com `output: "standalone"`.
+
+## Passo 6 - Ajustar CORS na API
+
+Depois que a URL final da Vercel existir, atualize `CORS_ALLOWED_ORIGINS` no Render:
+
+```env
+CORS_ALLOWED_ORIGINS=https://seu-projeto.vercel.app,http://localhost:3000
+```
+
+Depois disso, faca redeploy da API.
+
+## Resumo de variaveis
+
+### API no Render
+
+```env
+DATABASE_URL=postgresql+asyncpg://postgres.xxx:senha@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
+AUTH_SECRET_KEY=gere-um-segredo-longo-e-aleatorio
+SCANNER_ENABLED=false
+LOG_LEVEL=INFO
+CORS_ALLOWED_ORIGINS=https://seu-projeto.vercel.app,http://localhost:3000
+
+# opcionais
+ADMIN_TOKEN=
+ADMIN_USERNAME=
+ADMIN_PASSWORD=
+SENTRY_DSN=
+LOG_AGGREGATION_URL=
+LOG_AGGREGATION_TOKEN=
+```
+
+### Worker no Render
+
+```env
+DATABASE_URL=postgresql+asyncpg://postgres.xxx:senha@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
+AUTH_SECRET_KEY=gere-um-segredo-longo-e-aleatorio
+SCAN_INTERVAL_SECONDS=30
+LOG_LEVEL=INFO
+
+# opcionais
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+ADMIN_USERNAME=
+ADMIN_PASSWORD=
+SENTRY_DSN=
+LOG_AGGREGATION_URL=
+LOG_AGGREGATION_TOKEN=
+```
+
+### Frontend na Vercel
+
+```env
+NEXT_PUBLIC_API_URL=https://seu-servico-api.onrender.com/api
+NEXT_PUBLIC_WS_URL=wss://seu-servico-api.onrender.com/ws
+```
+
+## Checklist de smoke test
+
+Depois do deploy, valide nesta ordem:
+
+1. `GET /api/health` responde `ok` e `mode=api_only`.
+2. O worker aparece ativo e sem crash loop no Render.
+3. O dashboard abre na Vercel sem erro de CORS.
+4. As oportunidades aparecem em ate `30-60s`.
+5. O WebSocket conecta com `101 Switching Protocols`.
+6. O frontend continua atualizando mesmo com API e worker separados.
+7. O teste de Telegram entrega mensagem.
+8. No Supabase, as tabelas recebem dados:
+
+```sql
+select count(*) from opportunities;
+select count(*) from technical_signals;
+select count(*) from signal_outcomes;
+select count(*) from opportunity_snapshots;
+```
+
+## Troubleshooting
+
+### API sobe, mas o dashboard fica vazio
+
+- confirme que o worker esta rodando
+- confira se `DATABASE_URL` e identico na API e no worker
+- cheque os logs do worker para falhas de provider ou de conexao com o banco
+
+### Dashboard abre, mas nao atualiza em tempo real
+
+- confirme `NEXT_PUBLIC_WS_URL` com `wss://`
+- confirme que a API esta em `api_only`
+- confirme que o worker escreve snapshots normalmente
+- lembre que o frontend tem polling de fallback a cada `30s`, entao ausencia de update instantaneo nao significa necessariamente deploy quebrado
+
+### `alembic upgrade head` falha no Render
+
+- valide `DATABASE_URL`
+- confirme prefixo `postgresql+asyncpg://`
+- confirme acesso ao pooler do Supabase na porta `6543`
+
+### Alertas duplicados no Telegram
+
+- deixe apenas um worker ativo
+- nao rode scanner na API e no worker ao mesmo tempo
+- mantenha `SCANNER_ENABLED=false` na API
+
+### Erro de CORS no frontend
+
+- ajuste `CORS_ALLOWED_ORIGINS` na API
+- faca redeploy da API depois da alteracao
+
+## Operacao continua
+
+- Render e Vercel vao redeployar a cada push na branch configurada
+- alteracoes de schema devem continuar passando por `alembic upgrade head`
+- a topologia recomendada continua sendo API-only + worker separado

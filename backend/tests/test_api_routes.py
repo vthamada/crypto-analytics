@@ -140,12 +140,19 @@ def test_health_includes_runtime_snapshot(monkeypatch):
     routes.set_scan_config(AppConfig())
     routes.update_state([], None)
 
+    async def fake_scanner_state():
+        return None
+
+    monkeypatch.setattr(routes, "get_scanner_runtime_state", fake_scanner_state)
+
     client = create_test_client()
     response = client.get("/api/health")
 
     body = response.json()
     assert response.status_code == 200
     assert "scanner" in body
+    assert "scanner_state" in body
+    assert "mode" in body
     assert "websocket_connections" in body
 
 

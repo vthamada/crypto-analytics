@@ -40,10 +40,12 @@ def test_connection_manager_broadcasts_only_to_target_workspace():
         assert len(ws_research.messages) == 1
         assert json.loads(ws_research.messages[0])["count"] == 1
         assert manager.connection_count == 2
+        assert manager.workspace_ids == {"default", "research"}
 
         manager.disconnect(ws_default)
         manager.disconnect(ws_research)
         assert manager.connection_count == 0
+        assert manager.workspace_ids == set()
 
     asyncio.run(run_test())
 
