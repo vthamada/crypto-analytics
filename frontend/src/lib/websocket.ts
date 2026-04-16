@@ -1,5 +1,10 @@
 import type { Opportunity } from "./types";
 import { emitAppError } from "./app-errors";
+import {
+  getStoredAuthToken,
+  getStoredWorkspaceId,
+  SESSION_STORAGE_EVENT,
+} from "./api";
 
 type MessageHandler = (data: {
   type: string;
@@ -26,6 +31,20 @@ function createWebSocket(url: string): WebSocket {
   return new WebSocket(url);
 }
 
+
+function buildConnectionUrl(): string | null {
+  const token = getStoredAuthToken();
+  const workspaceId = getStoredWorkspaceId();
+  if (!token || !workspaceId) {
+    return null;
+  }
+
+  const url = new URL(WS_URL);
+  url.searchParams.set("token", token);
+  url.searchParams.set("workspace_id", workspaceId);
+  return url.toString();
+}
+
 class WebSocketClient {
   private ws: WebSocket | null = null;
   private handlers: Set<MessageHandler> = new Set();
@@ -33,13 +52,51 @@ class WebSocketClient {
   private reconnectDelay = 2000;
   private manualDisconnect = false;
   private reportedConnectionIssue = false;
+  private activeUrl: string | null = null;
+
+  constructor() {
+    if (typeof window !== "undefined") {
+      window.addEventListener(SESSION_STORAGE_EVENT, () => {
+        this.handleSessionChange();
+      });
+    }
+  }
+
+  private handleSessionChange(): void {
+    const nextUrl = buildConnectionUrl();
+    if (!nextUrl) {
+      this.disconnect();
+      return;
+    }
+
+    if (!this.handlers.size) {
+      this.activeUrl = nextUrl;
+      return;
+    }
+
+    if (this.activeUrl !== nextUrl) {
+      this.reconnect();
+    }
+  }
 
   connect(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) return;
+    const nextUrl = buildConnectionUrl();
+    if (!nextUrl) {
+      return;
+    }
+    if (this.ws?.readyState === WebSocket.OPEN && this.activeUrl === nextUrl) return;
+
+    if (this.ws && this.activeUrl !== nextUrl) {
+      this.manualDisconnect = true;
+      this.ws.close();
+      this.ws = null;
+    }
+
     this.manualDisconnect = false;
+    this.activeUrl = nextUrl;
 
     try {
-      this.ws = createWebSocket(WS_URL);
+      this.ws = createWebSocket(nextUrl);
 
       this.ws.onopen = () => {
         this.reconnectDelay = 2000;
@@ -59,11 +116,24 @@ class WebSocketClient {
         }
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
+        const shouldReconnect = !this.manualDisconnect && event.code !== 1008;
+        this.ws = null;
+        this.activeUrl = null;
         if (!this.manualDisconnect) {
           this.reportConnectionIssue();
         }
-        this.scheduleReconnect();
+        if (event.code === 1008) {
+          emitAppError({
+            source: "websocket",
+            message: "Canal em tempo real recusado para o workspace ativo. Atualize a sessao e tente novamente.",
+            dedupeKey: "websocket:policy-violation",
+          });
+          return;
+        }
+        if (shouldReconnect) {
+          this.scheduleReconnect();
+        }
       };
 
       this.ws.onerror = () => {
@@ -81,6 +151,19 @@ class WebSocketClient {
       this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, 30000);
       this.connect();
     }, this.reconnectDelay);
+  }
+
+  private reconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.manualDisconnect = true;
+    this.ws?.close();
+    this.ws = null;
+    this.activeUrl = null;
+    this.manualDisconnect = false;
+    this.connect();
   }
 
   private reportConnectionIssue(): void {
@@ -113,6 +196,7 @@ class WebSocketClient {
     }
     this.ws?.close();
     this.ws = null;
+    this.activeUrl = null;
   }
 }
 

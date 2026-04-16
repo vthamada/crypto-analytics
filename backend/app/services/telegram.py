@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -53,11 +54,16 @@ def _format_opportunity(opp: Opportunity) -> str:
     )
 
 
-def _alert_key(opp: Opportunity) -> str:
-    return f"{opp.exchange.value}:{opp.pair}"
+def _destination_key(token: str, chat_id: str) -> str:
+    token_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+    return f"{chat_id}:{token_digest}"
 
 
-def _filter_by_cooldown(opportunities: list[Opportunity]) -> list[Opportunity]:
+def _alert_key(opp: Opportunity, *, destination_key: str) -> str:
+    return f"{destination_key}:{opp.exchange.value}:{opp.pair}"
+
+
+def _filter_by_cooldown(opportunities: list[Opportunity], *, destination_key: str) -> list[Opportunity]:
     cooldown = max(settings.telegram_alert_cooldown_seconds, 0)
     if cooldown == 0:
         return opportunities
@@ -66,7 +72,7 @@ def _filter_by_cooldown(opportunities: list[Opportunity]) -> list[Opportunity]:
     eligible: list[Opportunity] = []
 
     for opp in opportunities:
-        key = _alert_key(opp)
+        key = _alert_key(opp, destination_key=destination_key)
         last_sent = _last_alert_sent_at.get(key)
         if last_sent and now - last_sent < timedelta(seconds=cooldown):
             continue
@@ -95,7 +101,8 @@ async def send_telegram_alert(
     if not opportunities:
         return False
 
-    eligible = _filter_by_cooldown(opportunities)
+    destination_key = _destination_key(effective_token, effective_chat_id)
+    eligible = _filter_by_cooldown(opportunities, destination_key=destination_key)
     if not eligible:
         logger.info("Telegram cooldown suppressed all candidate alerts")
         return False
@@ -114,7 +121,7 @@ async def send_telegram_alert(
         await _send_message(token=effective_token, chat_id=effective_chat_id, text=message)
         now = datetime.now(timezone.utc)
         for opp in top:
-            _last_alert_sent_at[_alert_key(opp)] = now
+            _last_alert_sent_at[_alert_key(opp, destination_key=destination_key)] = now
         logger.info("Telegram alert sent successfully")
         return True
     except Exception as e:

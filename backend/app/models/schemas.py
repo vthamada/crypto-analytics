@@ -120,18 +120,7 @@ class AppConfig(BaseModel):
         Exchange.MERCADO_BITCOIN,
         Exchange.BINANCE,
     ]
-    enabled_pairs: list[str] = [
-        "BTC_BRL",
-        "ETH_BRL",
-        "SOL_BRL",
-        "ADA_BRL",
-        "XRP_BRL",
-        "DOGE_BRL",
-        "DOT_BRL",
-        "AVAX_BRL",
-        "MATIC_BRL",
-        "LINK_BRL",
-    ]
+    enabled_pairs: list[str] = Field(default_factory=list)
     scan_interval_seconds: int = 30
     telegram_enabled: bool = True
     # Credenciais (sobrepõem variáveis de ambiente quando preenchidas)

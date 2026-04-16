@@ -244,6 +244,24 @@ function collapseAuditLogEntries(entries: AuditLogEntry[]): DisplayAuditLogEntry
   return collapsed;
 }
 
+
+function isWorkspaceAdminRole(role: string | null | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
+
+function isWorkspaceOwnerRole(role: string | null | undefined): boolean {
+  return role === "owner";
+}
+
+
+function resolveWorkspaceSummary(
+  workspaces: WorkspaceSummary[],
+  workspaceId: string,
+): WorkspaceSummary | null {
+  return workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+}
+
 export default function SettingsPage() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [adminToken, setAdminToken] = useState("");
@@ -296,8 +314,28 @@ export default function SettingsPage() {
   const [validatingCredentials, setValidatingCredentials] = useState(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedOperationalConfigRef = useRef("");
+  const activeWorkspace = resolveWorkspaceSummary(workspaces, activeWorkspaceId);
+  const activeWorkspaceRole = activeWorkspace?.role ?? "";
+  const canManageActiveWorkspace = isWorkspaceAdminRole(activeWorkspaceRole);
+  const canManageWorkspaceMembers = isWorkspaceOwnerRole(activeWorkspaceRole);
+  const canCreateWorkspaces = adminSession?.role === "admin";
 
-  const isAdmin = adminSession?.role === "admin";
+  function clearWorkspaceManagementState() {
+    setConfig(null);
+    setAuditLog([]);
+    setUsers([]);
+    setInvites([]);
+    setCredentialValidationResults([]);
+    setCredentialNotice(null);
+    setTelegramTestFeedback(null);
+    setUsersLoading(false);
+    lastSavedOperationalConfigRef.current = "";
+    setAutoSaveStatus("idle");
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }
 
   const initializeStoredSession = useEffectEvent(async (storedToken: string) => {
     await applyAuthenticatedState(storedToken);
@@ -331,7 +369,7 @@ export default function SettingsPage() {
     setPairResultsLimit(40);
   }, [pairCatalogView, pairAvailabilityFilter, pairSearch, activeWorkspaceId]);
 
-  function syncSessionState(session: AdminSessionInfo) {
+  function syncSessionState(session: AdminSessionInfo): string {
     const storedWorkspaceId = getStoredWorkspaceId();
     const resolvedWorkspaceId =
       storedWorkspaceId && session.workspaces.some((workspace) => workspace.id === storedWorkspaceId)
@@ -344,15 +382,13 @@ export default function SettingsPage() {
     if (resolvedWorkspaceId) {
       setStoredWorkspaceId(resolvedWorkspaceId);
     }
+    return resolvedWorkspaceId;
   }
 
   async function loadAdminWorkspaceData(token: string) {
     const workspaceId = getStoredWorkspaceId();
     if (!workspaceId) {
-      setConfig(null);
-      setAuditLog([]);
-      setUsers([]);
-      setInvites([]);
+      clearWorkspaceManagementState();
       return;
     }
 
@@ -372,12 +408,7 @@ export default function SettingsPage() {
       setInvites(workspaceInvites);
       setAuthError(null);
     } catch (error) {
-      setConfig(null);
-      lastSavedOperationalConfigRef.current = "";
-      setAutoSaveStatus("idle");
-      setAuditLog([]);
-      setUsers([]);
-      setInvites([]);
+      clearWorkspaceManagementState();
       setAuthError(error instanceof Error ? error.message : "Falha ao carregar dados administrativos");
     } finally {
       setUsersLoading(false);
@@ -408,18 +439,15 @@ export default function SettingsPage() {
       return false;
     }
 
-    syncSessionState(session);
+    const resolvedWorkspaceId = syncSessionState(session);
+    const resolvedWorkspace = resolveWorkspaceSummary(session.workspaces, resolvedWorkspaceId);
     setAuthError(null);
 
-    if (session.role === "admin") {
+    if (isWorkspaceAdminRole(resolvedWorkspace?.role)) {
       await loadAdminWorkspaceData(token);
       await loadAvailablePairsCatalog();
     } else {
-      setConfig(null);
-      setAuditLog([]);
-      setUsers([]);
-      setInvites([]);
-      setCredentialValidationResults([]);
+      clearWorkspaceManagementState();
     }
 
     return true;
@@ -461,7 +489,7 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
-    if (!config || !isAdmin || !adminToken) {
+    if (!config || !canManageActiveWorkspace || !adminToken) {
       return;
     }
 
@@ -496,7 +524,7 @@ export default function SettingsPage() {
         clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [adminToken, config, isAdmin]);
+  }, [adminToken, canManageActiveWorkspace, config]);
 
   async function handleUnlock() {
     if (!adminToken) {
@@ -534,7 +562,7 @@ export default function SettingsPage() {
   }
 
   async function handleSave() {
-    if (!config || !isAdmin) return;
+    if (!config || !canManageActiveWorkspace) return;
 
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
@@ -595,7 +623,7 @@ export default function SettingsPage() {
   }
 
   async function handleCreateWorkspace() {
-    if (!adminToken || !newWorkspaceName.trim() || !isAdmin) return;
+    if (!adminToken || !newWorkspaceName.trim() || !canCreateWorkspaces) return;
 
     setCreatingWorkspace(true);
     try {
@@ -612,6 +640,8 @@ export default function SettingsPage() {
   }
 
   async function handleWorkspaceChange(workspaceId: string) {
+    const workspace = resolveWorkspaceSummary(workspaces, workspaceId);
+
     setStoredWorkspaceId(workspaceId);
     setActiveWorkspaceId(workspaceId);
     setCredentialNotice(null);
@@ -619,15 +649,17 @@ export default function SettingsPage() {
     setPairAvailabilityFilter("active_exchanges");
     setPairSearch("");
 
-    if (adminToken && isAdmin) {
+    if (adminToken && isWorkspaceAdminRole(workspace?.role)) {
       setLoading(true);
       await loadAdminWorkspaceData(adminToken);
       setLoading(false);
+    } else {
+      clearWorkspaceManagementState();
     }
   }
 
   async function handleCreateUser() {
-    if (!adminToken || !isAdmin) return;
+    if (!adminToken || !canManageWorkspaceMembers) return;
     if (!newUserName.trim()) {
       setAuthError("Informe o usuário da nova conta.");
       return;
@@ -660,7 +692,7 @@ export default function SettingsPage() {
   }
 
   async function handleToggleUser(user: UserRecord) {
-    if (!adminToken || !isAdmin) return;
+    if (!adminToken || !canManageWorkspaceMembers) return;
 
     setUserActionId(`toggle-${user.id}`);
     try {
@@ -674,7 +706,7 @@ export default function SettingsPage() {
   }
 
   async function handleResetPassword(user: UserRecord) {
-    if (!adminToken || !isAdmin) return;
+    if (!adminToken || !canManageWorkspaceMembers) return;
 
     setUserActionId(`reset-${user.id}`);
     try {
@@ -698,7 +730,7 @@ export default function SettingsPage() {
   }
 
   async function handleCreateInvite() {
-    if (!adminToken || !isAdmin) return;
+    if (!adminToken || !canManageWorkspaceMembers) return;
     if (!inviteEmail.trim()) {
       setAuthError("Informe o email do convite.");
       return;
@@ -748,7 +780,7 @@ export default function SettingsPage() {
 
   async function handleValidateExchangeCredentials(configOverride?: AppConfig) {
     const effectiveConfig = configOverride ?? config;
-    if (!adminToken || !isAdmin || !effectiveConfig) return;
+    if (!adminToken || !canManageActiveWorkspace || !effectiveConfig) return;
 
     setValidatingCredentials(true);
     try {
@@ -805,7 +837,7 @@ export default function SettingsPage() {
   }
 
   async function handleTelegramTest() {
-    if (!adminToken || !isAdmin || !config) return;
+    if (!adminToken || !canManageActiveWorkspace || !config) return;
 
     setTelegramTesting(true);
     setTelegramTestFeedback(null);
@@ -984,13 +1016,13 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-5xl space-y-6 p-4 pt-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">{isAdmin ? "Configurações" : "Minha sessão"}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{canManageActiveWorkspace ? "Configurações" : "Minha sessão"}</h1>
           <p className="text-sm text-muted-foreground">
-            {isAdmin
+            {canManageActiveWorkspace
               ? "Ajuste parâmetros operacionais, gerencie usuários e mantenha a sessão autenticada sem expor segredos."
               : "Use esta área para trocar a senha temporária e acompanhar os workspaces aos quais você tem acesso."}
           </p>
-          {isAdmin ? (
+          {canManageActiveWorkspace ? (
             <p className={cn(
               "mt-1 text-xs",
               autoSaveStatus === "error" ? "text-red-500" : "text-muted-foreground",
@@ -1004,7 +1036,7 @@ export default function SettingsPage() {
             <LogOut className="h-4 w-4" />
             Sair
           </Button>
-          {isAdmin && config ? (
+          {canManageActiveWorkspace && config ? (
             <Button onClick={handleSave} disabled={saving} className="gap-2" data-testid="settings-save-button">
               {saving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1041,16 +1073,17 @@ export default function SettingsPage() {
             Sessão autenticada
           </CardTitle>
           <CardDescription>
-            {isAdmin
+            {canManageActiveWorkspace
               ? "Sessão com refresh token de longa duração e revogação por token_version."
               : "Sessão vinculada aos workspaces liberados para sua conta."}
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <MetaCard label="Usuário" value={adminSession.username} />
           <MetaCard label="Email" value={adminSession.email || "Não informado"} />
           <MetaCard label="Modo" value={adminSession.auth_mode} />
-          <MetaCard label="Role" value={adminSession.role} />
+          <MetaCard label="Role da conta" value={adminSession.role} />
+          <MetaCard label="Role no workspace" value={activeWorkspaceRole || "Não definido"} />
           <MetaCard
             label="Última troca"
             value={
@@ -1093,7 +1126,7 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="text-base font-semibold">Workspace ativo</CardTitle>
           <CardDescription>
-            {isAdmin
+            {canManageActiveWorkspace
               ? "Cada workspace tem configuração, auditoria e usuários isolados."
               : "Os dados do dashboard e histórico seguem o workspace selecionado aqui."}
           </CardDescription>
@@ -1112,7 +1145,7 @@ export default function SettingsPage() {
               </Badge>
             ))}
           </div>
-          {isAdmin ? (
+          {canCreateWorkspaces ? (
             <div className="flex gap-2">
               <Input
                 value={newWorkspaceName}
@@ -1165,7 +1198,7 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {isAdmin ? (
+      {canManageWorkspaceMembers ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base font-semibold">
@@ -1252,7 +1285,7 @@ export default function SettingsPage() {
         </Card>
       ) : null}
 
-      {isAdmin ? (
+      {canManageWorkspaceMembers ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base font-semibold">
@@ -1408,7 +1441,7 @@ export default function SettingsPage() {
         </Card>
       ) : null}
 
-      {isAdmin && config ? (
+      {canManageActiveWorkspace && config ? (
         <>
           <Card>
             <CardHeader>

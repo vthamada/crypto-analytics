@@ -31,3 +31,55 @@ def test_available_pairs_catalog_uses_cache(monkeypatch):
         assert first == second
 
     asyncio.run(run_test())
+
+
+def test_select_default_enabled_pairs_prefers_pairs_with_more_exchanges():
+    catalog = {
+        "pairs": [
+            {
+                "pair": "DOGE_BRL",
+                "display_name": "DOGE/BRL",
+                "availability": {"novadax": False, "mercado_bitcoin": False, "binance": True},
+            },
+            {
+                "pair": "BTC_BRL",
+                "display_name": "BTC/BRL",
+                "availability": {"novadax": True, "mercado_bitcoin": True, "binance": True},
+            },
+            {
+                "pair": "ETH_BRL",
+                "display_name": "ETH/BRL",
+                "availability": {"novadax": True, "mercado_bitcoin": True, "binance": False},
+            },
+        ]
+    }
+
+    selected = pairs.select_default_enabled_pairs(catalog, limit=2)
+
+    assert selected == ["BTC_BRL", "ETH_BRL"]
+
+
+def test_filter_pairs_by_availability_returns_only_supported_pairs():
+    catalog = {
+        "pairs": [
+            {
+                "pair": "BTC_BRL",
+                "display_name": "BTC/BRL",
+                "availability": {"novadax": True, "mercado_bitcoin": True, "binance": True},
+            },
+            {
+                "pair": "DOGE_BRL",
+                "display_name": "DOGE/BRL",
+                "availability": {"novadax": False, "mercado_bitcoin": False, "binance": True},
+            },
+        ]
+    }
+
+    filtered = pairs.filter_pairs_by_availability(
+        enabled_pairs=["BTC_BRL", "DOGE_BRL"],
+        enabled_exchanges=[Exchange.NOVADAX, Exchange.BINANCE],
+        catalog=catalog,
+    )
+
+    assert filtered[Exchange.NOVADAX] == ["BTC_BRL"]
+    assert filtered[Exchange.BINANCE] == ["BTC_BRL", "DOGE_BRL"]

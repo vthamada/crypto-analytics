@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.models.database import init_db
-from app.api.routes import router, update_state, get_scan_config, set_scan_config
+from app.api.routes import router, update_state, get_scan_config, set_scan_config, project_workspace_opportunity
 from app.api.websocket import websocket_endpoint, manager
 from app.services.scanner import Scanner
 from app.services.persistence import (
@@ -102,22 +102,47 @@ async def scan_loop() -> None:
 
             await run_history_retention_if_due(now=now)
 
-            # Broadcast via WebSocket
-            await manager.broadcast({
-                "type": "opportunities_update",
-                "data": [o.model_dump(exclude={"klines"}, mode="json") for o in opportunities],
-                "timestamp": now.isoformat(),
-                "count": len(opportunities),
-            })
+            projected_opportunities_by_workspace: dict[str, list] = {}
+            for workspace_id, workspace_config in workspace_configs.items():
+                projected_opportunities = [
+                    projected
+                    for projected in (
+                        project_workspace_opportunity(opportunity, workspace_config)
+                        for opportunity in opportunities
+                    )
+                    if projected is not None
+                ]
+                projected_opportunities_by_workspace[workspace_id] = projected_opportunities
 
-            # Send Telegram alert for high-score opportunities
-            if config.telegram_enabled:
-                high_score = [o for o in opportunities if o.score >= 60]
+                await manager.broadcast_workspace(
+                    workspace_id,
+                    {
+                        "type": "opportunities_update",
+                        "data": [
+                            opportunity.model_dump(exclude={"klines"}, mode="json")
+                            for opportunity in projected_opportunities
+                        ],
+                        "timestamp": now.isoformat(),
+                        "count": len(projected_opportunities),
+                    },
+                )
+
+            # Send Telegram alerts with per-workspace filtering and credentials.
+            for workspace_id, workspace_config in workspace_configs.items():
+                if not (
+                    workspace_config.telegram_enabled
+                    and workspace_config.telegram_bot_token
+                    and workspace_config.telegram_chat_id
+                ):
+                    continue
+
+                projected_opportunities = projected_opportunities_by_workspace.get(workspace_id, [])
+                high_score = [opportunity for opportunity in projected_opportunities if opportunity.score >= 60]
                 if high_score:
                     await send_telegram_alert(
                         high_score,
-                        token=config.telegram_bot_token,
-                        chat_id=config.telegram_chat_id,
+                        token=workspace_config.telegram_bot_token,
+                        chat_id=workspace_config.telegram_chat_id,
                     )
 
             logger.info(

@@ -30,8 +30,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/inline-error-state";
+import { SessionRequiredState } from "@/components/session-required-state";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getHistory, getAnalytics } from "@/lib/api";
+import { useHasAuthenticatedWorkspace } from "@/hooks/use-has-authenticated-workspace";
 import type { Analytics, HistoryRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -109,7 +111,7 @@ function scoreColor(score: number): string {
   return "bg-red-500/15 text-red-500 border-red-500/20";
 }
 
-export default function HistoryPage() {
+function HistoryContent() {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -441,4 +443,20 @@ export default function HistoryPage() {
       </Card>
     </div>
   );
+}
+
+
+export default function HistoryPage() {
+  const hasAuthenticatedWorkspace = useHasAuthenticatedWorkspace();
+
+  if (!hasAuthenticatedWorkspace) {
+    return (
+      <SessionRequiredState
+        title="Historico restrito ao workspace autenticado"
+        description="Os registros e analytics agora exigem sessao autenticada e workspace ativo para evitar leitura cruzada entre tenants."
+      />
+    );
+  }
+
+  return <HistoryContent />;
 }

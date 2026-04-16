@@ -44,7 +44,7 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 
 ### Qualidade e estabilidade
 - [x] Testes unitarios para filtros e score
-- [x] Testes de integracao para rotas principais do backend (14 passando)
+- [x] Testes de integracao para rotas principais do backend
 - [x] Mocks/fakes para providers de exchange nos testes
 - [x] Tratar erros e rate limit nos providers
 - [x] Deduplicacao de oportunidades no banco (janela de 5 min por par+exchange)
@@ -58,9 +58,9 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 
 ### Multi-tenant (base)
 - [x] Tabelas `users`, `workspaces`, `workspace_memberships`, `workspace_configs`
-- [x] Login admin com credenciais, token JWT, sessao de 8h
+- [x] Login com credenciais, access token assinado e refresh token
 - [x] Seletor de workspace no frontend
-- [x] Configuracao e auditoria isoladas por workspace
+- [x] Configuracao administrativa e auditoria isoladas por workspace
 
 ### Infra e operacao
 - [x] Migracoes com Alembic (3 migrations: baseline, admin_auth, workspace)
@@ -98,7 +98,7 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
   Campos: `plan`, `stripe_customer_id`, `subscription_status`, `trial_ends_at`.
   Implementar agora evita refatoracao maior quando o SaaS for lancado.
 
-- [x] **Pares dinamicos por exchange** — substituir lista hardcoded de pares por descoberta dinamica via `get_available_pairs()` (ja existe nos providers). Cache no backend com TTL de 1h. UI de selecao com busca e indicador por exchange:
+- [x] **Pares dinamicos por exchange** — catalogo e UI usam descoberta via `get_available_pairs()` com cache no backend de 1h. Novos workspaces recebem selecao inicial derivada do catalogo, e o scanner cruza `enabled_pairs` com a disponibilidade real por exchange antes de consultar os providers:
   ```
   BTC/BRL   [NovaDAX ✓] [Mercado BTC ✓] [Binance ✓]
   PEPE/BRL  [NovaDAX ✗] [Mercado BTC ✗] [Binance ✓]
@@ -161,26 +161,29 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
   Free tier com limites automaticamente aplicados.
   Stripe Checkout para upgrade de plano.
 
-- [ ] **Modelo de permissoes por workspace**
+- [x] **Modelo de permissoes por workspace**
+  Rotas e UI agora usam a membership do workspace ativo, em vez do papel global do usuario.
   Roles `owner`, `admin`, `member`:
   - `member`: visualiza dashboard e historico
-  - `admin`: configura thresholds, pares, Telegram
-  - `owner`: + gerencia membros e plano de cobranca
+  - `admin`: configura thresholds, pares, Telegram e auditoria
+  - `owner`: + gerencia membros e convites do workspace
 
 - [ ] **Scanner dedicado por worker**
   Extrair scanner de `backend/app/worker.py` (scaffold ja existe) para processo separado.
   Comunicacao via banco ou Redis pub/sub.
   Obrigatorio antes de ter dezenas de tenants ativos.
 
-- [ ] **Notificacoes por workspace**
-  Cada workspace usa seu proprio bot Telegram.
-  Hoje o Telegram le do `.env` — ja esta na estrutura de config, falta o dispatch correto.
+- [x] **Notificacoes por workspace**
+  O dispatch agora projeta oportunidades por workspace e envia alertas usando o bot/chat configurado naquele workspace, sem depender do token/chat mesclado global.
 
-- [ ] **Auditoria no frontend**
-  Endpoint `/api/admin/audit-log` existe mas sem tela. Pagina de auditoria para admins.
+- [x] **Isolamento do tempo real e leituras publicas**
+  Leituras operacionais agora exigem sessao autenticada, e o WebSocket autentica a conexao e publica somente para o workspace ativo.
+
+- [x] **Auditoria no frontend**
+  Pagina de configuracoes exibe auditoria recente do workspace ativo para administradores.
 
 - [ ] **Deploy de producao endurecido**
-  Postgres como padrao, rotacao de segredos, HTTPS obrigatorio, ALLOWED_ORIGINS configurado,
+  Postgres como padrao, rotacao de segredos, HTTPS obrigatorio, `cors_allowed_origins` configurado,
   health check conectado a monitoramento externo.
 
 ---
@@ -236,13 +239,13 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 1. **P3** — Feature gates por plano + Stripe
   *Liga monetizacao em cima da arquitetura de Organization ja implantada*
 
-2. **P3** — Modelo de permissoes por workspace
-  *Separa owner/admin/member antes de expor billing e colaboracao em orgs reais*
-
-3. **P3** — Scanner dedicado por worker
+2. **P3** — Scanner dedicado por worker
   *Isola carga operacional do app web antes de escalar tenants e frequencia de scans*
 
-4. **P3** — Notificacoes por workspace
-  *Fecha a separacao operacional entre workspaces, inclusive no dispatch do Telegram*
+3. **P3** — Autoregistro aberto com Free tier
+  *Abre a entrada self-service do produto sem depender de convite manual para o plano inicial*
 
-5. **P4** — Paper trading → execucao manual → automatica (nao pula fases)**
+4. **P3** — Deploy de producao endurecido
+  *Fecha os requisitos operacionais minimos antes de tratar o ambiente como producao real*
+
+5. **P4** — Paper trading → execucao manual → automatica (nao pula fases)

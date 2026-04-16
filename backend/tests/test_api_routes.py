@@ -14,12 +14,42 @@ def create_test_client() -> TestClient:
     return TestClient(app)
 
 
+def make_workspace(*, role: str = "owner", **overrides):
+    payload = {
+        "id": "workspace-1",
+        "slug": "desk",
+        "name": "Desk",
+        "role": role,
+        "is_active": True,
+    }
+    payload.update(overrides)
+    return type("Workspace", (), payload)()
+
+
 def test_config_requires_admin_token(monkeypatch):
     monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
     routes.set_scan_config(AppConfig())
 
     client = create_test_client()
     response = client.get("/api/config")
+
+    assert response.status_code == 401
+
+
+def test_dashboard_requires_authenticated_session(monkeypatch):
+    monkeypatch.setattr(routes.settings, "auth_secret_key", "signing-key")
+
+    client = create_test_client()
+    response = client.get("/api/dashboard/stats")
+
+    assert response.status_code == 401
+
+
+def test_history_requires_authenticated_session(monkeypatch):
+    monkeypatch.setattr(routes.settings, "auth_secret_key", "signing-key")
+
+    client = create_test_client()
+    response = client.get("/api/history")
 
     assert response.status_code == 401
 
@@ -38,7 +68,7 @@ def test_config_hides_sensitive_fields(monkeypatch):
 
     async def fake_resolve_workspace_context(session_info, workspace_id):
         return (
-            None,
+            make_workspace(role="owner"),
             AppConfig(
                 telegram_bot_token="bot-token",
                 telegram_chat_id="chat-id",
@@ -81,7 +111,7 @@ def test_update_config_preserves_existing_secret_on_blank(monkeypatch):
 
     async def fake_resolve_workspace_context(session_info, workspace_id):
         return (
-            type("Workspace", (), {"id": "workspace-1"})(),
+            make_workspace(role="owner"),
             current_config,
         )
 
@@ -274,27 +304,96 @@ def test_auth_refresh_returns_rotated_tokens(monkeypatch):
     assert body["refresh_expires_in_seconds"] == 30 * 24 * 3600
 
 
-def test_config_requires_admin_role(monkeypatch):
+def test_config_requires_workspace_admin_role(monkeypatch):
+    monkeypatch.setattr(routes.settings, "auth_secret_key", "signing-key")
+
+    async def fake_verify(token: str):
+        if token == "admin-token":
+            return UserSession(
+                user_id="user-2",
+                username="admin-account",
+                role="admin",
+                auth_mode="database",
+                token_version=1,
+            )
+        return None
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        assert session_info.role == "admin"
+        return (
+            make_workspace(role="member"),
+            AppConfig(),
+        )
+
+    monkeypatch.setattr(routes, "verify_access_token", fake_verify)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+
+    client = create_test_client()
+    response = client.get("/api/config", headers={"Authorization": "Bearer admin-token"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Workspace admin role required"
+
+
+def test_config_accepts_workspace_admin_role_even_for_member_session(monkeypatch):
     monkeypatch.setattr(routes.settings, "auth_secret_key", "signing-key")
 
     async def fake_verify(token: str):
         if token == "member-token":
             return UserSession(
                 user_id="user-2",
-                username="member",
+                username="member-account",
                 role="member",
                 auth_mode="database",
                 token_version=1,
             )
         return None
 
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        assert session_info.role == "member"
+        return (
+            make_workspace(role="admin"),
+            AppConfig(telegram_bot_token="bot-token", telegram_chat_id="chat-id"),
+        )
+
     monkeypatch.setattr(routes, "verify_access_token", fake_verify)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
 
     client = create_test_client()
     response = client.get("/api/config", headers={"Authorization": "Bearer member-token"})
 
+    assert response.status_code == 200
+    assert response.json()["telegram_bot_token"] == ""
+
+
+def test_users_endpoint_requires_workspace_owner_role(monkeypatch):
+    monkeypatch.setattr(routes.settings, "auth_secret_key", "signing-key")
+
+    async def fake_verify(token: str):
+        if token == "member-token":
+            return UserSession(
+                user_id="user-2",
+                username="workspace-admin",
+                role="member",
+                auth_mode="database",
+                token_version=1,
+            )
+        return None
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return (
+            make_workspace(role="admin"),
+            AppConfig(),
+        )
+
+    monkeypatch.setattr(routes, "verify_access_token", fake_verify)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+
+    client = create_test_client()
+    response = client.get("/api/users", headers={"Authorization": "Bearer member-token"})
+
     assert response.status_code == 403
-    assert response.json()["detail"] == "Admin role required"
+    assert response.json()["detail"] == "Workspace owner role required"
 
 
 def test_available_pairs_endpoint_returns_aggregated_catalog(monkeypatch):
@@ -351,7 +450,7 @@ def test_telegram_test_endpoint_uses_workspace_config_fallback(monkeypatch):
 
     async def fake_resolve_workspace_context(session_info, workspace_id):
         return (
-            type("Workspace", (), {"id": "workspace-1", "name": "Desk"})(),
+            make_workspace(role="owner"),
             AppConfig(telegram_bot_token="persisted-bot", telegram_chat_id="persisted-chat"),
         )
 
@@ -574,7 +673,7 @@ def test_update_config_requests_immediate_scan_refresh(monkeypatch):
 
     async def fake_resolve_workspace_context(session_info, workspace_id):
         return (
-            type("Workspace", (), {"id": "workspace-1"})(),
+            make_workspace(role="owner"),
             current_config,
         )
 
@@ -625,7 +724,7 @@ def test_update_config_can_skip_audit_for_autosave(monkeypatch):
 
     async def fake_resolve_workspace_context(session_info, workspace_id):
         return (
-            type("Workspace", (), {"id": "workspace-1"})(),
+            make_workspace(role="owner"),
             current_config,
         )
 
@@ -667,7 +766,7 @@ def test_validate_exchange_credentials_endpoint_returns_exchange_states(monkeypa
 
     async def fake_resolve_workspace_context(session_info, workspace_id):
         return (
-            type("Workspace", (), {"id": "workspace-1"})(),
+            make_workspace(role="owner"),
             AppConfig(),
         )
 

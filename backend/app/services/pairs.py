@@ -12,6 +12,7 @@ from app.providers.novadax import NovaDaxProvider
 logger = logging.getLogger(__name__)
 
 PAIR_CATALOG_TTL_SECONDS = 3600
+DEFAULT_ENABLED_PAIR_LIMIT = 10
 
 _pair_catalog_cache: dict | None = None
 _pair_catalog_generated_at: datetime | None = None
@@ -75,6 +76,45 @@ def _build_catalog_payload(provider_pairs: dict[Exchange, list[str]], generated_
     }
 
 
+def select_default_enabled_pairs(catalog: dict, limit: int = DEFAULT_ENABLED_PAIR_LIMIT) -> list[str]:
+    pairs = catalog.get("pairs", []) if isinstance(catalog, dict) else []
+    if not pairs or limit <= 0:
+        return []
+
+    ranked_pairs = sorted(
+        pairs,
+        key=lambda item: (
+            -sum(1 for available in item.get("availability", {}).values() if available),
+            _sort_pair_key(item.get("pair", "")),
+        ),
+    )
+    return [item["pair"] for item in ranked_pairs[:limit] if item.get("pair")]
+
+
+def filter_pairs_by_availability(
+    *,
+    enabled_pairs: list[str],
+    enabled_exchanges: list[Exchange],
+    catalog: dict,
+) -> dict[Exchange, list[str]]:
+    catalog_pairs = {
+        item["pair"]: item.get("availability", {})
+        for item in catalog.get("pairs", [])
+        if item.get("pair")
+    }
+
+    filtered_pairs: dict[Exchange, list[str]] = {}
+    for exchange in enabled_exchanges:
+        exchange_key = exchange.value if hasattr(exchange, "value") else str(exchange)
+        filtered_pairs[exchange] = [
+            pair
+            for pair in enabled_pairs
+            if catalog_pairs.get(pair, {}).get(exchange_key, False)
+        ]
+
+    return filtered_pairs
+
+
 async def get_available_pairs_catalog(*, force_refresh: bool = False) -> dict:
     global _pair_catalog_cache, _pair_catalog_generated_at
 
@@ -92,3 +132,20 @@ async def get_available_pairs_catalog(*, force_refresh: bool = False) -> dict:
     _pair_catalog_cache = payload
     _pair_catalog_generated_at = now
     return payload
+
+
+async def get_scannable_pairs_by_exchange(
+    *,
+    enabled_pairs: list[str],
+    enabled_exchanges: list[Exchange],
+    force_refresh: bool = False,
+) -> dict[Exchange, list[str]]:
+    if not enabled_pairs or not enabled_exchanges:
+        return {exchange: [] for exchange in enabled_exchanges}
+
+    catalog = await get_available_pairs_catalog(force_refresh=force_refresh)
+    return filter_pairs_by_availability(
+        enabled_pairs=enabled_pairs,
+        enabled_exchanges=enabled_exchanges,
+        catalog=catalog,
+    )

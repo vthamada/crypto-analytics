@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from app.api.routes import get_scan_config, set_scan_config, update_state
+from app.api.routes import get_scan_config, set_scan_config, update_state, project_workspace_opportunity
 from app.models.database import init_db
 from app.services.monitoring import scan_monitor
 from app.services.auth import ensure_admin_bootstrap
@@ -54,13 +54,28 @@ async def run_worker() -> None:
 
             await run_history_retention_if_due(now=now)
 
-            if config.telegram_enabled:
-                high_score = [opportunity for opportunity in opportunities if opportunity.score >= 60]
+            for workspace_config in workspace_configs.values():
+                if not (
+                    workspace_config.telegram_enabled
+                    and workspace_config.telegram_bot_token
+                    and workspace_config.telegram_chat_id
+                ):
+                    continue
+
+                projected_opportunities = [
+                    projected
+                    for projected in (
+                        project_workspace_opportunity(opportunity, workspace_config)
+                        for opportunity in opportunities
+                    )
+                    if projected is not None
+                ]
+                high_score = [opportunity for opportunity in projected_opportunities if opportunity.score >= 60]
                 if high_score:
                     await send_telegram_alert(
                         high_score,
-                        token=config.telegram_bot_token,
-                        chat_id=config.telegram_chat_id,
+                        token=workspace_config.telegram_bot_token,
+                        chat_id=workspace_config.telegram_chat_id,
                     )
 
             scan_monitor.complete_cycle(

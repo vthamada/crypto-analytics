@@ -13,6 +13,7 @@ from app.providers.base import ExchangeProvider
 from app.providers.novadax import NovaDaxProvider
 from app.providers.mercado_bitcoin import MercadoBitcoinProvider
 from app.providers.binance import BinanceProvider
+from app.services.pairs import get_scannable_pairs_by_exchange
 from app.filters.volatility import calculate_volatility, passes_volatility_filter, calculate_recent_change
 from app.filters.volume import passes_volume_filter, volume_score
 from app.filters.liquidity import calculate_liquidity, passes_liquidity_filter, liquidity_score
@@ -64,6 +65,20 @@ class Scanner:
 
     def set_historical_calibration(self, calibration: dict[str, dict[str, float]]) -> None:
         self._historical_calibration = calibration
+
+    async def _get_scannable_pairs_by_exchange(self) -> dict[Exchange, list[str]]:
+        enabled_exchanges = list(self._providers.keys())
+        try:
+            return await get_scannable_pairs_by_exchange(
+                enabled_pairs=self.config.enabled_pairs,
+                enabled_exchanges=enabled_exchanges,
+            )
+        except Exception as exc:
+            logger.warning("scan_pair_catalog_filter_failed error=%s", exc)
+            return {
+                exchange: list(self.config.enabled_pairs)
+                for exchange in enabled_exchanges
+            }
 
     async def scan_pair(self, provider: ExchangeProvider, pair: str) -> Opportunity | None:
         """Scan a single pair on a single exchange and return an opportunity if filters pass."""
@@ -159,8 +174,9 @@ class Scanner:
     async def scan_all(self) -> list[Opportunity]:
         """Run a full scan across all enabled exchanges and pairs."""
         tasks = []
+        scannable_pairs = await self._get_scannable_pairs_by_exchange()
         for exchange, provider in self._providers.items():
-            for pair in self.config.enabled_pairs:
+            for pair in scannable_pairs.get(exchange, []):
                 tasks.append(self.scan_pair(provider, pair))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)

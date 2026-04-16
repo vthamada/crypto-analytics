@@ -156,23 +156,14 @@ async def resolve_workspace_context(
     workspace_id: str | None,
 ) -> tuple[WorkspaceSummary, AppConfig]:
     if session_info is None:
-        if workspace_id and workspace_id != DEFAULT_WORKSPACE_ID:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Workspace auth required")
-        config = await load_workspace_config(DEFAULT_WORKSPACE_ID) or await load_config() or AppConfig()
-        return (
-            WorkspaceSummary(
-                id=DEFAULT_WORKSPACE_ID,
-                slug="default",
-                name="Default Workspace",
-                role="viewer",
-                is_active=True,
-            ),
-            config,
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     workspaces = await list_user_workspaces(session_info.user_id)
     if not workspaces:
         if session_info.auth_mode == "legacy_token":
+            if workspace_id and workspace_id != DEFAULT_WORKSPACE_ID:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace access denied")
+
             config = await load_workspace_config(DEFAULT_WORKSPACE_ID) or await load_config() or AppConfig()
             return (
                 WorkspaceSummary(
@@ -195,7 +186,7 @@ async def resolve_workspace_context(
 
     config = await load_workspace_config(workspace.id)
     if config is None:
-        config = await load_workspace_config(DEFAULT_WORKSPACE_ID) or await load_config() or AppConfig()
+        config = await load_config() if workspace.id == DEFAULT_WORKSPACE_ID else AppConfig()
     return workspace, config
 
 
@@ -271,9 +262,14 @@ class ExchangeCredentialValidationRequest(BaseModel):
     binance_api_secret: str | None = None
 
 
-def require_admin_role(session_info: UserSession) -> None:
-    if session_info.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+def require_workspace_admin_role(workspace: WorkspaceSummary) -> None:
+    if workspace.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace admin role required")
+
+
+def require_workspace_owner_role(workspace: WorkspaceSummary) -> None:
+    if workspace.role != "owner":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace owner role required")
 
 
 class ConfigUpdate(BaseModel):
@@ -486,8 +482,8 @@ async def list_users_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_owner_role(workspace)
     return await list_users_for_workspace(workspace.id)
 
 
@@ -497,8 +493,8 @@ async def create_user_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_owner_role(workspace)
     try:
         user, temporary_password = await create_user_by_admin(
             actor=session_info,
@@ -521,8 +517,8 @@ async def list_invites_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_owner_role(workspace)
     try:
         return await list_invites_for_workspace(actor=session_info, workspace_id=workspace.id)
     except PermissionError as exc:
@@ -537,8 +533,8 @@ async def create_invite_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_owner_role(workspace)
     try:
         return await create_invite_for_workspace(
             actor=session_info,
@@ -562,8 +558,8 @@ async def update_user_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_owner_role(workspace)
     try:
         return await set_user_active_state(
             actor=session_info,
@@ -585,8 +581,8 @@ async def reset_user_password_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_owner_role(workspace)
     try:
         user, temporary_password = await reset_user_password(
             actor=session_info,
@@ -606,17 +602,17 @@ async def admin_audit_log(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_admin_role(workspace)
     return await list_audit_logs(workspace_id=workspace.id, limit=limit)
 
 
 @router.get("/dashboard/stats", response_model=DashboardStats)
 async def dashboard_stats(
     x_workspace_id: str | None = Header(default=None),
-    session_info: UserSession | None = Depends(get_optional_user_session),
+    session_info: UserSession = Depends(require_user_session),
 ):
-    workspace, config = await resolve_workspace_context(session_info, x_workspace_id)
+    _, config = await resolve_workspace_context(session_info, x_workspace_id)
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in _current_opportunities]
     filtered_opportunities = [opportunity for opportunity in opps if opportunity is not None]
     exchanges_online = len({opportunity.exchange for opportunity in filtered_opportunities})
@@ -642,7 +638,7 @@ async def list_opportunities(
     sort_by: str = "score",
     limit: int = Query(default=50, le=200),
     x_workspace_id: str | None = Header(default=None),
-    session_info: UserSession | None = Depends(get_optional_user_session),
+    session_info: UserSession = Depends(require_user_session),
 ):
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
 
@@ -677,7 +673,7 @@ async def list_opportunities(
 async def get_opportunity(
     opp_id: str,
     x_workspace_id: str | None = Header(default=None),
-    session_info: UserSession | None = Depends(get_optional_user_session),
+    session_info: UserSession = Depends(require_user_session),
 ):
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     for opportunity in _current_opportunities:
@@ -695,7 +691,7 @@ async def history(
     min_score: float | None = None,
     hours: int | None = None,
     x_workspace_id: str | None = Header(default=None),
-    session_info: UserSession | None = Depends(get_optional_user_session),
+    session_info: UserSession = Depends(require_user_session),
 ):
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     return await get_history(
@@ -716,7 +712,7 @@ async def analytics(
     min_score: float | None = None,
     hours: int | None = None,
     x_workspace_id: str | None = Header(default=None),
-    session_info: UserSession | None = Depends(get_optional_user_session),
+    session_info: UserSession = Depends(require_user_session),
 ):
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     return await get_filtered_analytics(
@@ -738,8 +734,8 @@ async def get_config_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
-    _, config = await resolve_workspace_context(session_info, x_workspace_id)
+    workspace, config = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_admin_role(workspace)
     return sanitize_config(config)
 
 
@@ -750,8 +746,8 @@ async def update_config(
     x_config_audit_mode: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, current_config = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_admin_role(workspace)
     update_data = update.model_dump(exclude_none=True)
     updated_config = merge_config_with_sensitive_overrides(current_config, update_data)
     await save_workspace_config(workspace.id, updated_config)
@@ -773,8 +769,8 @@ async def validate_exchange_credentials_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, current_config = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_admin_role(workspace)
     effective_config = merge_config_with_sensitive_overrides(current_config, payload.model_dump(exclude_none=True))
     results = await validate_exchange_credentials(effective_config)
     await record_audit_event(
@@ -795,8 +791,8 @@ async def test_telegram_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
-    require_admin_role(session_info)
     workspace, current_config = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_admin_role(workspace)
 
     effective_token = (payload.telegram_bot_token or "").strip() or current_config.telegram_bot_token
     effective_chat_id = (payload.telegram_chat_id or "").strip() or current_config.telegram_chat_id

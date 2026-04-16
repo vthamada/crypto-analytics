@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import re
 import secrets
 import time
@@ -25,6 +26,10 @@ from app.models.database import (
     async_session,
 )
 from app.models.schemas import AppConfig, OrganizationSummary, WorkspaceSummary
+from app.services.pairs import get_available_pairs_catalog, select_default_enabled_pairs
+
+
+logger = logging.getLogger(__name__)
 
 
 def utcnow() -> datetime:
@@ -331,7 +336,14 @@ async def _create_workspace_if_missing(
         return workspace
 
 
-def _default_workspace_config() -> AppConfig:
+async def _default_workspace_config() -> AppConfig:
+    enabled_pairs: list[str] = []
+    try:
+        pair_catalog = await get_available_pairs_catalog()
+        enabled_pairs = select_default_enabled_pairs(pair_catalog)
+    except Exception as exc:
+        logger.warning("default_workspace_pair_catalog_unavailable error=%s", exc)
+
     return AppConfig(
         thresholds={
             "min_volatility_pct": settings.min_volatility_pct,
@@ -347,6 +359,7 @@ def _default_workspace_config() -> AppConfig:
             "spread": settings.weight_spread,
             "repetition": settings.weight_repetition,
         },
+        enabled_pairs=enabled_pairs,
         scan_interval_seconds=settings.scan_interval_seconds,
         telegram_enabled=bool(settings.telegram_bot_token and settings.telegram_chat_id),
         telegram_bot_token=settings.telegram_bot_token,
@@ -393,7 +406,7 @@ async def ensure_admin_bootstrap() -> None:
         organization_id=existing.organization_id or default_organization.id,
         name="Default Workspace",
         slug="default",
-        config=_default_workspace_config(),
+        config=await _default_workspace_config(),
     )
 
     if created_user:
@@ -633,7 +646,7 @@ async def create_workspace_for_user(actor: UserSession, name: str) -> WorkspaceS
         session.add(
             WorkspaceConfigRecord(
                 workspace_id=workspace.id,
-                value=_default_workspace_config().model_dump_json(),
+                value=(await _default_workspace_config()).model_dump_json(),
             )
         )
         await session.commit()
@@ -681,6 +694,13 @@ async def get_user_session_metadata(session_info: UserSession) -> dict:
 
 _USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]{3,50}$")
 _ALLOWED_ROLES = {"admin", "member"}
+_WORKSPACE_ADMIN_ROLES = {"owner", "admin"}
+_WORKSPACE_OWNER_ROLES = {"owner"}
+_WORKSPACE_ROLE_PRIORITY = {
+    "member": 1,
+    "admin": 2,
+    "owner": 3,
+}
 
 
 def _generate_temporary_password() -> str:
@@ -723,6 +743,51 @@ async def _generate_unique_username(session: AsyncSession, email: str) -> str:
     raise ValueError("Unable to generate a unique username for the invited user")
 
 
+def _workspace_role_priority(role: str) -> int:
+    return _WORKSPACE_ROLE_PRIORITY.get(role, 0)
+
+
+async def _get_workspace_membership(
+    session: AsyncSession,
+    *,
+    workspace_id: str,
+    user_id: str,
+) -> WorkspaceMembershipRecord | None:
+    return await session.scalar(
+        select(WorkspaceMembershipRecord).where(
+            WorkspaceMembershipRecord.workspace_id == workspace_id,
+            WorkspaceMembershipRecord.user_id == user_id,
+        )
+    )
+
+
+async def _require_workspace_membership(
+    session: AsyncSession,
+    *,
+    workspace_id: str,
+    user_id: str,
+    allowed_roles: set[str] | None = None,
+    missing_detail: str,
+    forbidden_detail: str,
+) -> WorkspaceMembershipRecord:
+    membership = await _get_workspace_membership(session, workspace_id=workspace_id, user_id=user_id)
+    if membership is None:
+        raise PermissionError(missing_detail)
+    if allowed_roles is not None and membership.role not in allowed_roles:
+        raise PermissionError(forbidden_detail)
+    return membership
+
+
+def _ensure_assignable_workspace_role(*, actor_role: str, target_role: str) -> None:
+    if target_role == "admin" and actor_role != "owner":
+        raise PermissionError("Only workspace owners can assign admin role")
+
+
+def _ensure_manageable_target_membership(*, actor_role: str, target_role: str) -> None:
+    if _workspace_role_priority(actor_role) <= _workspace_role_priority(target_role):
+        raise PermissionError("Workspace owners cannot manage other owners")
+
+
 def _invite_to_dict(
     invite: InviteRecord,
     *,
@@ -745,12 +810,12 @@ def _invite_to_dict(
     }
 
 
-def _user_to_dict(user: UserRecord) -> dict:
+def _user_to_dict(user: UserRecord, *, workspace_role: str | None = None) -> dict:
     return {
         "id": user.id,
         "username": user.username,
         "email": getattr(user, "email", None),
-        "role": user.role,
+        "role": workspace_role or user.role,
         "is_active": bool(user.is_active),
         "must_change_password": bool(getattr(user, "must_change_password", False)),
         "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -764,28 +829,25 @@ def _user_to_dict(user: UserRecord) -> dict:
 async def list_users_for_workspace(workspace_id: str) -> list[dict]:
     async with async_session() as session:
         result = await session.execute(
-            select(UserRecord)
+            select(UserRecord, WorkspaceMembershipRecord)
             .join(WorkspaceMembershipRecord, WorkspaceMembershipRecord.user_id == UserRecord.id)
             .where(WorkspaceMembershipRecord.workspace_id == workspace_id)
             .order_by(UserRecord.created_at.asc(), UserRecord.username.asc())
         )
-        rows = result.scalars().all()
-    return [_user_to_dict(user) for user in rows]
+        rows = result.all()
+    return [_user_to_dict(user, workspace_role=membership.role) for user, membership in rows]
 
 
 async def list_invites_for_workspace(*, actor: UserSession, workspace_id: str) -> list[dict]:
-    if actor.role != "admin":
-        raise PermissionError("Only admins can manage invites")
-
     async with async_session() as session:
-        actor_membership = await session.scalar(
-            select(WorkspaceMembershipRecord).where(
-                WorkspaceMembershipRecord.workspace_id == workspace_id,
-                WorkspaceMembershipRecord.user_id == actor.user_id,
-            )
+        await _require_workspace_membership(
+            session,
+            workspace_id=workspace_id,
+            user_id=actor.user_id,
+            allowed_roles=_WORKSPACE_OWNER_ROLES,
+            missing_detail="Workspace access denied",
+            forbidden_detail="Workspace owner role required",
         )
-        if actor_membership is None:
-            raise PermissionError("Admin does not have access to this workspace")
 
         workspace = await session.scalar(select(WorkspaceRecord).where(WorkspaceRecord.id == workspace_id))
         if workspace is None:
@@ -817,8 +879,6 @@ async def create_invite_for_workspace(
     role: str = "member",
     expires_in_days: int = 7,
 ) -> dict:
-    if actor.role != "admin":
-        raise PermissionError("Only admins can manage invites")
     if role not in _ALLOWED_ROLES:
         raise ValueError("Invalid role")
     if expires_in_days < 1 or expires_in_days > 30:
@@ -828,14 +888,15 @@ async def create_invite_for_workspace(
     expires_at = utcnow() + timedelta(days=expires_in_days)
 
     async with async_session() as session:
-        actor_membership = await session.scalar(
-            select(WorkspaceMembershipRecord).where(
-                WorkspaceMembershipRecord.workspace_id == workspace_id,
-                WorkspaceMembershipRecord.user_id == actor.user_id,
-            )
+        actor_membership = await _require_workspace_membership(
+            session,
+            workspace_id=workspace_id,
+            user_id=actor.user_id,
+            allowed_roles=_WORKSPACE_OWNER_ROLES,
+            missing_detail="Workspace access denied",
+            forbidden_detail="Workspace owner role required",
         )
-        if actor_membership is None:
-            raise PermissionError("Admin does not have access to this workspace")
+        _ensure_assignable_workspace_role(actor_role=actor_membership.role, target_role=role)
 
         workspace = await session.scalar(
             select(WorkspaceRecord).where(WorkspaceRecord.id == workspace_id, WorkspaceRecord.is_active.is_(True))
@@ -1021,9 +1082,6 @@ async def create_user_by_admin(
     temporary_password: str | None = None,
     role: str = "member",
 ) -> tuple[dict, str]:
-    if actor.role != "admin":
-        raise PermissionError("Only admins can create users")
-
     normalized = username.strip()
     if not _USERNAME_PATTERN.match(normalized):
         raise ValueError("Invalid username (use 3-50 chars, letters/digits/._-)")
@@ -1042,14 +1100,15 @@ async def create_user_by_admin(
         if workspace is None:
             raise LookupError("Workspace not found")
 
-        actor_membership = await session.scalar(
-            select(WorkspaceMembershipRecord).where(
-                WorkspaceMembershipRecord.workspace_id == workspace_id,
-                WorkspaceMembershipRecord.user_id == actor.user_id,
-            )
+        actor_membership = await _require_workspace_membership(
+            session,
+            workspace_id=workspace_id,
+            user_id=actor.user_id,
+            allowed_roles=_WORKSPACE_OWNER_ROLES,
+            missing_detail="Workspace access denied",
+            forbidden_detail="Workspace owner role required",
         )
-        if actor_membership is None:
-            raise PermissionError("Admin does not have access to this workspace")
+        _ensure_assignable_workspace_role(actor_role=actor_membership.role, target_role=role)
 
         existing = await session.scalar(select(UserRecord).where(UserRecord.username == normalized))
         if existing is not None:
@@ -1072,7 +1131,7 @@ async def create_user_by_admin(
             WorkspaceMembershipRecord(
                 workspace_id=workspace_id,
                 user_id=user.id,
-                role="member",
+                role=role,
             )
         )
         await session.commit()
@@ -1085,34 +1144,30 @@ async def create_user_by_admin(
         workspace_id=workspace_id,
         details={"target_user_id": user.id, "target_username": user.username, "role": user.role},
     )
-    return _user_to_dict(user), effective_password
+    return _user_to_dict(user, workspace_role=role), effective_password
 
 
 async def set_user_active_state(*, actor: UserSession, workspace_id: str, user_id: str, is_active: bool) -> dict:
-    if actor.role != "admin":
-        raise PermissionError("Only admins can toggle user status")
-
     if actor.user_id == user_id and not is_active:
-        raise ValueError("Admins cannot deactivate themselves")
+        raise ValueError("Workspace owners cannot deactivate themselves")
 
     async with async_session() as session:
-        actor_membership = await session.scalar(
-            select(WorkspaceMembershipRecord).where(
-                WorkspaceMembershipRecord.workspace_id == workspace_id,
-                WorkspaceMembershipRecord.user_id == actor.user_id,
-            )
+        actor_membership = await _require_workspace_membership(
+            session,
+            workspace_id=workspace_id,
+            user_id=actor.user_id,
+            allowed_roles=_WORKSPACE_OWNER_ROLES,
+            missing_detail="Workspace access denied",
+            forbidden_detail="Workspace owner role required",
         )
-        if actor_membership is None:
-            raise PermissionError("Admin does not have access to this workspace")
 
-        target_membership = await session.scalar(
-            select(WorkspaceMembershipRecord).where(
-                WorkspaceMembershipRecord.workspace_id == workspace_id,
-                WorkspaceMembershipRecord.user_id == user_id,
-            )
-        )
+        target_membership = await _get_workspace_membership(session, workspace_id=workspace_id, user_id=user_id)
         if target_membership is None:
             raise LookupError("User not found in this workspace")
+        _ensure_manageable_target_membership(
+            actor_role=actor_membership.role,
+            target_role=target_membership.role,
+        )
 
         user = await session.scalar(select(UserRecord).where(UserRecord.id == user_id))
         if user is None:
@@ -1132,33 +1187,29 @@ async def set_user_active_state(*, actor: UserSession, workspace_id: str, user_i
         workspace_id=workspace_id,
         details={"target_user_id": user.id, "target_username": user.username},
     )
-    return _user_to_dict(user)
+    return _user_to_dict(user, workspace_role=target_membership.role)
 
 
 async def reset_user_password(*, actor: UserSession, workspace_id: str, user_id: str) -> tuple[dict, str]:
-    if actor.role != "admin":
-        raise PermissionError("Only admins can reset passwords")
-
     temporary_password = _generate_temporary_password()
 
     async with async_session() as session:
-        actor_membership = await session.scalar(
-            select(WorkspaceMembershipRecord).where(
-                WorkspaceMembershipRecord.workspace_id == workspace_id,
-                WorkspaceMembershipRecord.user_id == actor.user_id,
-            )
+        actor_membership = await _require_workspace_membership(
+            session,
+            workspace_id=workspace_id,
+            user_id=actor.user_id,
+            allowed_roles=_WORKSPACE_OWNER_ROLES,
+            missing_detail="Workspace access denied",
+            forbidden_detail="Workspace owner role required",
         )
-        if actor_membership is None:
-            raise PermissionError("Admin does not have access to this workspace")
 
-        target_membership = await session.scalar(
-            select(WorkspaceMembershipRecord).where(
-                WorkspaceMembershipRecord.workspace_id == workspace_id,
-                WorkspaceMembershipRecord.user_id == user_id,
-            )
-        )
+        target_membership = await _get_workspace_membership(session, workspace_id=workspace_id, user_id=user_id)
         if target_membership is None:
             raise LookupError("User not found in this workspace")
+        _ensure_manageable_target_membership(
+            actor_role=actor_membership.role,
+            target_role=target_membership.role,
+        )
 
         user = await session.scalar(select(UserRecord).where(UserRecord.id == user_id))
         if user is None:
@@ -1179,7 +1230,7 @@ async def reset_user_password(*, actor: UserSession, workspace_id: str, user_id:
         workspace_id=workspace_id,
         details={"target_user_id": user.id, "target_username": user.username},
     )
-    return _user_to_dict(user), temporary_password
+    return _user_to_dict(user, workspace_role=target_membership.role), temporary_password
 
 
 async def list_audit_logs(*, workspace_id: str | None = None, limit: int = 50) -> list[dict]:

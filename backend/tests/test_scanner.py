@@ -27,6 +27,14 @@ class FakeProvider:
 
 def test_scan_all_returns_opportunities(monkeypatch, sample_ticker, sample_order_book, sample_klines):
     monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+    async def fake_scannable_pairs(self):
+        return {Exchange.BINANCE: ["BTC_BRL"]}
+
+    monkeypatch.setattr(
+        Scanner,
+        "_get_scannable_pairs_by_exchange",
+        fake_scannable_pairs,
+    )
     config = AppConfig(enabled_exchanges=[Exchange.BINANCE], enabled_pairs=["BTC_BRL"])
     scanner = Scanner(config)
     scanner._providers = {
@@ -44,6 +52,17 @@ def test_scan_all_returns_opportunities(monkeypatch, sample_ticker, sample_order
 
 def test_scan_all_enriches_cross_exchange_context(monkeypatch, sample_order_book, sample_klines):
     monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+    async def fake_scannable_pairs(self):
+        return {
+            Exchange.BINANCE: ["BTC_BRL"],
+            Exchange.NOVADAX: ["BTC_BRL"],
+        }
+
+    monkeypatch.setattr(
+        Scanner,
+        "_get_scannable_pairs_by_exchange",
+        fake_scannable_pairs,
+    )
     config = AppConfig(
         enabled_exchanges=[Exchange.BINANCE, Exchange.NOVADAX],
         enabled_pairs=["BTC_BRL"],
@@ -87,3 +106,35 @@ def test_scan_all_enriches_cross_exchange_context(monkeypatch, sample_order_book
     assert len(opportunities) == 2
     assert all(opportunity.cross_exchange_gap_pct > 0 for opportunity in opportunities)
     assert any(opportunity.arbitrage_available for opportunity in opportunities)
+
+
+def test_scan_all_skips_pairs_unavailable_for_provider(monkeypatch, sample_ticker, sample_order_book, sample_klines):
+    monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+    async def fake_scannable_pairs(self):
+        return {Exchange.BINANCE: ["BTC_BRL"]}
+
+    monkeypatch.setattr(
+        Scanner,
+        "_get_scannable_pairs_by_exchange",
+        fake_scannable_pairs,
+    )
+    config = AppConfig(enabled_exchanges=[Exchange.BINANCE], enabled_pairs=["BTC_BRL", "DOGE_BRL"])
+    scanner = Scanner(config)
+
+    calls: list[str] = []
+
+    class TrackingFakeProvider(FakeProvider):
+        async def get_ticker(self, pair: str):
+            calls.append(pair)
+            return await super().get_ticker(pair)
+
+    scanner._providers = {
+        Exchange.BINANCE: TrackingFakeProvider(sample_ticker, sample_order_book, sample_klines)
+    }
+
+    import asyncio
+
+    opportunities = asyncio.run(scanner.scan_all())
+
+    assert len(opportunities) == 1
+    assert calls == ["BTC_BRL"]

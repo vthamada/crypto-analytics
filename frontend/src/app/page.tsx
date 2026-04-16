@@ -5,11 +5,13 @@ import { KPICards } from "@/components/kpi-cards";
 import { InlineErrorState } from "@/components/inline-error-state";
 import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { OpportunitiesTable } from "@/components/opportunities-table";
+import { SessionRequiredState } from "@/components/session-required-state";
 import { SignalDetailModal } from "@/components/signal-detail-modal";
+import { useHasAuthenticatedWorkspace } from "@/hooks/use-has-authenticated-workspace";
 import { useOpportunities } from "@/hooks/use-opportunities";
 import type { Opportunity } from "@/lib/types";
 
-export default function DashboardPage() {
+function DashboardContent() {
   const { opportunities, stats, loading, error, refetch } = useOpportunities();
   const [selected, setSelected] = useState<Opportunity | null>(null);
 
@@ -41,4 +43,20 @@ export default function DashboardPage() {
       />
     </div>
   );
+}
+
+
+export default function DashboardPage() {
+  const hasAuthenticatedWorkspace = useHasAuthenticatedWorkspace();
+
+  if (!hasAuthenticatedWorkspace) {
+    return (
+      <SessionRequiredState
+        title="Dashboard restrito ao workspace autenticado"
+        description="O monitoramento em tempo real agora exige uma sessao autenticada e um workspace ativo para manter o isolamento multi-tenant."
+      />
+    );
+  }
+
+  return <DashboardContent />;
 }
