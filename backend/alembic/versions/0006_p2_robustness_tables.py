@@ -7,7 +7,7 @@ import sqlalchemy as sa
 
 
 revision = "0006_p2_robustness_tables"
-down_revision = "0005_organization_invites_onboarding"
+down_revision = "0005_org_invites_onboard"
 branch_labels = None
 depends_on = None
 

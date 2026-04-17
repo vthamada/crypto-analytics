@@ -7,7 +7,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0005_organization_invites_onboarding"
+revision = "0005_org_invites_onboard"
 down_revision = "0004_user_management"
 branch_labels = None
 depends_on = None
@@ -18,6 +18,8 @@ def utcnow() -> datetime:
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+
     op.create_table(
         "organizations",
         sa.Column("id", sa.String(), nullable=False),
@@ -67,7 +69,7 @@ def upgrade() -> None:
 
     default_org_id = str(uuid.uuid4())
     now = utcnow()
-    op.execute(
+    bind.execute(
         sa.text(
             """
             INSERT INTO organizations (
@@ -104,8 +106,14 @@ def upgrade() -> None:
             "updated_at": now,
         },
     )
-    op.execute(sa.text("UPDATE users SET organization_id = :organization_id WHERE organization_id IS NULL"), {"organization_id": default_org_id})
-    op.execute(sa.text("UPDATE workspaces SET organization_id = :organization_id WHERE organization_id IS NULL"), {"organization_id": default_org_id})
+    bind.execute(
+        sa.text("UPDATE users SET organization_id = :organization_id WHERE organization_id IS NULL"),
+        {"organization_id": default_org_id},
+    )
+    bind.execute(
+        sa.text("UPDATE workspaces SET organization_id = :organization_id WHERE organization_id IS NULL"),
+        {"organization_id": default_org_id},
+    )
 
 
 def downgrade() -> None:

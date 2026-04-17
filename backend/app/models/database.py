@@ -304,11 +304,12 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 
 def get_sync_database_url() -> str:
-    return (
+    sync_url = (
         settings.database_url
         .replace("sqlite+aiosqlite://", "sqlite://")
         .replace("postgresql+asyncpg://", "postgresql://")
     )
+    return sync_url.replace("ssl=require", "sslmode=require")
 
 
 def get_alembic_config() -> Config:
