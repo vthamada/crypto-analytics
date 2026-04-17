@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DashboardStats, Opportunity } from "@/lib/types";
 import { getOpportunities, getStats } from "@/lib/api";
+import type { OpportunitySortMode } from "@/lib/opportunity-operability";
 import { wsClient } from "@/lib/websocket";
 
 export function useOpportunities(filters?: {
@@ -10,7 +11,9 @@ export function useOpportunities(filters?: {
   pair?: string;
   min_score?: number;
   movement_type?: string;
-  sort_by?: string;
+  arbitrage_only?: boolean;
+  operable_only?: boolean;
+  sort_by?: OpportunitySortMode;
 }) {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);

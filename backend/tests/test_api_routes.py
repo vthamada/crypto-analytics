@@ -84,9 +84,12 @@ def test_config_hides_sensitive_fields(monkeypatch):
 
     body = response.json()
     assert response.status_code == 200
-    assert body["telegram_bot_token"] == ""
-    assert body["telegram_chat_id"] == ""
-    assert body["novadax_api_secret"] == ""
+    assert body["config"]["telegram_bot_token"] == ""
+    assert body["config"]["telegram_chat_id"] == ""
+    assert body["config"]["novadax_api_secret"] == ""
+    assert body["configured_secrets"]["telegram_bot_token"] is True
+    assert body["configured_secrets"]["telegram_chat_id"] is True
+    assert body["configured_secrets"]["novadax_api_secret"] is True
 
 
 def test_update_config_preserves_existing_secret_on_blank(monkeypatch):
@@ -131,8 +134,9 @@ def test_update_config_preserves_existing_secret_on_blank(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["telegram_bot_token"] == ""
-    assert response.json()["scan_interval_seconds"] == 45
+    assert response.json()["config"]["telegram_bot_token"] == ""
+    assert response.json()["config"]["scan_interval_seconds"] == 45
+    assert response.json()["configured_secrets"]["telegram_bot_token"] is True
 
 
 def test_health_includes_runtime_snapshot(monkeypatch):
@@ -370,7 +374,8 @@ def test_config_accepts_workspace_admin_role_even_for_member_session(monkeypatch
     response = client.get("/api/config", headers={"Authorization": "Bearer member-token"})
 
     assert response.status_code == 200
-    assert response.json()["telegram_bot_token"] == ""
+    assert response.json()["config"]["telegram_bot_token"] == ""
+    assert response.json()["configured_secrets"]["telegram_bot_token"] is True
 
 
 def test_users_endpoint_requires_workspace_owner_role(monkeypatch):

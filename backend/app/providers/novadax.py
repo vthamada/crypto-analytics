@@ -19,6 +19,18 @@ class NovaDaxProvider(ExchangeProvider):
         # Internal: BTC_BRL -> NovaDAX: BTC_BRL (same format)
         return pair.upper()
 
+    @staticmethod
+    def _extract_kline_timestamp(payload: dict) -> int | None:
+        for field in ("timestamp", "time", "ts", "t", "score"):
+            raw_value = payload.get(field)
+            if raw_value in (None, ""):
+                continue
+            try:
+                return int(raw_value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
     async def get_available_pairs(self) -> list[str]:
         try:
             data = await self._request("GET", "/common/symbols")
@@ -109,8 +121,12 @@ class NovaDaxProvider(ExchangeProvider):
 
         klines = []
         for k in data.get("data", []):
+            timestamp = self._extract_kline_timestamp(k)
+            if timestamp is None:
+                logger.debug("[NovaDAX] skipping kline without timestamp for %s: %s", pair, k)
+                continue
             klines.append(Kline(
-                open_time=datetime.fromtimestamp(int(k["score"]), tz=timezone.utc),
+                open_time=datetime.fromtimestamp(timestamp, tz=timezone.utc),
                 open=float(k["openPrice"]),
                 high=float(k["highPrice"]),
                 low=float(k["lowPrice"]),

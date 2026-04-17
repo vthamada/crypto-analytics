@@ -99,6 +99,69 @@ test("dashboard aplica atualizacao em tempo real via websocket mockado", async (
   await expect(page.getByTestId("kpi-value-opportunities")).toHaveText("3");
 });
 
+test("dashboard continua funcional com payload legado sem executabilidade", async ({ page }) => {
+  const state = createMockApiState({
+    opportunities: [
+      buildOpportunity({
+        id: "opp-legacy",
+        pair: "BTC_BRL",
+        exchange: "novadax",
+        score: 81,
+      }),
+    ],
+  });
+  await mockApi(page, state);
+
+  await page.goto("/settings");
+  await loginAsAdmin(page);
+  await page.goto("/");
+
+  await expect(page.locator('[data-testid="opportunity-opp-legacy"]:visible')).toBeVisible();
+  await expect(page.getByText("Payload atual ainda nao traz executabilidade. Mantendo leitura tecnica.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Operabilidade" })).toBeDisabled();
+});
+
+test("dashboard explica operabilidade quando o payload novo esta disponivel", async ({ page }) => {
+  const state = createMockApiState({
+    opportunities: [
+      buildOpportunity({
+        id: "opp-operable",
+        pair: "ETH_BRL",
+        exchange: "binance",
+        score: 88,
+        technical_score: 84.2,
+        score_version: "v1",
+        executability_version: "v1",
+        executability_score: 76.4,
+        executability_band: "good",
+        interesting_signal: true,
+        operable_signal: true,
+        bid_notional_top_n: 12000,
+        ask_notional_top_n: 11800,
+        total_notional_top_n: 23800,
+        estimated_buy_slippage_bps: 8.2,
+        estimated_sell_slippage_bps: 9.4,
+        fillable_notional_within_slippage_cap: 2600,
+      }),
+    ],
+  });
+  await mockApi(page, state);
+
+  await page.goto("/settings");
+  await loginAsAdmin(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Operabilidade" }).click();
+  const opportunityCard = page.locator('[data-testid="opportunity-opp-operable"]:visible');
+  await expect(opportunityCard.getByText("Operavel").first()).toBeVisible();
+  await expect(opportunityCard.getByText("Liquidez OK")).toBeVisible();
+
+  await opportunityCard.click();
+  await expect(page.getByText("Leitura operacional")).toBeVisible();
+  await expect(page.getByText("Slippage compra")).toBeVisible();
+  await expect(page.getByText("Executabilidade")).toBeVisible();
+});
+
 test("history exibe erro inline e toast global quando a API falha", async ({ page }) => {
   const state = createMockApiState({
     historyErrorMessage: "Serviço de histórico indisponível.",
@@ -303,14 +366,48 @@ async function fulfillMockApi(route: Route, state: MockApiState) {
   }
 
   if (method === "GET" && path === "/config") {
-    await json(route, config);
+    await json(route, {
+      config,
+      configured_secrets: {
+        telegram_bot_token: Boolean(config.telegram_bot_token),
+        telegram_chat_id: Boolean(config.telegram_chat_id),
+        novadax_api_key: Boolean(config.novadax_api_key),
+        novadax_api_secret: Boolean(config.novadax_api_secret),
+        mb_api_key: Boolean(config.mb_api_key),
+        mb_api_secret: Boolean(config.mb_api_secret),
+        binance_api_key: Boolean(config.binance_api_key),
+        binance_api_secret: Boolean(config.binance_api_secret),
+      },
+    });
     return;
   }
 
   if (method === "PUT" && path === "/config") {
     const payload = JSON.parse(request.postData() || "{}");
     state.configs[workspaceId] = { ...config, ...payload };
-    await json(route, state.configs[workspaceId]);
+    await json(route, {
+      config: {
+        ...state.configs[workspaceId],
+        telegram_bot_token: "",
+        telegram_chat_id: "",
+        novadax_api_key: "",
+        novadax_api_secret: "",
+        mb_api_key: "",
+        mb_api_secret: "",
+        binance_api_key: "",
+        binance_api_secret: "",
+      },
+      configured_secrets: {
+        telegram_bot_token: Boolean(state.configs[workspaceId].telegram_bot_token),
+        telegram_chat_id: Boolean(state.configs[workspaceId].telegram_chat_id),
+        novadax_api_key: Boolean(state.configs[workspaceId].novadax_api_key),
+        novadax_api_secret: Boolean(state.configs[workspaceId].novadax_api_secret),
+        mb_api_key: Boolean(state.configs[workspaceId].mb_api_key),
+        mb_api_secret: Boolean(state.configs[workspaceId].mb_api_secret),
+        binance_api_key: Boolean(state.configs[workspaceId].binance_api_key),
+        binance_api_secret: Boolean(state.configs[workspaceId].binance_api_secret),
+      },
+    });
     return;
   }
 

@@ -11,7 +11,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import (
@@ -29,6 +29,9 @@ from app.models.schemas import AppConfig, Opportunity, ScoreWeights
 logger = logging.getLogger(__name__)
 
 SCORE_VERSION = "v1"
+EXECUTABILITY_VERSION = "v1"
+MOVEMENT_VERSION = "v1"
+PROFILE_VERSION = "v1"
 _DEDUP_SIGNAL_WINDOW_MINUTES = 5
 
 
@@ -93,6 +96,9 @@ async def update_scanner_runtime_state(
         if opportunities_count is not None:
             record.opportunities_count = opportunities_count
         record.score_version = SCORE_VERSION
+        record.executability_version = EXECUTABILITY_VERSION
+        record.movement_version = MOVEMENT_VERSION
+        record.profile_version = PROFILE_VERSION
         record.updated_at = utcnow()
 
         await session.commit()
@@ -111,6 +117,9 @@ async def get_scanner_runtime_state() -> dict | None:
             "last_success_at": record.last_success_at.isoformat() if record.last_success_at else None,
             "opportunities_count": record.opportunities_count,
             "score_version": record.score_version,
+            "executability_version": getattr(record, "executability_version", EXECUTABILITY_VERSION),
+            "movement_version": getattr(record, "movement_version", MOVEMENT_VERSION),
+            "profile_version": getattr(record, "profile_version", PROFILE_VERSION),
         }
 
 
@@ -144,12 +153,26 @@ async def write_opportunity_snapshots(
                 score=opp.score,
                 technical_score=technical_score,
                 score_version=SCORE_VERSION,
+                executability_version=opp.executability_version,
+                movement_version=opp.movement_version,
+                profile_version=opp.profile_version,
                 volatility_pct=opp.volatility_pct,
                 volume_24h=opp.volume_24h,
                 quote_volume_24h=opp.quote_volume_24h,
                 liquidity_units=opp.liquidity_units,
+                bid_notional_top_n=opp.bid_notional_top_n,
+                ask_notional_top_n=opp.ask_notional_top_n,
+                total_notional_top_n=opp.total_notional_top_n,
                 spread_pct=opp.spread_pct,
+                executability_score=opp.executability_score,
+                executability_band=opp.executability_band,
+                interesting_signal=opp.interesting_signal,
+                operable_signal=opp.operable_signal,
+                estimated_buy_slippage_bps=opp.estimated_buy_slippage_bps,
+                estimated_sell_slippage_bps=opp.estimated_sell_slippage_bps,
+                fillable_notional_within_slippage_cap=opp.fillable_notional_within_slippage_cap,
                 movement_type=opp.movement_type.value,
+                movement_persistence_score=opp.movement_persistence_score,
                 last_price=opp.last_price,
                 change_pct=opp.change_pct,
                 detected_at=normalize_db_datetime(opp.detected_at),
@@ -191,12 +214,26 @@ async def read_opportunity_snapshots() -> list[dict]:
                 "score": r.score,
                 "technical_score": r.technical_score,
                 "score_version": r.score_version,
+                "executability_version": getattr(r, "executability_version", EXECUTABILITY_VERSION),
+                "movement_version": getattr(r, "movement_version", MOVEMENT_VERSION),
+                "profile_version": getattr(r, "profile_version", PROFILE_VERSION),
                 "volatility_pct": r.volatility_pct,
                 "volume_24h": r.volume_24h,
                 "quote_volume_24h": r.quote_volume_24h,
                 "liquidity_units": r.liquidity_units,
+                "bid_notional_top_n": getattr(r, "bid_notional_top_n", None),
+                "ask_notional_top_n": getattr(r, "ask_notional_top_n", None),
+                "total_notional_top_n": getattr(r, "total_notional_top_n", None),
                 "spread_pct": r.spread_pct,
+                "executability_score": getattr(r, "executability_score", None),
+                "executability_band": getattr(r, "executability_band", None),
+                "interesting_signal": getattr(r, "interesting_signal", None),
+                "operable_signal": getattr(r, "operable_signal", None),
+                "estimated_buy_slippage_bps": getattr(r, "estimated_buy_slippage_bps", None),
+                "estimated_sell_slippage_bps": getattr(r, "estimated_sell_slippage_bps", None),
+                "fillable_notional_within_slippage_cap": getattr(r, "fillable_notional_within_slippage_cap", None),
                 "movement_type": r.movement_type,
+                "movement_persistence_score": getattr(r, "movement_persistence_score", None),
                 "last_price": r.last_price,
                 "change_pct": r.change_pct,
                 "detected_at": r.detected_at.isoformat() if r.detected_at else None,
@@ -259,6 +296,9 @@ async def save_technical_signals(opportunities: list[Opportunity]) -> dict[str, 
                 pair=opp.pair,
                 technical_score=technical_score,
                 score_version=SCORE_VERSION,
+                executability_version=opp.executability_version,
+                movement_version=opp.movement_version,
+                profile_version=opp.profile_version,
                 volatility_pct=opp.volatility_pct,
                 volatility_score=opp.volatility_score,
                 volume_24h=opp.volume_24h,
@@ -306,12 +346,20 @@ async def save_workspace_projections(
     visible: bool = True,
     alert_eligible: bool = False,
     projection_reason: str | None = None,
+    score_version: str = SCORE_VERSION,
+    executability_version: str = EXECUTABILITY_VERSION,
+    movement_version: str = MOVEMENT_VERSION,
+    profile_version: str = PROFILE_VERSION,
 ) -> None:
     async with async_session() as session:
         record = WorkspaceSignalProjectionRecord(
             workspace_id=workspace_id,
             technical_signal_id=technical_signal_id,
             workspace_score=workspace_score,
+            score_version=score_version,
+            executability_version=executability_version,
+            movement_version=movement_version,
+            profile_version=profile_version,
             visible=visible,
             alert_eligible=alert_eligible,
             projection_reason=projection_reason,
@@ -338,6 +386,10 @@ async def save_workspace_projections_batch(
                 workspace_id=proj["workspace_id"],
                 technical_signal_id=proj["technical_signal_id"],
                 workspace_score=proj["workspace_score"],
+                score_version=proj.get("score_version", SCORE_VERSION),
+                executability_version=proj.get("executability_version", EXECUTABILITY_VERSION),
+                movement_version=proj.get("movement_version", MOVEMENT_VERSION),
+                profile_version=proj.get("profile_version", PROFILE_VERSION),
                 visible=proj.get("visible", True),
                 alert_eligible=proj.get("alert_eligible", False),
                 projection_reason=proj.get("projection_reason"),
@@ -392,9 +444,14 @@ async def get_pending_outcomes(
         query = (
             select(SignalOutcomeRecord)
             .where(
-                SignalOutcomeRecord.evaluated_at.is_(None),
                 SignalOutcomeRecord.signal_detected_at <= min_age_cutoff,
                 SignalOutcomeRecord.signal_detected_at >= max_age_cutoff,
+                or_(
+                    SignalOutcomeRecord.price_after_5m.is_(None),
+                    SignalOutcomeRecord.price_after_15m.is_(None),
+                    SignalOutcomeRecord.price_after_1h.is_(None),
+                    SignalOutcomeRecord.price_after_4h.is_(None),
+                ),
             )
             .order_by(SignalOutcomeRecord.signal_detected_at)
             .limit(limit)
@@ -430,24 +487,37 @@ async def update_outcome(
         if record is None:
             return
 
-        if price_after_5m is not None:
+        if price_after_5m is not None and record.price_after_5m is None:
             record.price_after_5m = price_after_5m
             record.outcome_pct_5m = round((price_after_5m - record.entry_price) / record.entry_price * 100, 4) if record.entry_price else None
-        if price_after_15m is not None:
+        if price_after_15m is not None and record.price_after_15m is None:
             record.price_after_15m = price_after_15m
             record.outcome_pct_15m = round((price_after_15m - record.entry_price) / record.entry_price * 100, 4) if record.entry_price else None
-        if price_after_1h is not None:
+        if price_after_1h is not None and record.price_after_1h is None:
             record.price_after_1h = price_after_1h
             record.outcome_pct_1h = round((price_after_1h - record.entry_price) / record.entry_price * 100, 4) if record.entry_price else None
-        if price_after_4h is not None:
+        if price_after_4h is not None and record.price_after_4h is None:
             record.price_after_4h = price_after_4h
             record.outcome_pct_4h = round((price_after_4h - record.entry_price) / record.entry_price * 100, 4) if record.entry_price else None
         if max_price_1h is not None:
-            record.max_price_1h = max_price_1h
+            record.max_price_1h = max(
+                [value for value in (record.max_price_1h, max_price_1h) if value is not None]
+            )
         if min_price_1h is not None:
-            record.min_price_1h = min_price_1h
+            record.min_price_1h = min(
+                [value for value in (record.min_price_1h, min_price_1h) if value is not None]
+            )
 
-        record.evaluated_at = utcnow()
+        if all(
+            value is not None
+            for value in (
+                record.price_after_5m,
+                record.price_after_15m,
+                record.price_after_1h,
+                record.price_after_4h,
+            )
+        ):
+            record.evaluated_at = utcnow()
         await session.commit()
 
 

@@ -11,7 +11,9 @@ from app.models.database import (
     Base,
     OpportunityRecord,
     OpportunitySnapshotRecord,
+    ScannerRuntimeStateRecord,
     TechnicalSignalRecord,
+    WorkspaceSignalProjectionRecord,
 )
 from app.models.schemas import Exchange, MovementType, Opportunity
 from app.services import persistence, shared_state
@@ -39,12 +41,27 @@ def test_runtime_persistence_normalizes_aware_detected_at(monkeypatch):
             score=74.2,
             technical_score=70.1,
             score_version="v1",
+            executability_version="v1",
+            movement_version="v1",
+            profile_version="v1",
+            technical_signal_id=None,
+            executability_score=61.4,
+            executability_band="fair",
+            interesting_signal=True,
+            operable_signal=False,
             volatility_pct=3.4,
             volume_24h=1500.0,
             quote_volume_24h=300000.0,
             liquidity_units=4200.0,
+            bid_notional_top_n=22000.0,
+            ask_notional_top_n=21000.0,
+            total_notional_top_n=43000.0,
             spread_pct=0.22,
+            estimated_buy_slippage_bps=12.5,
+            estimated_sell_slippage_bps=16.8,
+            fillable_notional_within_slippage_cap=5000.0,
             movement_type=MovementType.SPIKE,
+            movement_persistence_score=0.37,
             last_price=350000.0,
             change_pct=2.6,
             detected_at=datetime.now(timezone.utc),
@@ -61,6 +78,12 @@ def test_runtime_persistence_normalizes_aware_detected_at(monkeypatch):
         signal_map = await shared_state.save_technical_signals([opportunity])
         opportunity.technical_signal_id = signal_map[opportunity.id]
         await shared_state.write_opportunity_snapshots([opportunity], "cycle-test")
+        await shared_state.save_workspace_projections(
+            workspace_id="workspace-1",
+            technical_signal_id=opportunity.technical_signal_id,
+            workspace_score=opportunity.score,
+        )
+        await shared_state.update_scanner_runtime_state(opportunities_count=1)
         await shared_state.create_pending_outcomes(
             [
                 {
@@ -77,13 +100,32 @@ def test_runtime_persistence_normalizes_aware_detected_at(monkeypatch):
             history_row = await session.get(OpportunityRecord, opportunity.id)
             snapshot_row = await session.get(OpportunitySnapshotRecord, opportunity.id)
             signal_row = await session.get(TechnicalSignalRecord, opportunity.technical_signal_id)
+            projection_result = await session.execute(
+                WorkspaceSignalProjectionRecord.__table__.select().limit(1)
+            )
+            projection_row = projection_result.first()
+            runtime_row = await session.get(ScannerRuntimeStateRecord, "singleton")
 
         assert history_row is not None
         assert snapshot_row is not None
         assert signal_row is not None
+        assert projection_row is not None
+        assert runtime_row is not None
         assert history_row.detected_at.tzinfo is None
         assert snapshot_row.detected_at.tzinfo is None
         assert signal_row.detected_at.tzinfo is None
+        assert history_row.executability_version == "v1"
+        assert history_row.movement_version == "v1"
+        assert history_row.profile_version == "v1"
+        assert history_row.executability_score == 61.4
+        assert snapshot_row.executability_version == "v1"
+        assert snapshot_row.bid_notional_top_n == 22000.0
+        assert signal_row.executability_version == "v1"
+        assert runtime_row.executability_version == "v1"
+        assert runtime_row.movement_version == "v1"
+        assert runtime_row.profile_version == "v1"
+        assert projection_row.score_version == "v1"
+        assert projection_row.executability_version == "v1"
 
         await engine.dispose()
         if db_path.exists():
@@ -100,12 +142,22 @@ def test_runtime_writers_strip_timezone_before_persisting(monkeypatch):
         score=66.4,
         technical_score=61.0,
         score_version="v1",
+        executability_version="v1",
+        movement_version="v1",
+        profile_version="v1",
         volatility_pct=2.9,
         volume_24h=900.0,
         quote_volume_24h=180000.0,
         liquidity_units=3000.0,
+        bid_notional_top_n=8000.0,
+        ask_notional_top_n=7600.0,
+        total_notional_top_n=15600.0,
         spread_pct=0.31,
+        estimated_buy_slippage_bps=22.0,
+        estimated_sell_slippage_bps=28.0,
+        fillable_notional_within_slippage_cap=2000.0,
         movement_type=MovementType.WEAK,
+        movement_persistence_score=0.18,
         last_price=18000.0,
         change_pct=1.4,
         detected_at=datetime.now(timezone.utc),
@@ -117,6 +169,10 @@ def test_runtime_writers_strip_timezone_before_persisting(monkeypatch):
         repetition_score=0.18,
         movement_multiplier=0.7,
         technical_signal_id="signal-aware",
+        executability_score=42.2,
+        executability_band="poor",
+        interesting_signal=True,
+        operable_signal=False,
     )
 
     class _Result:
@@ -175,3 +231,6 @@ def test_runtime_writers_strip_timezone_before_persisting(monkeypatch):
     assert signal_session.added[0].detected_at.tzinfo is None
     assert snapshot_session.added[0].detected_at.tzinfo is None
     assert outcome_session.added[0].signal_detected_at.tzinfo is None
+    assert history_session.added[0].executability_version == "v1"
+    assert snapshot_session.added[0].executability_version == "v1"
+    assert signal_session.added[0].executability_version == "v1"

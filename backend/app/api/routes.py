@@ -11,6 +11,7 @@ from app.config import settings
 from app.models.schemas import (
     AvailablePairsResponse,
     AppConfig,
+    ConfigResponse,
     DashboardStats,
     ExchangeCredentialValidationResponse,
     Exchange,
@@ -109,6 +110,16 @@ def sanitize_config(config: AppConfig) -> AppConfig:
     for field in _SENSITIVE_CONFIG_FIELDS:
         data[field] = ""
     return AppConfig(**data)
+
+
+def build_config_response(config: AppConfig) -> ConfigResponse:
+    return ConfigResponse(
+        config=sanitize_config(config),
+        configured_secrets={
+            field: bool(getattr(config, field, ""))
+            for field in sorted(_SENSITIVE_CONFIG_FIELDS)
+        },
+    )
 
 
 async def get_optional_user_session(
@@ -654,6 +665,7 @@ async def list_opportunities(
     min_score: float | None = None,
     movement_type: str | None = None,
     arbitrage_only: bool = False,
+    operable_only: bool = False,
     sort_by: str = "score",
     limit: int = Query(default=50, le=200),
     x_workspace_id: str | None = Header(default=None),
@@ -675,9 +687,12 @@ async def list_opportunities(
         visible_opportunities = [opportunity for opportunity in visible_opportunities if opportunity.movement_type.value == movement_type]
     if arbitrage_only:
         visible_opportunities = [opportunity for opportunity in visible_opportunities if opportunity.arbitrage_available]
+    if operable_only:
+        visible_opportunities = [opportunity for opportunity in visible_opportunities if opportunity.operable_signal]
 
     sort_keys = {
         "score": lambda opportunity: opportunity.score,
+        "executability": lambda opportunity: opportunity.executability_score if opportunity.executability_score is not None else -1,
         "gap": lambda opportunity: opportunity.cross_exchange_gap_pct,
         "volatility": lambda opportunity: opportunity.volatility_pct,
         "volume": lambda opportunity: opportunity.quote_volume_24h,
@@ -750,17 +765,17 @@ async def available_pairs():
     return await get_available_pairs_catalog()
 
 
-@router.get("/config", response_model=AppConfig)
+@router.get("/config", response_model=ConfigResponse)
 async def get_config_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
     workspace, config = await resolve_workspace_context(session_info, x_workspace_id)
     require_workspace_admin_role(workspace)
-    return sanitize_config(config)
+    return build_config_response(config)
 
 
-@router.put("/config", response_model=AppConfig)
+@router.put("/config", response_model=ConfigResponse)
 async def update_config(
     update: ConfigUpdate,
     x_workspace_id: str | None = Header(default=None),
@@ -781,7 +796,7 @@ async def update_config(
             workspace_id=workspace.id,
             details={"updated_fields": sorted(update_data.keys())},
         )
-    return sanitize_config(updated_config)
+    return build_config_response(updated_config)
 
 
 @router.post("/config/validate-exchanges", response_model=ExchangeCredentialValidationResponse)

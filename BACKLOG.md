@@ -1,6 +1,6 @@
 # Backlog
 
-Ultima revisao: 2026-04-16
+Ultima revisao: 2026-04-17
 
 Legenda: `[x]` concluido · `[ ]` pendente · `[~]` parcialmente feito
 
@@ -326,3 +326,146 @@ Executar somente depois da base P2/P3 estar estavel e com dados reais suficiente
 
 - [ ] **Nivel 5 — Modelo supervisionado com outcomes**
   Treinar modelo apenas depois de 4-8 semanas de `signal_outcomes` confiaveis, usando features tecnicas e rotulo de outcome para refinar o ranking final.
+
+---
+
+## Backlog tecnico de evolucao operacional (2026-04-17)
+
+Objetivo: evoluir o produto de `scanner heuristico de atencao` para `assistente operacional util`, preservando a base atual de coleta, filtros minimos, score tecnico inicial, persistencia e outcomes, e adicionando uma camada explicita de executabilidade.
+
+### Progresso de execucao do plano operacional
+
+- [x] **Release A** â€” contratos aditivos, leitura dual, campos opcionais de executabilidade e versionamento explicito do motor.
+- [x] **Release B** â€” liquidez em notional, estimativa de slippage por tamanho de ordem e `fillable_notional_within_slippage_cap`.
+- [x] **Release C** â€” `executability_score`, `executability_band`, split entre `interesting_signal` e `operable_signal`, alem de ordenacao e filtro operacional na API.
+- [x] **Release D** â€” explicabilidade operacional, dual-read seguro e consumo visual da nova camada no frontend.
+- [ ] **Release E+** â€” perfil operacional por workspace, duracao util, taxonomia refinada, reweighting por outcome e evolucao estrutural do historico.
+
+### Bloco 1 - Evolucao da logica de sinais
+
+| Nome da iniciativa | Problema que resolve | Descricao da implementacao | Impacto esperado | Dependencias | Complexidade estimada | Prioridade | Criterios de aceite | Risco de implementacao | Observacoes tecnicas |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Liquidez em notional por lado do book | `liquidity_units` distorce ativos baratos e caros e nao representa capacidade financeira real de entrada/saida | Substituir a metrica atual por `bid_notional_top_n`, `ask_notional_top_n`, `total_notional_top_n` e `depth_ratio_by_distance` usando `preco * quantidade` no top N do order book; manter `liquidity_units` apenas para compatibilidade/transicao | Melhora imediata na filtragem de moedas ruins e reduz falso positivo em ativos baratos com book raso | Dados atuais de order book; ajuste em `filters/liquidity.py`, `scanner.py`, schemas e API | Media | P0 | Nova metrica aparece no payload da oportunidade; ranking muda em cenarios onde quantidade era alta mas notional era baixo; testes cobrem moedas baratas vs caras | Medio | Pode ser introduzido sem breaking change se os novos campos forem aditivos e o score antigo seguir funcionando durante transicao |
+| Slippage estimado por tamanho de ordem | O sistema nao sabe se o book aguenta uma ordem real sem deterioracao relevante de preco | Calcular `estimated_buy_slippage_bps` e `estimated_sell_slippage_bps` simulando consumo progressivo do book para tamanhos de ordem configuraveis em BRL (`250`, `1000`, `5000`, por perfil); expor tambem `fillable_notional_within_slippage_cap` | Separa sinal bonito de sinal realmente executavel e reduz risco de ficar preso | Liquidez em notional; definicao de tamanhos padrao por workspace/perfil | Media | P0 | API retorna slippage estimado por sinal; sinais com spread baixo mas slippage alto deixam de rankear no topo; testes reproduzem books rasos e profundos | Medio/Alto | O modelo inicial pode usar book estatico com tolerancia documentada; nao precisa modelar latencia nem impacto dinamico na primeira fase |
+| Score de executabilidade | O score atual mede interesse tecnico, nao operabilidade real | Criar `executability_score` separado do `technical_score`, combinando notional depth, slippage, spread, assimetria bid/ask, volume e facilidade de saida; expor tambem `executability_band` (`poor`, `fair`, `good`, `strong`) | Passa a rankear pelo que o operador consegue executar, nao so pelo que chama atencao | Liquidez em notional e slippage estimado | Media | P0 | Toda oportunidade passa a ter `technical_score` e `executability_score`; frontend consegue ordenar por ambos; documentacao explica diferenca entre os dois | Medio | Recomendado manter o score tecnico intacto e adicionar o novo score em paralelo para evitar quebrar comparabilidade historica |
+| Split entre `interesting_signal` e `operable_signal` | Hoje tudo aparece como oportunidade no mesmo plano, misturando curiosidade de mercado e oportunidade real | Adicionar classificacao booleana/enum separando `interesting_signal` e `operable_signal`, com regras iniciais baseadas em executability score, spread maximo efetivo, slippage cap e volume minimo por perfil | Reduz ruido no dashboard e no Telegram e economiza tempo do operador | Score de executabilidade; ajustes de API e UI | Baixa/Media | P0 | Dashboard e alertas conseguem filtrar/exibir separadamente sinais interessantes e sinais operaveis; testes de contrato da API cobrem os novos campos | Baixo | Pode nascer como classificacao derivada sem schema novo permanente; depois pode virar entidade mais explicita se fizer sentido |
+| Duracao util do movimento | O sistema detecta o movimento, mas nao mede se ele tem janela operacional suficiente | Preencher `duration_minutes` com uma heuristica real baseada em persistencia do movimento, repeticao em ciclos consecutivos, estabilidade do spread e manutencao de liquidez por uma janela curta; complementar com `movement_persistence_score` | Ajuda a distinguir impulso morto de oportunidade com continuidade minima | Dados de ciclos atuais; `shared_state.py`; outcome pipeline | Media | P1 | `duration_minutes` deixa de ser `0` na maioria dos sinais validos; sinais com continuidade curta sao penalizados; testes cobrem persistencia em ciclos consecutivos | Medio | Pode ser iniciado sem mudar schema se reaproveitar `duration_minutes`; o refinamento posterior pode exigir tabela agregada por janela |
+| Refinamento da taxonomia de movimentos | `strong_range/spike/weak/trap` ainda e util, mas generico demais para decisao operacional | Expandir a taxonomia para categorias mais operacionais, como `trend_continuation`, `breakout_clean`, `breakout_exhaustion`, `mean_reversion_candidate`, `illiquid_spike`, preservando mapeamento backward-compatible para as labels atuais | Melhora leitura rapida e qualidade dos filtros por tipo de movimento | Duracao util; ajustes em `filters/movement.py` e frontend | Media | P1 | Taxonomia nova existe no backend com mapeamento para categorias legadas; frontend consegue exibir nova label sem quebrar historico | Medio | Recomenda-se manter campo legado `movement_type` e adicionar `movement_regime` ou `movement_class_v2` para migracao gradual |
+| Reweighting por outcome | `historical_confidence` atual e fraco e usa pouco do resultado real dos sinais | Criar recalibracao por desempenho historico de buckets de score, tipo de movimento, exchange, par e perfil, usando `signal_outcomes` confiaveis para ajustar o ranking final com limites conservadores | Melhora progressiva da qualidade do ranking e aproxima o motor de evidencia real | Outcome pipeline confiavel; agregacoes historicas; schema para versao do motor | Media/Alta | P1 | Ranking mostra impacto do reweighting sem causar oscilacoes extremas; ha relatorio de calibracao por bucket; testes garantem limites min/max do multiplicador | Alto | Deve entrar com versionamento explicito (`ranking_version`, `reweighting_version`) para auditoria e rollback |
+
+### Bloco 2 - Persistencia, historico e analytics
+
+| Nome da iniciativa | Problema que resolve | Descricao da implementacao | Impacto esperado | Dependencias | Complexidade estimada | Prioridade | Criterios de aceite | Risco de implementacao | Observacoes tecnicas |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Separacao entre evento bruto, sinal, projecao e outcome | O modelo atual funciona, mas ainda mistura camadas de observacao e decisao, o que limita analytics e experimentacao | Introduzir camadas mais explicitas: `raw_market_observations`, `technical_signals`, `workspace_signal_projections`, `signal_outcomes`, com chaves de correlacao e timestamps de ciclo; manter escrita dual temporaria com o modelo atual | Facilita auditoria, reprocessamento, comparacao de motores e experimentacao futura | Revisao de schema; migracao incremental; adaptacoes em persistence/shared_state | Alta | P1 | Cada camada passa a ter responsabilidade clara; e possivel rastrear um sinal desde o book observado ate o outcome; jobs e API continuam funcionando durante migracao | Alto | Migracao sensivel; ideal usar dual-write, backfill e feature flag antes de desligar leituras antigas |
+| Historico orientado a analytics operacionais | O historico atual serve ao feed, mas ainda e fraco para responder “o que realmente funciona?” | Criar visoes ou tabelas agregadas por bucket de score, faixa de slippage, exchange, par, movimento e perfil, com metricas de win rate, mediana de outcome e degradacao de executabilidade | Permite avaliar edge de verdade e sustenta calibracao do ranking | Outcomes estaveis; separacao de camadas ou visoes derivadas | Media | P1 | Dashboard interno/endpoint de analytics responde queries por bucket sem consultas pesadas nas tabelas operacionais | Medio | Pode começar com materialized views ou jobs periodicos, sem reestruturar tudo de uma vez |
+| Auditoria de versao do motor de sinais | Sem versao explicita, fica dificil comparar score antigo vs novo e explicar regressao/melhoria | Persistir `score_version`, `executability_version`, `movement_version`, `profile_version` e parametros relevantes junto de cada sinal/projecao | Viabiliza experimentacao segura e comparacao entre iteracoes do motor | Ajustes de schema e pontos de persistencia | Baixa/Media | P0 | Todo sinal novo grava versoes do motor; API exibe esses campos quando solicitado; comparacoes historicas tornam-se possiveis | Baixo | Entrega valor cedo e reduz risco de evolucao silenciosa do ranking |
+| Politica de retencao e compactacao do historico | O volume de registros tende a crescer e pode pesar sem governanca clara | Definir retencao por camada: feed operacional curto, sinais/outcomes medio prazo, agregados longo prazo; implementar rotinas de pruning/compactacao e documentar limites | Controla custo e performance sem perder capacidade analitica | Separacao de camadas; revisao de queries do historico | Media | P1 | Existe politica explicita de retencao; jobs removem ou agregam dados antigos sem degradar telas principais | Medio | A deduplicacao atual ajuda o feed, mas nao substitui uma politica clara de retencao por tipo de dado |
+| Deduplificacao orientada a semantica do sinal | A deduplicacao atual por 5 minutos pode tanto reduzir ruido quanto esconder evolucao real do sinal | Revisar a deduplicacao para considerar mudancas materiais de score, slippage, spread e regime do movimento antes de suprimir uma nova linha | Mantem historico mais util para analytics sem virar spam de registros | Liquidez/slippage/score novos; revisao de persistence | Media | P1 | Dois sinais proximos no tempo so sao deduplicados se forem semanticamente equivalentes; testes cobrem casos de score igual vs score materialmente diferente | Medio | Mudanca sensivel porque altera densidade do historico; ideal ativar por feature flag e medir impacto |
+
+### Bloco 3 - Personalizacao e experiencia operacional
+
+| Nome da iniciativa | Problema que resolve | Descricao da implementacao | Impacto esperado | Dependencias | Complexidade estimada | Prioridade | Criterios de aceite | Risco de implementacao | Observacoes tecnicas |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Workspace Trading Profile | O sistema ainda e generico demais e nao reflete o “olho” operacional do usuario final | Criar perfis por workspace como `conservador`, `intraday liquido`, `agressivo`, `scalp`, com parametros de tamanho de ordem, slippage maximo, spread tolerado, volume minimo, preferencia por duracao e sensibilidade a spike | Alinha o motor ao uso real do operador e reduz ruido de ativos ruins | Score de executabilidade; schema de configuracao; UI de settings | Media | P1 | Cada workspace consegue selecionar perfil; ranking e alertas mudam conforme o perfil; API retorna perfil ativo nas oportunidades projetadas | Medio | Prioridade elevada por diretriz de produto; deve ser P1, nao P2 |
+| Thresholds por perfil operacional | Thresholds fixos atuais servem como base, mas nao como representacao do operador real | Derivar thresholds minimos e pesos de executabilidade a partir do trading profile, mantendo defaults seguros e override manual limitado | Melhora aderencia sem transformar a UI em painel de ajuste arbitrario | Workspace Trading Profile; score de executabilidade | Media | P1 | Alterar o perfil muda os thresholds efetivos do workspace; configuracao continua auditavel e previsivel | Medio | Melhor usar presets com poucos overrides do que liberar pesos totalmente livres logo de inicio |
+| Alertas orientados a operabilidade | Alertas atuais podem disparar sinais interessantes, mas nao necessariamente executaveis | Adicionar filtros de alerta por `operable_signal`, banda de executabilidade, par favorito, exchange e tamanho de ordem suportado | Aumenta utilidade do Telegram e reduz fadiga de notificacao | Split interesting/operable; profile; ajustes de config UI | Baixa/Media | P1 | Usuario consegue receber apenas sinais operaveis dentro do seu perfil; mensagem do alerta explica por que o sinal foi enviado | Baixo | Alto valor perceptivel com pouco risco, desde que a camada de executabilidade esteja minimamente pronta |
+| Dashboard com explicabilidade operacional | O frontend atual ainda mostra score e filtros, mas nao deixa claro “por que isso vale atencao” ou “por que nao e operavel” | Mostrar badges e razoes de operabilidade: `liquidez BRL`, `slippage estimado`, `saida dificil`, `duracao curta`, `operavel para R$ X`; incluir alternancia entre “interessantes” e “operaveis” | Reduz tempo perdido lendo ativo ruim e melhora confianca do operador | Score de executabilidade; API com campos novos; ajustes em `opportunities-table.tsx` | Media | P1 | No dashboard mobile/desktop o usuario consegue entender rapidamente por que um sinal e ou nao operavel; testes e2e cobrem a nova UX | Baixo/Medio | Gera valor rapido quando combinado com P0; nao depende da separacao completa do historico |
+
+### Bloco 4 - Melhorias estruturais de suporte
+
+| Nome da iniciativa | Problema que resolve | Descricao da implementacao | Impacto esperado | Dependencias | Complexidade estimada | Prioridade | Criterios de aceite | Risco de implementacao | Observacoes tecnicas |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Evolucao de schema e contratos de API sem quebra | As mudancas de score e executabilidade vao ampliar bastante o payload das oportunidades | Adicionar campos novos de forma aditiva em schemas, rotas e clientes (`technical_score`, `executability_score`, `operable_signal`, `slippage`, `notional_depth`, versoes do motor), preservando os campos atuais durante uma fase de transicao | Permite entregar valor sem quebrar frontend, worker ou historico existente | Iniciativas P0 de logica de sinais | Media | P0 | Frontend atual continua funcionando; novos consumidores podem usar os campos novos; testes de contrato e build passam | Baixo | Principal item para garantir migracao incremental sem breaking change |
+| Pipeline incremental de migracao e backfill | Parte das mudancas exige reclassificacao ou preenchimento historico parcial | Criar migracoes DB em etapas, backfill para campos derivados quando possivel e feature flags para alternar leitura do modelo antigo para o novo | Reduz risco de deploy e viabiliza rollback | Evolucao de schema; possivel dual-write | Media/Alta | P1 | Migracoes podem ser aplicadas sem downtime perceptivel; rollback e documentado; ambiente de staging valida o fluxo | Alto | Item-chave para as iniciativas de persistencia; vale preparar antes das migracoes mais sensiveis |
+| Adaptacao do ranking backend com compatibilidade | O backend hoje projeta score por workspace, mas nao contempla a camada nova de operabilidade | Atualizar o pipeline de `project_workspace_opportunity` e ranking para suportar multiplos scores, perfis e regras de visibilidade sem alterar semanticamente o score tecnico original | Garante consistencia entre scanner, API e dashboard | Score de executabilidade; profile; API aditiva | Media | P0 | O backend passa a expor ordenacao por score tecnico e por operabilidade; respostas seguem consistentes entre endpoints | Medio | Melhor tratar o ranking como composicao de camadas, nao substituir o score tecnico existente |
+| Adaptacao do frontend para leitura dual | O frontend precisara conviver por um tempo com payload antigo e novo | Atualizar `types.ts`, `api.ts` e componentes para suportar fallback quando campos novos nao existirem, com feature flags visuais quando necessario | Permite rollout gradual sem travar deploy conjunto backend/frontend | Evolucao de schema/API | Baixa/Media | P0 | Frontend renderiza com e sem os novos campos; nenhuma tela principal quebra durante rollout | Baixo | Essencial para manter deploy incremental entre Render e Vercel |
+| Suite de verificacao e benchmark do motor | Sem testes especificos, o ranking pode piorar silenciosamente a cada ajuste | Adicionar fixtures de books/klines, testes de ranking e snapshots de cenarios operacionais, alem de um benchmark comparando score tecnico vs executabilidade | Aumenta seguranca para iterar na camada nova | Campos e calculos novos; infraestrutura de teste existente | Media | P0 | Existe suite automatizada cobrindo books rasos/profundos, sinais operaveis/nao operaveis e regressao de ranking | Medio | Alto retorno para manutencao; deve entrar cedo junto da camada P0 |
+
+### Ordem recomendada de implementacao
+
+1. Evolucao de schema e contratos de API sem quebra
+2. Auditoria de versao do motor de sinais
+3. Liquidez em notional por lado do book
+4. Slippage estimado por tamanho de ordem
+5. Score de executabilidade
+6. Split entre `interesting_signal` e `operable_signal`
+7. Adaptacao do ranking backend com compatibilidade
+8. Adaptacao do frontend para leitura dual
+9. Dashboard com explicabilidade operacional
+10. Workspace Trading Profile
+11. Thresholds por perfil operacional
+12. Alertas orientados a operabilidade
+13. Duracao util do movimento
+14. Refinamento da taxonomia de movimentos
+15. Historico orientado a analytics operacionais
+16. Deduplificacao orientada a semantica do sinal
+17. Politica de retencao e compactacao do historico
+18. Reweighting por outcome
+19. Pipeline incremental de migracao e backfill
+20. Separacao entre evento bruto, sinal, projecao e outcome
+
+### Itens que podem ser feitos sem breaking change
+
+- Liquidez em notional por lado do book
+- Slippage estimado por tamanho de ordem
+- Score de executabilidade
+- Split entre `interesting_signal` e `operable_signal`
+- Auditoria de versao do motor de sinais
+- Dashboard com explicabilidade operacional
+- Alertas orientados a operabilidade
+- Adaptacao do frontend para leitura dual
+- Suite de verificacao e benchmark do motor
+
+### Itens que exigirao migracao mais sensivel
+
+- Separacao entre evento bruto, sinal, projecao e outcome
+- Pipeline incremental de migracao e backfill
+- Deduplificacao orientada a semantica do sinal
+- Politica de retencao e compactacao do historico
+- Reweighting por outcome
+- Workspace Trading Profile se for persistido com versionamento e retrocompatibilidade de configuracao
+
+### Itens que geram valor mais rapido
+
+- Liquidez em notional por lado do book
+- Slippage estimado por tamanho de ordem
+- Score de executabilidade
+- Split entre `interesting_signal` e `operable_signal`
+- Dashboard com explicabilidade operacional
+
+### Sequencia recomendada de execucao
+
+1. Fechar a base P0 de executabilidade sem mexer ainda na estrutura profunda do historico.
+2. Colocar o frontend para explicar operabilidade com leitura dual e sem quebrar o fluxo atual.
+3. Introduzir `Workspace Trading Profile` e thresholds por perfil para alinhar o ranking ao uso real.
+4. Melhorar `duration_minutes`, taxonomia e alertas depois que a camada de executabilidade ja estiver visivel.
+5. So entao atacar reweighting por outcome e a separacao estrutural das camadas de persistencia.
+
+### Top 5 itens que mais geram valor
+
+1. Liquidez em notional por lado do book
+2. Slippage estimado por tamanho de ordem
+3. Score de executabilidade
+4. Split entre `interesting_signal` e `operable_signal`
+5. Dashboard com explicabilidade operacional
+
+### Top 5 itens com maior risco tecnico
+
+1. Separacao entre evento bruto, sinal, projecao e outcome
+2. Reweighting por outcome
+3. Pipeline incremental de migracao e backfill
+4. Slippage estimado por tamanho de ordem
+5. Deduplificacao orientada a semantica do sinal
+
+### Recomendacao final de por onde comecar
+
+Comecar por um pacote P0 pequeno e coeso:
+
+1. `Liquidez em notional`
+2. `Slippage estimado`
+3. `Score de executabilidade`
+4. `Split interesting vs operable`
+5. `Dashboard com explicabilidade`
+
+Esse pacote entrega valor operacional rapido, quase todo sem breaking change, e ataca exatamente o maior gap atual: diferenciar o que apenas chama atencao do que realmente da para operar. A reorganizacao mais profunda de persistencia e analytics deve vir depois, quando essa camada nova ja estiver gerando dados reais suficientes para calibracao e quando houver mais seguranca para migrar sem ruir o fluxo atual.

@@ -48,6 +48,16 @@ def test_scan_all_returns_opportunities(monkeypatch, sample_ticker, sample_order
     assert len(opportunities) == 1
     assert opportunities[0].pair == "BTC_BRL"
     assert opportunities[0].score > 0
+    assert opportunities[0].bid_notional_top_n is not None
+    assert opportunities[0].ask_notional_top_n is not None
+    assert opportunities[0].total_notional_top_n is not None
+    assert opportunities[0].estimated_buy_slippage_bps is not None
+    assert opportunities[0].estimated_sell_slippage_bps is not None
+    assert opportunities[0].fillable_notional_within_slippage_cap is not None
+    assert opportunities[0].executability_score is not None
+    assert opportunities[0].executability_band is not None
+    assert opportunities[0].interesting_signal is True
+    assert opportunities[0].operable_signal in {True, False}
 
 
 def test_scan_all_enriches_cross_exchange_context(monkeypatch, sample_order_book, sample_klines):
@@ -138,3 +148,88 @@ def test_scan_all_skips_pairs_unavailable_for_provider(monkeypatch, sample_ticke
 
     assert len(opportunities) == 1
     assert calls == ["BTC_BRL"]
+
+
+def test_scan_all_captures_lower_slippage_for_deeper_book(monkeypatch, sample_ticker, sample_klines):
+    monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+
+    async def fake_scannable_pairs(self):
+        return {
+            Exchange.BINANCE: ["BTC_BRL"],
+            Exchange.NOVADAX: ["BTC_BRL"],
+        }
+
+    monkeypatch.setattr(Scanner, "_get_scannable_pairs_by_exchange", fake_scannable_pairs)
+    config = AppConfig(
+        enabled_exchanges=[Exchange.BINANCE, Exchange.NOVADAX],
+        enabled_pairs=["BTC_BRL"],
+        thresholds={
+            "min_volatility_pct": 2.0,
+            "min_volume_brl": 10000.0,
+            "min_volume_brl_small": 3000.0,
+            "min_liquidity_units": 1.0,
+            "max_spread_pct": 2.0,
+        },
+    )
+    scanner = Scanner(config)
+
+    deep_book = OrderBook(
+        exchange=Exchange.BINANCE,
+        pair="BTC_BRL",
+        bids=[
+            {"price": 119.95, "quantity": 100},
+            {"price": 119.90, "quantity": 100},
+        ],
+        asks=[
+            {"price": 120.00, "quantity": 100},
+            {"price": 120.05, "quantity": 100},
+        ],
+    )
+    shallow_book = OrderBook(
+        exchange=Exchange.NOVADAX,
+        pair="BTC_BRL",
+        bids=[
+            {"price": 119.50, "quantity": 2},
+            {"price": 119.00, "quantity": 2},
+        ],
+        asks=[
+            {"price": 120.00, "quantity": 2},
+            {"price": 121.00, "quantity": 2},
+        ],
+    )
+
+    class DeepProvider(FakeProvider):
+        exchange = Exchange.BINANCE
+
+    class ShallowProvider(FakeProvider):
+        exchange = Exchange.NOVADAX
+
+    scanner._providers = {
+        Exchange.BINANCE: DeepProvider(sample_ticker, deep_book, sample_klines),
+        Exchange.NOVADAX: ShallowProvider(
+            Ticker(
+                exchange=Exchange.NOVADAX,
+                pair="BTC_BRL",
+                last_price=sample_ticker.last_price,
+                high_24h=sample_ticker.high_24h,
+                low_24h=sample_ticker.low_24h,
+                volume_24h=sample_ticker.volume_24h,
+                quote_volume_24h=sample_ticker.quote_volume_24h,
+                change_pct_24h=sample_ticker.change_pct_24h,
+            ),
+            shallow_book,
+            sample_klines,
+        ),
+    }
+
+    import asyncio
+
+    opportunities = asyncio.run(scanner.scan_all())
+    by_exchange = {opportunity.exchange: opportunity for opportunity in opportunities}
+
+    assert by_exchange[Exchange.BINANCE].estimated_buy_slippage_bps is not None
+    assert by_exchange[Exchange.NOVADAX].estimated_buy_slippage_bps is None
+    assert by_exchange[Exchange.BINANCE].total_notional_top_n > by_exchange[Exchange.NOVADAX].total_notional_top_n
+    assert by_exchange[Exchange.BINANCE].executability_score > by_exchange[Exchange.NOVADAX].executability_score
+    assert by_exchange[Exchange.BINANCE].operable_signal is True
+    assert by_exchange[Exchange.NOVADAX].operable_signal is False

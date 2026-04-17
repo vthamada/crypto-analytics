@@ -42,6 +42,7 @@ Para detalhes operacionais completos, use [SYSTEM_STATE.md](SYSTEM_STATE.md) com
 - `frontend/src/hooks/use-opportunities.ts`: carga inicial, WebSocket e polling de fallback
 - `frontend/src/lib/api.ts`: cliente REST com sessao e refresh token
 - `frontend/src/lib/websocket.ts`: cliente WebSocket com reconexao
+- `frontend/src/lib/opportunity-operability.ts`: helpers de leitura dual, ranking e explicabilidade operacional
 
 ## Componentes principais
 
@@ -62,8 +63,9 @@ O worker:
 - carrega configuracao agregada dos workspaces
 - instancia providers por exchange
 - coleta `ticker`, `order_book` e `klines`
-- aplica filtros e calcula score
+- aplica filtros, calcula score tecnico e camada de executabilidade
 - enriquece arbitragem cross-exchange
+- classifica o sinal como `interesting_signal` e `operable_signal`
 - grava o estado compartilhado do ciclo
 - projeta oportunidades por workspace e dispara alertas Telegram
 - avalia outcomes pendentes de sinais anteriores
@@ -92,6 +94,17 @@ O modelo atual separa:
 
 O scanner continua global e a visibilidade final e recalculada por workspace.
 
+Com a camada de executabilidade atual:
+
+- o motor global continua produzindo `score` e `technical_score`
+- a operabilidade entra como camada paralela via `executability_score`
+- a projecao por workspace preserva a semantica de executabilidade e recalcula apenas o ranking contextual do workspace
+
+No frontend atual:
+
+- a leitura continua funcionando com payload legado, sem exigir os novos campos
+- quando `executability_score` existe, o dashboard passa a explicar o sinal com badges, ranking por operabilidade e detalhe operacional
+
 ## Modelo de dados principal
 
 Entidades de runtime e API:
@@ -114,6 +127,16 @@ Entidades persistidas mais relevantes:
 - `WorkspaceConfigRecord`
 - `AuditLogRecord`
 
+Campos operacionais recentes relevantes em `Opportunity` e nas camadas persistidas:
+
+- `technical_score`, `score_version`
+- `executability_score`, `executability_band`, `executability_version`
+- `interesting_signal`, `operable_signal`
+- `bid_notional_top_n`, `ask_notional_top_n`, `total_notional_top_n`
+- `estimated_buy_slippage_bps`, `estimated_sell_slippage_bps`
+- `fillable_notional_within_slippage_cap`
+- `movement_persistence_score`, `movement_version`, `profile_version`
+
 ## Decisoes arquiteturais atuais
 
 ### Escolhas consistentes com o estagio atual
@@ -130,6 +153,7 @@ Entidades persistidas mais relevantes:
 - o scanner continua global, nao isolado fisicamente por tenant
 - o WebSocket depende de memoria local da instancia da API
 - o `score` operacional do scanner ainda usa configuracao agregada com pesos do primeiro workspace carregado
+- o frontend ainda nao explora totalmente a camada de executabilidade; isso entra na Release D do plano operacional
 - nao ha barramento pub/sub dedicado; em `api_only` a API observa o estado compartilhado e repropaga snapshots, mas isso ainda nao equivale a broadcast distribuido entre multiplas replicas
 
 ## Pontos de atencao

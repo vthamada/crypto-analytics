@@ -20,6 +20,22 @@ import {
   YAxis,
 } from "recharts";
 import type { Opportunity } from "@/lib/types";
+import {
+  formatBps,
+  formatCurrency,
+  formatCurrencyCompact,
+  formatSignedPercent,
+  getExecutabilityBandLabel,
+  getExecutabilityHighlight,
+  getExecutabilityScore,
+  getOperabilityFillRatio,
+  getOperabilityReasons,
+  getReasonToneClasses,
+  getTechnicalScore,
+  hasExecutability,
+  isInterestingSignal,
+  isOperableSignal,
+} from "@/lib/opportunity-operability";
 import { cn } from "@/lib/utils";
 
 interface SignalDetailModalProps {
@@ -63,175 +79,314 @@ const CHART_TOOLTIP_ITEM_STYLE = {
 } as const;
 
 export function SignalDetailModal({
-  opportunity: opp,
+  opportunity: opportunity,
   open,
   onClose,
 }: SignalDetailModalProps) {
-  if (!opp) return null;
+  if (!opportunity) return null;
 
-  const chartData = (opp.klines || []).map((k) => ({
-    time: new Date(k.open_time).toLocaleTimeString("pt-BR", {
+  const technicalScore = getTechnicalScore(opportunity);
+  const executabilityScore = getExecutabilityScore(opportunity);
+  const showExecutability = hasExecutability(opportunity);
+  const reasons = getOperabilityReasons(opportunity);
+  const fillRatio = getOperabilityFillRatio(opportunity);
+  const chartData = (opportunity.klines || []).map((kline) => ({
+    time: new Date(kline.open_time).toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
     }),
-    price: k.close,
-    volume: k.volume,
-    high: k.high,
-    low: k.low,
+    price: kline.close,
+    volume: kline.volume,
+    high: kline.high,
+    low: kline.low,
   }));
 
   return (
     <Dialog open={open} onOpenChange={() => onClose()}>
-      <DialogContent className="max-w-2xl rounded-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-3">
-            <span className="text-xl font-bold">{opp.pair}</span>
-            <Badge
-              variant="outline"
-              className={cn("text-sm font-bold", scoreColor(opp.score))}
-            >
-              Score {opp.score}
-            </Badge>
-            <span className="text-sm text-muted-foreground">
-              {exchangeLabel(opp.exchange)}
-            </span>
-          </DialogTitle>
+      <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto rounded-2xl">
+        <DialogHeader className="space-y-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-2">
+              <DialogTitle className="flex flex-wrap items-center gap-3">
+                <span className="text-xl font-bold">{opportunity.pair.replace("_", "/")}</span>
+                <span className="text-sm text-muted-foreground">{exchangeLabel(opportunity.exchange)}</span>
+              </DialogTitle>
+              <div className="flex flex-wrap gap-2">
+                <Badge
+                  variant="outline"
+                  className={cn("text-sm font-bold", scoreColor(technicalScore))}
+                >
+                  Score tecnico {technicalScore.toFixed(1)}
+                </Badge>
+                {executabilityScore != null ? (
+                  <Badge
+                    variant="outline"
+                    className={cn("text-sm font-bold", getExecutabilityHighlight(opportunity))}
+                  >
+                    Operabilidade {executabilityScore.toFixed(1)}
+                  </Badge>
+                ) : null}
+                <Badge variant="outline" className="text-sm">
+                  {isOperableSignal(opportunity)
+                    ? "Operavel"
+                    : isInterestingSignal(opportunity)
+                      ? "Interessante"
+                      : "Nao classificado"}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-muted/20 px-4 py-3 text-sm">
+              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Leitura rapida</p>
+              <p className="mt-1 font-semibold">
+                {showExecutability
+                  ? `${getExecutabilityBandLabel(opportunity)} • saida ${formatBps(opportunity.estimated_sell_slippage_bps)}`
+                  : "Payload tecnico sem camada de operabilidade"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Detectado em{" "}
+                {new Date(opportunity.detected_at).toLocaleString("pt-BR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {reasons.map((reason) => (
+              <Badge
+                key={`${opportunity.id}-${reason.label}`}
+                variant="outline"
+                className={cn("border px-2 py-0.5 text-[11px]", getReasonToneClasses(reason.tone))}
+              >
+                {reason.label}
+              </Badge>
+            ))}
+            {opportunity.arbitrage_available ? (
+              <Badge variant="outline" className="border-blue-500/20 text-blue-500">
+                Gap {opportunity.cross_exchange_gap_pct.toFixed(2)}%
+              </Badge>
+            ) : null}
+          </div>
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <DetailCard label="Preço" value={`R$ ${opp.last_price.toLocaleString("pt-BR")}`} />
+          <DetailCard label="Preco" value={formatCurrency(opportunity.last_price)} />
           <DetailCard
-            label="Variação"
-            value={`${opp.change_pct >= 0 ? "+" : ""}${opp.change_pct.toFixed(2)}%`}
-            valueClass={opp.change_pct >= 0 ? "text-emerald-500" : "text-red-500"}
+            label="Variacao"
+            value={formatSignedPercent(opportunity.change_pct)}
+            valueClass={opportunity.change_pct >= 0 ? "text-emerald-500" : "text-red-500"}
           />
-          <DetailCard label="Volatilidade" value={`${opp.volatility_pct.toFixed(2)}%`} />
-          <DetailCard label="Spread" value={`${opp.spread_pct.toFixed(4)}%`} />
-          <DetailCard label="Volume 24h" value={`R$ ${(opp.quote_volume_24h / 1000).toFixed(0)}K`} />
-          <DetailCard label="Liquidez" value={`${opp.liquidity_units.toLocaleString("pt-BR")} un.`} />
+          <DetailCard label="Spread" value={`${opportunity.spread_pct.toFixed(4)}%`} />
+          <DetailCard label="Volatilidade" value={`${opportunity.volatility_pct.toFixed(2)}%`} />
+          <DetailCard label="Volume 24h" value={formatCurrencyCompact(opportunity.quote_volume_24h)} />
           <DetailCard
-            label="Gap Cross"
-            value={`${opp.cross_exchange_gap_pct.toFixed(2)}%`}
-            valueClass={opp.arbitrage_available ? "text-blue-500" : undefined}
+            label="Liquidez"
+            value={
+              opportunity.total_notional_top_n != null
+                ? formatCurrencyCompact(opportunity.total_notional_top_n)
+                : `${opportunity.liquidity_units.toLocaleString("pt-BR")} un.`
+            }
           />
           <DetailCard
             label="Movimento"
-            value={opp.movement_type.replace("_", " ")}
+            value={opportunity.movement_type.replace("_", " ")}
           />
           <DetailCard
-            label="Detectado"
-            value={new Date(opp.detected_at).toLocaleTimeString("pt-BR")}
+            label="Gap Cross"
+            value={`${opportunity.cross_exchange_gap_pct.toFixed(2)}%`}
+            valueClass={opportunity.arbitrage_available ? "text-blue-500" : undefined}
           />
         </div>
 
-        {opp.cross_exchange_reference_exchange || opp.cross_exchange_reference_price ? (
-          <>
-            <Separator className="my-2" />
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Separator className="my-4" />
+
+        {showExecutability ? (
+          <div className="space-y-4">
+            <div className="flex flex-col gap-1">
+              <h4 className="text-sm font-semibold">Leitura operacional</h4>
+              <p className="text-sm text-muted-foreground">
+                Esta camada separa o que apenas chama atencao do que parece executavel para uma ordem baseline.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               <DetailCard
-                label="Exchange referência"
-                value={opp.cross_exchange_reference_exchange ?? "-"}
+                label="Bid top N"
+                value={
+                  opportunity.bid_notional_top_n != null
+                    ? formatCurrencyCompact(opportunity.bid_notional_top_n)
+                    : "n/d"
+                }
               />
               <DetailCard
-                label="Preço referência"
+                label="Ask top N"
                 value={
-                  opp.cross_exchange_reference_price
-                    ? `R$ ${opp.cross_exchange_reference_price.toLocaleString("pt-BR")}`
+                  opportunity.ask_notional_top_n != null
+                    ? formatCurrencyCompact(opportunity.ask_notional_top_n)
+                    : "n/d"
+                }
+              />
+              <DetailCard
+                label="Slippage compra"
+                value={formatBps(opportunity.estimated_buy_slippage_bps)}
+              />
+              <DetailCard
+                label="Slippage saida"
+                value={formatBps(opportunity.estimated_sell_slippage_bps)}
+                valueClass={
+                  opportunity.estimated_sell_slippage_bps != null && opportunity.estimated_sell_slippage_bps > 25
+                    ? "text-red-500"
+                    : undefined
+                }
+              />
+              <DetailCard
+                label="Executabilidade"
+                value={
+                  executabilityScore != null
+                    ? `${executabilityScore.toFixed(1)} • ${getExecutabilityBandLabel(opportunity)}`
+                    : "n/d"
+                }
+              />
+              <DetailCard
+                label="Fillable no cap"
+                value={
+                  opportunity.fillable_notional_within_slippage_cap != null
+                    ? formatCurrencyCompact(opportunity.fillable_notional_within_slippage_cap)
+                    : "n/d"
+                }
+              />
+              <DetailCard
+                label="Cobertura da ordem"
+                value={fillRatio != null ? `${Math.round(fillRatio * 100)}%` : "n/d"}
+              />
+              <DetailCard
+                label="Versoes"
+                value={[
+                  opportunity.score_version ?? "score n/d",
+                  opportunity.executability_version ?? "exec n/d",
+                ].join(" • ")}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+            Este sinal veio de um payload legado. O dashboard preserva a leitura tecnica, mas a explicacao de
+            operabilidade so aparece quando o backend enviar a nova camada de executabilidade.
+          </div>
+        )}
+
+        {opportunity.cross_exchange_reference_exchange || opportunity.cross_exchange_reference_price ? (
+          <>
+            <Separator className="my-4" />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <DetailCard
+                label="Exchange referencia"
+                value={opportunity.cross_exchange_reference_exchange ?? "-"}
+              />
+              <DetailCard
+                label="Preco referencia"
+                value={
+                  opportunity.cross_exchange_reference_price != null
+                    ? formatCurrency(opportunity.cross_exchange_reference_price)
                     : "-"
                 }
               />
               <DetailCard
-                label="Confiança histórica"
-                value={`${(opp.historical_confidence * 100).toFixed(1)}%`}
+                label="Confianca historica"
+                value={`${(opportunity.historical_confidence * 100).toFixed(1)}%`}
               />
             </div>
           </>
         ) : null}
 
-        <Separator className="my-2" />
+        {chartData.length > 0 ? (
+          <>
+            <Separator className="my-4" />
+            <div className="space-y-4">
+              <div>
+                <h4 className="mb-2 text-sm font-medium text-muted-foreground">
+                  Preco recente
+                </h4>
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={chartData}>
+                    <defs>
+                      <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                    <XAxis
+                      dataKey="time"
+                      tick={CHART_AXIS_TICK}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={CHART_AXIS_TICK}
+                      axisLine={false}
+                      tickLine={false}
+                      domain={["auto", "auto"]}
+                      tickFormatter={(value: number) => value.toLocaleString("pt-BR")}
+                    />
+                    <Tooltip
+                      contentStyle={CHART_TOOLTIP_STYLE}
+                      labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                      itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                      formatter={(value) => [
+                        formatCurrency(Number(value)),
+                        "Preco",
+                      ]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="price"
+                      stroke="var(--primary)"
+                      fill="url(#priceGradient)"
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
 
-        {chartData.length > 0 && (
-          <div className="space-y-4">
-            <div>
-              <h4 className="mb-2 text-sm font-medium text-muted-foreground">
-                Preço Recente
-              </h4>
-              <ResponsiveContainer width="100%" height={200}>
-                <AreaChart data={chartData}>
-                  <defs>
-                    <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
-                  <XAxis
-                    dataKey="time"
-                    tick={CHART_AXIS_TICK}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={CHART_AXIS_TICK}
-                    axisLine={false}
-                    tickLine={false}
-                    domain={["auto", "auto"]}
-                    tickFormatter={(v: number) => v.toLocaleString("pt-BR")}
-                  />
-                  <Tooltip
-                    contentStyle={CHART_TOOLTIP_STYLE}
-                    labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                    itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                    formatter={(value) => [
-                      `R$ ${Number(value).toLocaleString("pt-BR")}`,
-                      "Preço",
-                    ]}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="price"
-                    stroke="var(--primary)"
-                    fill="url(#priceGradient)"
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              <div>
+                <h4 className="mb-2 text-sm font-medium text-muted-foreground">
+                  Volume
+                </h4>
+                <ResponsiveContainer width="100%" height={120}>
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                    <XAxis
+                      dataKey="time"
+                      tick={CHART_AXIS_TICK}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={CHART_AXIS_TICK}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Tooltip
+                      contentStyle={CHART_TOOLTIP_STYLE}
+                      labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                      itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                    />
+                    <Bar
+                      dataKey="volume"
+                      fill="var(--primary)"
+                      opacity={0.7}
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-
-            <div>
-              <h4 className="mb-2 text-sm font-medium text-muted-foreground">
-                Volume
-              </h4>
-              <ResponsiveContainer width="100%" height={120}>
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
-                  <XAxis
-                    dataKey="time"
-                    tick={CHART_AXIS_TICK}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={CHART_AXIS_TICK}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={CHART_TOOLTIP_STYLE}
-                    labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                    itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                  />
-                  <Bar
-                    dataKey="volume"
-                    fill="var(--primary)"
-                    opacity={0.7}
-                    radius={[4, 4, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
+          </>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

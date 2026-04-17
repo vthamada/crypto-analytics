@@ -177,12 +177,29 @@ def test_serialize_history_record_marks_naive_detected_at_as_utc():
         exchange="binance",
         pair="BTC_BRL",
         score=80,
+        technical_score=75,
+        score_version="v1",
+        executability_version="v1",
+        movement_version="v1",
+        profile_version="v1",
+        technical_signal_id="sig-history-1",
+        executability_score=62.5,
+        executability_band="fair",
+        interesting_signal=True,
+        operable_signal=False,
         volatility_pct=5,
         volume_24h=1000,
         quote_volume_24h=100000,
         liquidity_units=5000,
+        bid_notional_top_n=12000,
+        ask_notional_top_n=11000,
+        total_notional_top_n=23000,
         spread_pct=0.2,
+        estimated_buy_slippage_bps=14.0,
+        estimated_sell_slippage_bps=19.0,
+        fillable_notional_within_slippage_cap=5000,
         movement_type="strong_range",
+        movement_persistence_score=0.45,
         last_price=100,
         change_pct=4,
         detected_at=datetime(2026, 4, 15, 18, 55, 30),
@@ -192,3 +209,20 @@ def test_serialize_history_record_marks_naive_detected_at_as_utc():
     serialized = persistence.serialize_history_record(record)
 
     assert serialized["detected_at"] == "2026-04-15T18:55:30+00:00"
+    assert serialized["technical_score"] == 75
+    assert serialized["score_version"] == "v1"
+    assert serialized["executability_version"] == "v1"
+    assert serialized["movement_version"] == "v1"
+    assert serialized["profile_version"] == "v1"
+    assert serialized["technical_signal_id"] == "sig-history-1"
+    assert serialized["executability_score"] == 62.5
+    assert serialized["executability_band"] == "fair"
+    assert serialized["interesting_signal"] is True
+    assert serialized["operable_signal"] is False
+    assert serialized["bid_notional_top_n"] == 12000
+    assert serialized["ask_notional_top_n"] == 11000
+    assert serialized["total_notional_top_n"] == 23000
+    assert serialized["estimated_buy_slippage_bps"] == 14.0
+    assert serialized["estimated_sell_slippage_bps"] == 19.0
+    assert serialized["fillable_notional_within_slippage_cap"] == 5000
+    assert serialized["movement_persistence_score"] == 0.45

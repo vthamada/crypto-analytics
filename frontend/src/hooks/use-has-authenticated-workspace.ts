@@ -15,9 +15,7 @@ function readAuthenticatedWorkspaceState(): boolean {
 
 
 export function useHasAuthenticatedWorkspace() {
-  const [hasAuthenticatedWorkspace, setHasAuthenticatedWorkspace] = useState(
-    readAuthenticatedWorkspaceState,
-  );
+  const [hasAuthenticatedWorkspace, setHasAuthenticatedWorkspace] = useState<boolean | null>(null);
 
   useEffect(() => {
     const syncState = () => {

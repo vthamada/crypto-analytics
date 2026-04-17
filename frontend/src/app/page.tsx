@@ -49,6 +49,10 @@ function DashboardContent() {
 export default function DashboardPage() {
   const hasAuthenticatedWorkspace = useHasAuthenticatedWorkspace();
 
+  if (hasAuthenticatedWorkspace === null) {
+    return <div className="mx-auto max-w-7xl p-4 pt-6" />;
+  }
+
   if (!hasAuthenticatedWorkspace) {
     return (
       <SessionRequiredState

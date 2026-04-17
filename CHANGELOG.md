@@ -12,6 +12,25 @@ Convencao deste repositorio:
 
 - Nenhuma entrada em aberto.
 
+## [2026-04-17]
+
+### Added
+- Campos aditivos de executabilidade no contrato de oportunidades e historico: `executability_score`, `executability_band`, `interesting_signal`, `operable_signal`, metricas de notional/slippage e versionamento explicito (`executability_version`, `movement_version`, `profile_version`).
+- Compatibilidade de schema no startup para acrescentar colunas operacionais novas sem depender de uma migracao bloqueante unica.
+- `backend/app/filters/executability.py` com calculo de slippage estimado, notional preenchivel e `calculate_executability_score()`.
+- Metricas de book em notional (`bid_notional_top_n`, `ask_notional_top_n`, `total_notional_top_n`) no pipeline do scanner.
+- Ordenacao por executabilidade e filtro `operable_only` em `/api/opportunities`.
+- Suite de testes cobrindo score de executabilidade, books rasos/profundos, contrato aditivo e preservacao da camada de executabilidade na projecao por workspace.
+
+### Changed
+- O scanner agora produz uma camada paralela de operabilidade sem substituir o ranking tecnico existente.
+- A heuristica inicial de classificacao operacional passou a separar `interesting_signal` de `operable_signal`.
+- `project_workspace_opportunity()` preserva `executability_score`, `executability_band` e flags operacionais, recalculando apenas o score contextual do workspace.
+- `main.py` e `worker.py` passaram a materializar `score_version`, `executability_version`, `movement_version` e `profile_version` junto das projecoes do ciclo.
+- O dashboard passou a suportar leitura dual entre payload legado e payload novo, com ordenacao por operabilidade, badges operacionais, modal de detalhe explicando liquidez/slippage e melhor leitura mobile.
+- `useHasAuthenticatedWorkspace()` e a pagina inicial do dashboard foram ajustados para evitar mismatch de hidratacao entre SSR e cliente.
+- `README.md`, `ARCHITECTURE.md`, `SYSTEM_STATE.md`, `BACKLOG.md` e o plano `docs/superpowers/plans/2026-04-17-operational-executability-plan.md` foram atualizados para refletir a conclusao das Releases A, B, C e D.
+
 ## [2026-04-16]
 
 ### Added

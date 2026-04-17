@@ -14,15 +14,38 @@ from app.providers.novadax import NovaDaxProvider
 from app.providers.mercado_bitcoin import MercadoBitcoinProvider
 from app.providers.binance import BinanceProvider
 from app.services.pairs import get_scannable_pairs_by_exchange
-from app.services.shared_state import calculate_technical_score, SCORE_VERSION
+from app.services.shared_state import (
+    EXECUTABILITY_VERSION,
+    MOVEMENT_VERSION,
+    PROFILE_VERSION,
+    SCORE_VERSION,
+    calculate_technical_score,
+)
 from app.filters.volatility import calculate_volatility, passes_volatility_filter, calculate_recent_change
 from app.filters.volume import passes_volume_filter, volume_score
-from app.filters.liquidity import calculate_liquidity, passes_liquidity_filter, liquidity_score
+from app.filters.executability import (
+    calculate_executability_score,
+    classify_executability_band,
+    estimate_fillable_notional,
+    estimate_slippage_bps,
+)
+from app.filters.liquidity import (
+    calculate_liquidity,
+    calculate_notional_depth,
+    calculate_total_notional_depth,
+    passes_liquidity_filter,
+    liquidity_score,
+)
 from app.filters.spread import calculate_spread, passes_spread_filter, spread_score
 from app.filters.movement import classify_movement
 from app.filters.scoring import calculate_score
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_ORDER_NOTIONAL_BRL = 1_000.0
+DEFAULT_MAX_SLIPPAGE_BPS = 25.0
+DEFAULT_OPERABLE_EXECUTABILITY_SCORE = 60.0
+DEFAULT_OPERABLE_SPREAD_PCT = 0.6
 
 
 MOVEMENT_MODIFIERS = {
@@ -136,6 +159,41 @@ class Scanner:
             spread_component = spread_score(order_book)
             repetition_component = min(self._repetition_counts[key] / 5.0, 1.0)
             movement_multiplier = MOVEMENT_MODIFIERS.get(movement_type.value, 1.0)
+            bid_notional_top_n = calculate_notional_depth(order_book, "bid")
+            ask_notional_top_n = calculate_notional_depth(order_book, "ask")
+            total_notional_top_n = calculate_total_notional_depth(order_book)
+            estimated_buy_slippage_bps = estimate_slippage_bps(
+                order_book,
+                "buy",
+                order_notional_brl=DEFAULT_ORDER_NOTIONAL_BRL,
+            )
+            estimated_sell_slippage_bps = estimate_slippage_bps(
+                order_book,
+                "sell",
+                order_notional_brl=DEFAULT_ORDER_NOTIONAL_BRL,
+            )
+            fillable_notional_within_slippage_cap = min(
+                estimate_fillable_notional(order_book, DEFAULT_MAX_SLIPPAGE_BPS, "buy"),
+                estimate_fillable_notional(order_book, DEFAULT_MAX_SLIPPAGE_BPS, "sell"),
+            )
+            serialized_buy_slippage = (
+                None if estimated_buy_slippage_bps == float("inf") else round(estimated_buy_slippage_bps, 2)
+            )
+            serialized_sell_slippage = (
+                None if estimated_sell_slippage_bps == float("inf") else round(estimated_sell_slippage_bps, 2)
+            )
+            serialized_fillable_notional = round(fillable_notional_within_slippage_cap, 2)
+            executability_score = calculate_executability_score(
+                bid_notional_top_n=bid_notional_top_n,
+                ask_notional_top_n=ask_notional_top_n,
+                estimated_buy_slippage_bps=serialized_buy_slippage,
+                estimated_sell_slippage_bps=serialized_sell_slippage,
+                spread_pct=round(calculate_spread(order_book), 4),
+                quote_volume_24h=ticker.quote_volume_24h,
+                fillable_notional_within_slippage_cap=serialized_fillable_notional,
+                order_notional_brl=DEFAULT_ORDER_NOTIONAL_BRL,
+            )
+            executability_band = classify_executability_band(executability_score)
 
             score = calculate_score(
                 ticker=ticker,
@@ -147,6 +205,13 @@ class Scanner:
             )
             historical_confidence = self._historical_calibration.get(pair, {}).get("factor", 1.0)
             score = min(max(round(score * historical_confidence, 1), 0), 100)
+            interesting_signal = score >= 40
+            operable_signal = (
+                executability_score >= DEFAULT_OPERABLE_EXECUTABILITY_SCORE
+                and serialized_sell_slippage is not None
+                and serialized_sell_slippage <= DEFAULT_MAX_SLIPPAGE_BPS
+                and round(calculate_spread(order_book), 4) <= min(self.config.thresholds.max_spread_pct, DEFAULT_OPERABLE_SPREAD_PCT)
+            )
 
             technical_score = calculate_technical_score(
                 volatility_score=volatility_component,
@@ -165,11 +230,24 @@ class Scanner:
                 score=score,
                 technical_score=technical_score,
                 score_version=SCORE_VERSION,
+                executability_version=EXECUTABILITY_VERSION,
+                movement_version=MOVEMENT_VERSION,
+                profile_version=PROFILE_VERSION,
+                executability_score=executability_score,
+                executability_band=executability_band,
+                interesting_signal=interesting_signal,
+                operable_signal=operable_signal,
                 volatility_pct=round(volatility_pct, 2),
                 volume_24h=ticker.volume_24h,
                 quote_volume_24h=ticker.quote_volume_24h,
                 liquidity_units=round(calculate_liquidity(order_book), 2),
+                bid_notional_top_n=round(bid_notional_top_n, 2),
+                ask_notional_top_n=round(ask_notional_top_n, 2),
+                total_notional_top_n=round(total_notional_top_n, 2),
                 spread_pct=round(calculate_spread(order_book), 4),
+                estimated_buy_slippage_bps=serialized_buy_slippage,
+                estimated_sell_slippage_bps=serialized_sell_slippage,
+                fillable_notional_within_slippage_cap=serialized_fillable_notional,
                 movement_type=movement_type,
                 last_price=ticker.last_price,
                 change_pct=round(calculate_recent_change(klines), 2),

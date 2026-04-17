@@ -17,12 +17,29 @@ export interface Opportunity {
   exchange: Exchange;
   pair: string;
   score: number;
+  technical_score?: number | null;
+  score_version?: string;
+  executability_version?: string;
+  movement_version?: string;
+  profile_version?: string;
+  technical_signal_id?: string | null;
+  executability_score?: number | null;
+  executability_band?: string | null;
+  interesting_signal?: boolean | null;
+  operable_signal?: boolean | null;
   volatility_pct: number;
   volume_24h: number;
   quote_volume_24h: number;
   liquidity_units: number;
+  bid_notional_top_n?: number | null;
+  ask_notional_top_n?: number | null;
+  total_notional_top_n?: number | null;
   spread_pct: number;
+  estimated_buy_slippage_bps?: number | null;
+  estimated_sell_slippage_bps?: number | null;
+  fillable_notional_within_slippage_cap?: number | null;
   movement_type: MovementType;
+  movement_persistence_score?: number | null;
   last_price: number;
   change_pct: number;
   detected_at: string;
@@ -32,6 +49,12 @@ export interface Opportunity {
   cross_exchange_reference_price?: number | null;
   arbitrage_available: boolean;
   historical_confidence: number;
+  volatility_score?: number;
+  volume_score?: number;
+  liquidity_score?: number;
+  spread_score?: number;
+  repetition_score?: number;
+  movement_multiplier?: number;
   klines?: Kline[];
 }
 
@@ -79,17 +102,39 @@ export interface AppConfig {
   binance_api_secret: string;
 }
 
+export interface ConfigResponse {
+  config: AppConfig;
+  configured_secrets: Record<string, boolean>;
+}
+
 export interface HistoryRecord {
   id: string;
   exchange: Exchange;
   pair: string;
   score: number;
+  technical_score?: number | null;
+  score_version?: string;
+  executability_version?: string;
+  movement_version?: string;
+  profile_version?: string;
+  technical_signal_id?: string | null;
+  executability_score?: number | null;
+  executability_band?: string | null;
+  interesting_signal?: boolean | null;
+  operable_signal?: boolean | null;
   volatility_pct: number;
   volume_24h: number;
   quote_volume_24h: number;
   liquidity_units: number;
+  bid_notional_top_n?: number | null;
+  ask_notional_top_n?: number | null;
+  total_notional_top_n?: number | null;
   spread_pct: number;
+  estimated_buy_slippage_bps?: number | null;
+  estimated_sell_slippage_bps?: number | null;
+  fillable_notional_within_slippage_cap?: number | null;
   movement_type: MovementType;
+  movement_persistence_score?: number | null;
   last_price: number;
   change_pct: number;
   detected_at: string;
@@ -99,6 +144,12 @@ export interface HistoryRecord {
   cross_exchange_reference_price?: number | null;
   arbitrage_available: boolean;
   historical_confidence: number;
+  volatility_score?: number;
+  volume_score?: number;
+  liquidity_score?: number;
+  spread_score?: number;
+  repetition_score?: number;
+  movement_multiplier?: number;
 }
 
 export interface Analytics {

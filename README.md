@@ -76,8 +76,12 @@ npm --prefix frontend run e2e
 
 - Scanner global com projecao posterior por workspace
 - `technical_score` neutro com `score_version`
+- Camada aditiva de executabilidade com `executability_score`, `executability_band`, `interesting_signal` e `operable_signal`
+- Metricas de book em notional e estimativa de slippage (`bid_notional_top_n`, `ask_notional_top_n`, `estimated_*_slippage_bps`, `fillable_notional_within_slippage_cap`)
 - `technical_signals`, `workspace_signal_projections` e `signal_outcomes`
 - API capaz de operar sem scanner local via `opportunity_snapshots`
+- `/api/opportunities` com ordenacao por score tecnico ou executabilidade e filtro `operable_only`
+- Dashboard com leitura dual para payload legado/novo e explicabilidade operacional no card e no detalhe do sinal
 - Worker dedicado como fluxo padrao de scan
 - Politica de Telegram configuravel por workspace
 - Health check com `mode` (`scanner` ou `api_only`) e `scanner_state`

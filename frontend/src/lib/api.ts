@@ -1,6 +1,7 @@
 import type {
   AdminSessionInfo,
   AppConfig,
+  ConfigResponse,
   AvailablePairsResponse,
   Analytics,
   AuthResponse,
@@ -17,6 +18,7 @@ import type {
   WorkspaceSummary,
 } from "./types";
 import { emitAppError } from "./app-errors";
+import type { OpportunitySortMode } from "./opportunity-operability";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 export const AUTH_TOKEN_STORAGE_KEY = "crypto-analytics-admin-token";
@@ -282,7 +284,8 @@ export function getOpportunities(params?: {
   min_score?: number;
   movement_type?: string;
   arbitrage_only?: boolean;
-  sort_by?: string;
+  operable_only?: boolean;
+  sort_by?: OpportunitySortMode;
   limit?: number;
 }): Promise<Opportunity[]> {
   const query = new URLSearchParams();
@@ -465,7 +468,7 @@ export function getAvailablePairs(): Promise<AvailablePairsResponse> {
   return fetchJSON("/pairs/available", { skipAuthRefresh: true });
 }
 
-export function getConfig(adminToken?: string): Promise<AppConfig> {
+export function getConfig(adminToken?: string): Promise<ConfigResponse> {
   return fetchJSON("/config", { headers: adminHeaders(adminToken) });
 }
 
@@ -473,7 +476,7 @@ export function updateConfig(
   config: Partial<AppConfig>,
   adminToken?: string,
   options?: { skipAudit?: boolean },
-): Promise<AppConfig> {
+): Promise<ConfigResponse> {
   const headers = new Headers(normalizeHeaders(adminHeaders(adminToken)));
   if (options?.skipAudit) {
     headers.set("X-Config-Audit-Mode", "skip");

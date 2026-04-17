@@ -101,6 +101,7 @@ async def evaluate_pending_outcomes(*, limit: int = 50) -> int:
                     detected_at = detected_at.replace(tzinfo=timezone.utc)
 
                 kwargs: dict[str, float] = {}
+                within_1h_window = now <= detected_at + _WINDOW_1H
 
                 if _window_ready(detected_at, _WINDOW_5M, now):
                     kwargs["price_after_5m"] = current_price
@@ -111,8 +112,8 @@ async def evaluate_pending_outcomes(*, limit: int = 50) -> int:
                 if _window_ready(detected_at, _WINDOW_4H, now):
                     kwargs["price_after_4h"] = current_price
 
-                # Also track min/max within 1h window
-                if _window_ready(detected_at, _WINDOW_1H, now):
+                # Track the observed range while the signal is still inside the first hour.
+                if within_1h_window:
                     kwargs["max_price_1h"] = current_price
                     kwargs["min_price_1h"] = current_price
 

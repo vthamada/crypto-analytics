@@ -1,6 +1,6 @@
 # Estado Atual do Sistema
 
-Ultima revisao: 2026-04-16
+Ultima revisao: 2026-04-17
 
 ## Objetivo deste documento
 
@@ -19,6 +19,7 @@ O ponto mais importante para entender o comportamento atual e este:
 
 - o scanner e global
 - as oportunidades detectadas sao globais
+- cada oportunidade agora carrega tambem uma camada paralela de executabilidade
 - a visibilidade final e recalculada por workspace
 - o historico persistido e global, mas filtrado por workspace na leitura
 - o WebSocket e isolado por workspace
@@ -60,7 +61,7 @@ Visao por modulo:
 - `backend/app/main.py`: inicializa banco, bootstrap de admin, publica REST + WebSocket e pode opcionalmente subir o scanner local quando `SCANNER_ENABLED=true`.
 - `backend/app/api/routes.py`: autentica a sessao, resolve o workspace, expoe dashboard, oportunidades, historico, analytics, configuracao, usuarios, invites e auditoria.
 - `backend/app/api/websocket.py`: autentica conexoes e isola streams por workspace.
-- `backend/app/services/scanner.py`: executa a coleta nas exchanges, aplica filtros, classifica o movimento, calcula score e enriquece arbitragem cross-exchange.
+- `backend/app/services/scanner.py`: executa a coleta nas exchanges, aplica filtros, classifica o movimento, calcula score tecnico, calcula executabilidade e enriquece arbitragem cross-exchange.
 - `backend/app/services/persistence.py`: persiste historico, le configuracoes por workspace, agrega configuracoes para o scanner global e recalcula score por workspace na leitura.
 - `backend/app/services/shared_state.py`: persiste estado compartilhado entre worker e API, incluindo `scanner_runtime_state`, `opportunity_snapshots`, `technical_signals`, `workspace_signal_projections`, `signal_outcomes` e `repetition_counts`.
 - `backend/app/worker.py`: processo dedicado de scan usado no fluxo padrao do `docker-compose.yml`.
@@ -209,12 +210,13 @@ Essa classificacao usa:
 - tendencia de volume
 - presenca de reversao recente
 
-### Etapa F. Calculo do score base e do score tecnico
+### Etapa F. Calculo do score base, do score tecnico e da camada de executabilidade
 
 O sistema hoje trabalha com dois conceitos relacionados, mas distintos:
 
 - `score`: score operacional da oportunidade no ciclo corrente
 - `technical_score`: score tecnico neutro, persistido com `score_version` e independente dos pesos do workspace
+- `executability_score`: score paralelo de operabilidade, persistido com `executability_version` e sem sobrescrever o score tecnico
 
 Ambos usam cinco componentes, todos normalizados para escala `0..1` antes da combinacao ponderada:
 
@@ -246,6 +248,40 @@ Depois da soma ponderada, o sistema aplica um modificador por tipo de movimento:
 - `trap`: `0.50`
 
 O `technical_score` e calculado com pesos default fixos em `shared_state.py` e versionado por `SCORE_VERSION`.
+
+Em paralelo, a camada de executabilidade usa os dados do order book para responder se o sinal parece operavel de verdade.
+
+Componentes atuais da executabilidade:
+
+- liquidez em notional nos dois lados do book
+- slippage estimado de compra para uma ordem baseline
+- slippage estimado de venda para uma ordem baseline
+- spread efetivo
+- volume em quote
+- notional preenchivel dentro do cap de slippage
+
+Campos produzidos hoje no `Opportunity`:
+
+- `bid_notional_top_n`
+- `ask_notional_top_n`
+- `total_notional_top_n`
+- `estimated_buy_slippage_bps`
+- `estimated_sell_slippage_bps`
+- `fillable_notional_within_slippage_cap`
+- `executability_score`
+- `executability_band`
+
+Bandas atuais de executabilidade:
+
+- `strong`
+- `good`
+- `fair`
+- `poor`
+
+Classificacoes operacionais derivadas:
+
+- `interesting_signal`: heuristica inicial baseada no score tecnico/base
+- `operable_signal`: heuristica inicial baseada em `executability_score`, cap de slippage de saida e spread efetivo
 
 ### Etapa G. Calibracao historica
 
@@ -313,6 +349,12 @@ O historico em `opportunities` guarda, entre outros campos:
 - `technical_score`
 - `score_version`
 - `technical_signal_id`
+- `executability_score`
+- `executability_band`
+- `interesting_signal`
+- `operable_signal`
+- metricas de notional e slippage do book
+- `executability_version`, `movement_version`, `profile_version`
 
 Existe uma deduplicacao simples:
 
@@ -339,7 +381,7 @@ Para cada workspace, ele faz:
 2. verifica se a exchange esta habilitada nesse workspace
 3. verifica se o par esta habilitado nesse workspace
 4. recalcula o `workspace_score` com os pesos do workspace a partir dos componentes tecnicos
-5. preserva os componentes tecnicos e o fator historico
+5. preserva os componentes tecnicos, o fator historico e a camada de executabilidade
 
 Esse passo e feito por `project_workspace_opportunity()`.
 
@@ -347,6 +389,7 @@ O que isso significa na pratica:
 
 - uma oportunidade pode existir no estado global, mas nao aparecer para um workspace especifico
 - dois workspaces podem ver scores diferentes para a mesma oportunidade base
+- a projecao por workspace preserva `executability_score`, `executability_band` e `operable_signal`; ela recalcula apenas o `workspace_score`
 - essa projecao tambem pode ser materializada em `workspace_signal_projections` para auditoria e analytics
 
 ### Etapa K. Entrega em tempo real
@@ -393,7 +436,7 @@ Isso evita que um workspace silencie o outro quando ambos usam destinos diferent
 Leituras operacionais:
 
 - `/api/dashboard/stats`: usa o estado atual em memoria ou faz fallback para `opportunity_snapshots`, sempre projetando para o workspace atual
-- `/api/opportunities`: lista as oportunidades correntes em memoria ou no snapshot compartilhado, ja filtradas e re-scoreadas para o workspace atual
+- `/api/opportunities`: lista as oportunidades correntes em memoria ou no snapshot compartilhado, ja filtradas e re-scoreadas para o workspace atual, com suporte a ordenacao por `score` ou `executability` e filtro `operable_only`
 - `/api/opportunities/{id}`: detalhe do sinal corrente
 - `/api/history`: le o historico persistido e reaplica filtros do workspace
 - `/api/analytics`: agrega o historico filtrado para o workspace
@@ -445,7 +488,10 @@ O dashboard principal:
 - carrega `stats` e `opportunities` por REST
 - escuta WebSocket por workspace
 - mostra KPIs, checklist de onboarding e tabela de oportunidades
-- abre modal de detalhe com os dados do sinal selecionado
+- suporta leitura dual entre payload legado e payload com executabilidade
+- permite alternar o ranking principal entre score tecnico e operabilidade
+- destaca `interesting_signal` e `operable_signal` com badges e razoes operacionais
+- abre modal de detalhe com os dados do sinal selecionado, incluindo liquidez BRL, slippage e banda de executabilidade quando disponiveis
 
 ### Historico e analytics
 
@@ -489,6 +535,7 @@ O sistema ainda nao e:
 - uma arquitetura distribuida para escalar horizontalmente o scanner e o streaming
 - um sistema com persistencia historica nativamente segregada por workspace
 - um motor de score calibrado por feedback real de performance de sinais
+- um frontend que explique toda a camada de executabilidade com boa UX; isso ainda entra na Release D do plano operacional
 
 ## 8. Pontos de refinamento mais importantes
 
@@ -595,6 +642,7 @@ Refinamento sugerido:
 
 - registrar outcome posterior do sinal
 - validar taxa de acerto por faixa de score
+- validar taxa de acerto tambem por faixa de `executability_score`
 - calibrar pesos com historico real, nao apenas com heuristica manual
 
 ### Refinamento 7. Segredos operacionais

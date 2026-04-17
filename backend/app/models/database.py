@@ -62,7 +62,21 @@ class OpportunityRecord(Base):
     movement_multiplier = Column(Float, default=1.0)
     technical_score = Column(Float, nullable=True)
     score_version = Column(String, nullable=True, default="v1")
+    executability_version = Column(String, nullable=True, default="v1")
+    movement_version = Column(String, nullable=True, default="v1")
+    profile_version = Column(String, nullable=True, default="v1")
     technical_signal_id = Column(String, nullable=True)
+    executability_score = Column(Float, nullable=True)
+    executability_band = Column(String, nullable=True)
+    interesting_signal = Column(Boolean, nullable=True)
+    operable_signal = Column(Boolean, nullable=True)
+    bid_notional_top_n = Column(Float, nullable=True)
+    ask_notional_top_n = Column(Float, nullable=True)
+    total_notional_top_n = Column(Float, nullable=True)
+    estimated_buy_slippage_bps = Column(Float, nullable=True)
+    estimated_sell_slippage_bps = Column(Float, nullable=True)
+    fillable_notional_within_slippage_cap = Column(Float, nullable=True)
+    movement_persistence_score = Column(Float, nullable=True)
 
 
 class ConfigRecord(Base):
@@ -191,6 +205,9 @@ class ScannerRuntimeStateRecord(Base):
     last_success_at = Column(DateTime, nullable=True)
     opportunities_count = Column(Integer, nullable=False, default=0)
     score_version = Column(String, nullable=False, default="v1")
+    executability_version = Column(String, nullable=False, default="v1")
+    movement_version = Column(String, nullable=False, default="v1")
+    profile_version = Column(String, nullable=False, default="v1")
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
@@ -203,12 +220,26 @@ class OpportunitySnapshotRecord(Base):
     score = Column(Float, nullable=False)
     technical_score = Column(Float, nullable=False)
     score_version = Column(String, nullable=False, default="v1")
+    executability_version = Column(String, nullable=False, default="v1")
+    movement_version = Column(String, nullable=False, default="v1")
+    profile_version = Column(String, nullable=False, default="v1")
     volatility_pct = Column(Float, nullable=False)
     volume_24h = Column(Float, nullable=False)
     quote_volume_24h = Column(Float, nullable=False)
     liquidity_units = Column(Float, nullable=False)
+    bid_notional_top_n = Column(Float, nullable=True)
+    ask_notional_top_n = Column(Float, nullable=True)
+    total_notional_top_n = Column(Float, nullable=True)
     spread_pct = Column(Float, nullable=False)
+    executability_score = Column(Float, nullable=True)
+    executability_band = Column(String, nullable=True)
+    interesting_signal = Column(Boolean, nullable=True)
+    operable_signal = Column(Boolean, nullable=True)
+    estimated_buy_slippage_bps = Column(Float, nullable=True)
+    estimated_sell_slippage_bps = Column(Float, nullable=True)
+    fillable_notional_within_slippage_cap = Column(Float, nullable=True)
     movement_type = Column(String, nullable=False)
+    movement_persistence_score = Column(Float, nullable=True)
     last_price = Column(Float, nullable=False)
     change_pct = Column(Float, nullable=False)
     detected_at = Column(DateTime, nullable=False, default=utcnow)
@@ -234,6 +265,9 @@ class TechnicalSignalRecord(Base):
     pair = Column(String, nullable=False, index=True)
     technical_score = Column(Float, nullable=False, index=True)
     score_version = Column(String, nullable=False, default="v1")
+    executability_version = Column(String, nullable=False, default="v1")
+    movement_version = Column(String, nullable=False, default="v1")
+    profile_version = Column(String, nullable=False, default="v1")
     volatility_pct = Column(Float, nullable=False)
     volatility_score = Column(Float, default=0.0)
     volume_24h = Column(Float, nullable=False)
@@ -263,6 +297,10 @@ class WorkspaceSignalProjectionRecord(Base):
     workspace_id = Column(String, nullable=False, index=True)
     technical_signal_id = Column(String, nullable=False, index=True)
     workspace_score = Column(Float, nullable=False)
+    score_version = Column(String, nullable=False, default="v1")
+    executability_version = Column(String, nullable=False, default="v1")
+    movement_version = Column(String, nullable=False, default="v1")
+    profile_version = Column(String, nullable=False, default="v1")
     visible = Column(Boolean, nullable=False, default=True)
     alert_eligible = Column(Boolean, nullable=False, default=False)
     projection_reason = Column(String, nullable=True)
@@ -353,7 +391,7 @@ async def init_db() -> None:
 
 
 async def ensure_schema_compatibility() -> None:
-    expected_columns = {
+    opportunity_columns = {
         "cross_exchange_gap_pct": "FLOAT DEFAULT 0.0",
         "cross_exchange_reference_exchange": "VARCHAR",
         "cross_exchange_reference_price": "FLOAT",
@@ -367,7 +405,60 @@ async def ensure_schema_compatibility() -> None:
         "movement_multiplier": "FLOAT DEFAULT 1.0",
         "technical_score": "FLOAT",
         "score_version": "VARCHAR DEFAULT 'v1'",
+        "executability_version": "VARCHAR DEFAULT 'v1'",
+        "movement_version": "VARCHAR DEFAULT 'v1'",
+        "profile_version": "VARCHAR DEFAULT 'v1'",
         "technical_signal_id": "VARCHAR",
+        "executability_score": "FLOAT",
+        "executability_band": "VARCHAR",
+        "interesting_signal": "BOOLEAN",
+        "operable_signal": "BOOLEAN",
+        "bid_notional_top_n": "FLOAT",
+        "ask_notional_top_n": "FLOAT",
+        "total_notional_top_n": "FLOAT",
+        "estimated_buy_slippage_bps": "FLOAT",
+        "estimated_sell_slippage_bps": "FLOAT",
+        "fillable_notional_within_slippage_cap": "FLOAT",
+        "movement_persistence_score": "FLOAT",
+    }
+
+    scanner_runtime_columns = {
+        "score_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "executability_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+    }
+
+    snapshot_columns = {
+        "score_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "executability_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "bid_notional_top_n": "FLOAT",
+        "ask_notional_top_n": "FLOAT",
+        "total_notional_top_n": "FLOAT",
+        "executability_score": "FLOAT",
+        "executability_band": "VARCHAR",
+        "interesting_signal": "BOOLEAN",
+        "operable_signal": "BOOLEAN",
+        "estimated_buy_slippage_bps": "FLOAT",
+        "estimated_sell_slippage_bps": "FLOAT",
+        "fillable_notional_within_slippage_cap": "FLOAT",
+        "movement_persistence_score": "FLOAT",
+    }
+
+    technical_signal_columns = {
+        "score_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "executability_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+    }
+
+    workspace_projection_columns = {
+        "score_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "executability_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
     }
 
     audit_columns = {
@@ -420,13 +511,22 @@ async def ensure_schema_compatibility() -> None:
                 continue
             await conn.run_sync(lambda sync_conn, name=table_name: Base.metadata.tables[name].create(sync_conn))
 
-        existing_columns = await conn.run_sync(
-            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("opportunities")}
-        )
-        for column_name, ddl in expected_columns.items():
-            if column_name in existing_columns:
-                continue
-            await conn.execute(text(f"ALTER TABLE opportunities ADD COLUMN {column_name} {ddl}"))
+        for table_name, columns in (
+            ("opportunities", opportunity_columns),
+            ("scanner_runtime_state", scanner_runtime_columns),
+            ("opportunity_snapshots", snapshot_columns),
+            ("technical_signals", technical_signal_columns),
+            ("workspace_signal_projections", workspace_projection_columns),
+        ):
+            existing_columns = await conn.run_sync(
+                lambda sync_conn, current_table=table_name: {
+                    column["name"] for column in inspect(sync_conn).get_columns(current_table)
+                }
+            )
+            for column_name, ddl in columns.items():
+                if column_name in existing_columns:
+                    continue
+                await conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}"))
 
         audit_existing_columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("audit_logs")}

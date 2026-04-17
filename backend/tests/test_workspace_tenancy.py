@@ -122,6 +122,11 @@ def test_workspace_projection_uses_workspace_specific_weights_and_filters():
         exchange=Exchange.BINANCE,
         pair="BTC_BRL",
         score=50,
+        technical_score=47.5,
+        executability_score=82.0,
+        executability_band="strong",
+        interesting_signal=True,
+        operable_signal=True,
         volatility_pct=5,
         volume_24h=1000,
         quote_volume_24h=150000,
@@ -161,3 +166,6 @@ def test_workspace_projection_uses_workspace_specific_weights_and_filters():
     assert projected_spread is not None
     assert projected_filtered is None
     assert projected_volatility.score > projected_spread.score
+    assert projected_volatility.executability_score == 82.0
+    assert projected_volatility.operable_signal is True
+    assert projected_spread.executability_band == "strong"

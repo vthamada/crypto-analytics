@@ -173,6 +173,19 @@ const CONFIG_UPDATE_FIELD_LABELS: Record<string, string> = {
   binance_api_secret: "API secret Binance",
 };
 
+const SENSITIVE_FIELDS = [
+  "telegram_bot_token",
+  "telegram_chat_id",
+  "novadax_api_key",
+  "novadax_api_secret",
+  "mb_api_key",
+  "mb_api_secret",
+  "binance_api_key",
+  "binance_api_secret",
+] as const;
+
+type SensitiveField = (typeof SENSITIVE_FIELDS)[number];
+
 function buildOperationalConfigPayload(config: AppConfig): Partial<AppConfig> {
   return {
     thresholds: config.thresholds,
@@ -311,6 +324,8 @@ export default function SettingsPage() {
   const [credentialValidationResults, setCredentialValidationResults] = useState<
     ExchangeCredentialValidationResult[]
   >([]);
+  const [configuredSecrets, setConfiguredSecrets] = useState<Record<string, boolean>>({});
+  const [editingSecrets, setEditingSecrets] = useState<Record<string, boolean>>({});
   const [validatingCredentials, setValidatingCredentials] = useState(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedOperationalConfigRef = useRef("");
@@ -322,6 +337,8 @@ export default function SettingsPage() {
 
   function clearWorkspaceManagementState() {
     setConfig(null);
+    setConfiguredSecrets({});
+    setEditingSecrets({});
     setAuditLog([]);
     setUsers([]);
     setInvites([]);
@@ -400,8 +417,10 @@ export default function SettingsPage() {
         listUsers(token),
         listInvites(token),
       ]);
-      setConfig(data);
-      lastSavedOperationalConfigRef.current = serializeOperationalConfig(data);
+      setConfig(data.config);
+      setConfiguredSecrets(data.configured_secrets);
+      setEditingSecrets({});
+      lastSavedOperationalConfigRef.current = serializeOperationalConfig(data.config);
       setAutoSaveStatus("idle");
       setAuditLog(audit);
       setUsers(workspaceUsers);
@@ -464,6 +483,8 @@ export default function SettingsPage() {
     setInvites([]);
     setAvailablePairsCatalog(null);
     setActiveWorkspaceId("");
+    setConfiguredSecrets({});
+    setEditingSecrets({});
     setAuthError(null);
     setPairCatalogError(null);
     setTelegramTestFeedback(null);
@@ -506,7 +527,8 @@ export default function SettingsPage() {
       setAutoSaveStatus("saving");
       void updateConfig(buildOperationalConfigPayload(config), adminToken, { skipAudit: true })
         .then((updated) => {
-          lastSavedOperationalConfigRef.current = serializeOperationalConfig(updated);
+          setConfiguredSecrets(updated.configured_secrets);
+          lastSavedOperationalConfigRef.current = serializeOperationalConfig(updated.config);
           setAutoSaveStatus("saved");
           setAuthError(null);
           window.setTimeout(() => {
@@ -573,8 +595,10 @@ export default function SettingsPage() {
     try {
       const configSnapshot = { ...config };
       const updated = await updateConfig(configSnapshot, adminToken);
-      setConfig(updated);
-      lastSavedOperationalConfigRef.current = serializeOperationalConfig(updated);
+      setConfig(updated.config);
+      setConfiguredSecrets(updated.configured_secrets);
+      setEditingSecrets({});
+      lastSavedOperationalConfigRef.current = serializeOperationalConfig(updated.config);
       setAuthError(null);
       setSaved(true);
       setAutoSaveStatus("saved");
@@ -834,6 +858,16 @@ export default function SettingsPage() {
 
   function toggleShow(field: string) {
     setShowSecrets((prev) => ({ ...prev, [field]: !prev[field] }));
+  }
+
+  function toggleSecretEditing(field: SensitiveField) {
+    setEditingSecrets((current) => {
+      const nextEditing = !current[field];
+      if (!nextEditing && config?.[field] === "") {
+        return { ...current, [field]: false };
+      }
+      return { ...current, [field]: nextEditing };
+    });
   }
 
   async function handleTelegramTest() {
@@ -1888,21 +1922,72 @@ export default function SettingsPage() {
               <Separator />
 
               <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant={
+                        isSecretConfigured(configuredSecrets, "telegram_bot_token", "telegram_chat_id")
+                          ? "default"
+                          : "outline"
+                      }
+                    >
+                      {isSecretConfigured(configuredSecrets, "telegram_bot_token", "telegram_chat_id")
+                        ? "Telegram configurado"
+                        : "Telegram pendente"}
+                    </Badge>
+                    {config.telegram_bot_token || config.telegram_chat_id ? (
+                      <Badge variant="secondary">edicao em andamento</Badge>
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setEditingSecrets((current) => {
+                        const nextEditing = !(current.telegram_bot_token || current.telegram_chat_id);
+                        return {
+                          ...current,
+                          telegram_bot_token: nextEditing,
+                          telegram_chat_id: nextEditing,
+                        };
+                      })
+                    }
+                  >
+                    {editingSecrets.telegram_bot_token || editingSecrets.telegram_chat_id
+                      ? "Cancelar edicao"
+                      : "Editar credenciais"}
+                  </Button>
+                </div>
                 <CredentialField
                   label="Bot token"
-                  placeholder="Preencha apenas para atualizar"
+                  placeholder={
+                    configuredSecrets.telegram_bot_token && !editingSecrets.telegram_bot_token
+                      ? "Credencial ja cadastrada"
+                      : "Preencha para cadastrar ou atualizar"
+                  }
                   value={config.telegram_bot_token}
                   show={!!showSecrets.telegram_bot_token}
                   onToggle={() => toggleShow("telegram_bot_token")}
                   onChange={(value) => setConfig({ ...config, telegram_bot_token: value })}
+                  configured={!!configuredSecrets.telegram_bot_token}
+                  editing={!!editingSecrets.telegram_bot_token || config.telegram_bot_token.length > 0}
+                  onEditToggle={() => toggleSecretEditing("telegram_bot_token")}
                 />
                 <CredentialField
                   label="Chat ID"
-                  placeholder="Preencha apenas para atualizar"
+                  placeholder={
+                    configuredSecrets.telegram_chat_id && !editingSecrets.telegram_chat_id
+                      ? "Credencial ja cadastrada"
+                      : "Preencha para cadastrar ou atualizar"
+                  }
                   value={config.telegram_chat_id}
                   show={!!showSecrets.telegram_chat_id}
                   onToggle={() => toggleShow("telegram_chat_id")}
                   onChange={(value) => setConfig({ ...config, telegram_chat_id: value })}
+                  configured={!!configuredSecrets.telegram_chat_id}
+                  editing={!!editingSecrets.telegram_chat_id || config.telegram_chat_id.length > 0}
+                  onEditToggle={() => toggleSecretEditing("telegram_chat_id")}
                 />
               </div>
 
@@ -1948,22 +2033,69 @@ export default function SettingsPage() {
             <CardContent className="space-y-6">
               {EXCHANGE_CRED_FIELDS.map(({ exchange, label, keyField, secretField }) => (
                 <div key={exchange} className="space-y-3">
-                  <p className="text-sm font-semibold text-muted-foreground">{label}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-muted-foreground">{label}</p>
+                      <Badge
+                        variant={
+                          isSecretConfigured(configuredSecrets, keyField, secretField) ? "default" : "outline"
+                        }
+                      >
+                        {isSecretConfigured(configuredSecrets, keyField, secretField)
+                          ? "credenciais salvas"
+                          : "sem credenciais"}
+                      </Badge>
+                      {config[keyField] || config[secretField] ? (
+                        <Badge variant="secondary">edicao em andamento</Badge>
+                      ) : null}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setEditingSecrets((current) => {
+                          const nextEditing = !(current[keyField] || current[secretField]);
+                          return {
+                            ...current,
+                            [keyField]: nextEditing,
+                            [secretField]: nextEditing,
+                          };
+                        })
+                      }
+                    >
+                      {editingSecrets[keyField] || editingSecrets[secretField] ? "Cancelar edicao" : "Editar"}
+                    </Button>
+                  </div>
                   <CredentialField
                     label="API key"
-                    placeholder="Preencha apenas para atualizar"
+                    placeholder={
+                      configuredSecrets[keyField] && !editingSecrets[keyField]
+                        ? "Credencial ja cadastrada"
+                        : "Preencha para cadastrar ou atualizar"
+                    }
                     value={config[keyField]}
                     show={!!showSecrets[keyField]}
                     onToggle={() => toggleShow(keyField)}
                     onChange={(value) => setConfig({ ...config, [keyField]: value })}
+                    configured={!!configuredSecrets[keyField]}
+                    editing={!!editingSecrets[keyField] || config[keyField].length > 0}
+                    onEditToggle={() => toggleSecretEditing(keyField)}
                   />
                   <CredentialField
                     label="API secret"
-                    placeholder="Preencha apenas para atualizar"
+                    placeholder={
+                      configuredSecrets[secretField] && !editingSecrets[secretField]
+                        ? "Credencial ja cadastrada"
+                        : "Preencha para cadastrar ou atualizar"
+                    }
                     value={config[secretField]}
                     show={!!showSecrets[secretField]}
                     onToggle={() => toggleShow(secretField)}
                     onChange={(value) => setConfig({ ...config, [secretField]: value })}
+                    configured={!!configuredSecrets[secretField]}
+                    editing={!!editingSecrets[secretField] || config[secretField].length > 0}
+                    onEditToggle={() => toggleSecretEditing(secretField)}
                   />
                   {exchange !== "binance" ? <Separator /> : null}
                 </div>
@@ -2113,6 +2245,9 @@ function CredentialField({
   show,
   onToggle,
   onChange,
+  configured = false,
+  editing = true,
+  onEditToggle,
 }: {
   label: string;
   placeholder: string;
@@ -2120,6 +2255,9 @@ function CredentialField({
   show: boolean;
   onToggle: () => void;
   onChange: (value: string) => void;
+  configured?: boolean;
+  editing?: boolean;
+  onEditToggle?: () => void;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -2130,17 +2268,30 @@ function CredentialField({
           placeholder={placeholder}
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="pr-9 font-mono text-sm"
+          className="pr-20 font-mono text-sm"
           autoComplete="off"
+          disabled={configured && !editing && value === ""}
         />
-        <button
-          type="button"
-          onClick={onToggle}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          tabIndex={-1}
-        >
-          {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        </button>
+        <div className="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
+          {configured && !editing && value === "" && onEditToggle ? (
+            <button
+              type="button"
+              onClick={onEditToggle}
+              className="text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              tabIndex={-1}
+            >
+              editar
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onToggle}
+            className="text-muted-foreground hover:text-foreground"
+            tabIndex={-1}
+          >
+            {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2148,6 +2299,13 @@ function CredentialField({
 
 function formatExchangeLabel(exchange: ExchangeCredentialValidationResult["exchange"]) {
   return EXCHANGE_CRED_FIELDS.find((item) => item.exchange === exchange)?.label ?? exchange;
+}
+
+function isSecretConfigured(
+  configuredSecrets: Record<string, boolean>,
+  ...fields: SensitiveField[]
+): boolean {
+  return fields.some((field) => configuredSecrets[field]);
 }
 
 function formatValidationStatus(status: ExchangeCredentialValidationResult["state"]) {

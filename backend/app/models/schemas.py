@@ -74,13 +74,27 @@ class Opportunity(BaseModel):
     score: float = Field(ge=0, le=100)
     technical_score: float | None = None
     score_version: str = "v1"
+    executability_version: str = "v1"
+    movement_version: str = "v1"
+    profile_version: str = "v1"
     technical_signal_id: str | None = None
+    executability_score: float | None = None
+    executability_band: str | None = None
+    interesting_signal: bool | None = None
+    operable_signal: bool | None = None
     volatility_pct: float
     volume_24h: float
     quote_volume_24h: float
     liquidity_units: float
+    bid_notional_top_n: float | None = None
+    ask_notional_top_n: float | None = None
+    total_notional_top_n: float | None = None
     spread_pct: float
+    estimated_buy_slippage_bps: float | None = None
+    estimated_sell_slippage_bps: float | None = None
+    fillable_notional_within_slippage_cap: float | None = None
     movement_type: MovementType
+    movement_persistence_score: float | None = None
     last_price: float
     change_pct: float
     detected_at: datetime = Field(default_factory=utcnow)
@@ -140,6 +154,11 @@ class AppConfig(BaseModel):
     binance_api_secret: str = ""
 
 
+class ConfigResponse(BaseModel):
+    config: AppConfig
+    configured_secrets: dict[str, bool]
+
+
 class DashboardStats(BaseModel):
     total_opportunities: int
     active_opportunities: int
@@ -158,12 +177,29 @@ class HistoryRecord(BaseModel):
     score: float
     technical_score: float | None = None
     score_version: str = "v1"
+    executability_version: str = "v1"
+    movement_version: str = "v1"
+    profile_version: str = "v1"
+    technical_signal_id: str | None = None
+    executability_score: float | None = None
+    executability_band: str | None = None
+    interesting_signal: bool | None = None
+    operable_signal: bool | None = None
     volatility_pct: float
     volume_24h: float
     liquidity_units: float
+    quote_volume_24h: float
+    bid_notional_top_n: float | None = None
+    ask_notional_top_n: float | None = None
+    total_notional_top_n: float | None = None
     spread_pct: float
+    estimated_buy_slippage_bps: float | None = None
+    estimated_sell_slippage_bps: float | None = None
+    fillable_notional_within_slippage_cap: float | None = None
     movement_type: MovementType
+    movement_persistence_score: float | None = None
     last_price: float
+    change_pct: float
     detected_at: datetime
     duration_minutes: float
     cross_exchange_gap_pct: float = 0.0

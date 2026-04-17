@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -10,6 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,20 +23,29 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Opportunity } from "@/lib/types";
+import {
+  formatBps,
+  formatCurrency,
+  formatCurrencyCompact,
+  formatNotionalOrFallback,
+  formatSignedPercent,
+  getExecutabilityHighlight,
+  getExecutabilityScore,
+  getOperabilityReasons,
+  getReasonToneClasses,
+  getSortValue,
+  getTechnicalScore,
+  hasExecutability,
+  isInterestingSignal,
+  isOperableSignal,
+  type OpportunitySortMode,
+} from "@/lib/opportunity-operability";
 import { cn } from "@/lib/utils";
 
 interface OpportunitiesTableProps {
   opportunities: Opportunity[];
   loading?: boolean;
   onSelect?: (opportunity: Opportunity) => void;
-}
-
-function formatPrice(price: number): string {
-  return `R$ ${price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
-}
-
-function formatCompactVolume(volume: number): string {
-  return `R$ ${(volume / 1000).toFixed(0)}K`;
 }
 
 function scoreColor(score: number): string {
@@ -45,10 +56,10 @@ function scoreColor(score: number): string {
 
 function movementBadge(type: string) {
   const map: Record<string, { label: string; variant: string }> = {
-    strong_range: { label: "📈 Forte", variant: "bg-emerald-500/15 text-emerald-500" },
-    spike: { label: "⚡ Spike", variant: "bg-yellow-500/15 text-yellow-500" },
-    weak: { label: "😐 Fraco", variant: "bg-muted text-muted-foreground" },
-    trap: { label: "⚠ Armadilha", variant: "bg-red-500/15 text-red-500" },
+    strong_range: { label: "Forte", variant: "bg-emerald-500/15 text-emerald-500" },
+    spike: { label: "Spike", variant: "bg-yellow-500/15 text-yellow-500" },
+    weak: { label: "Fraco", variant: "bg-muted text-muted-foreground" },
+    trap: { label: "Armadilha", variant: "bg-red-500/15 text-red-500" },
   };
   const info = map[type] || { label: type, variant: "bg-muted text-muted-foreground" };
   return (
@@ -67,6 +78,24 @@ function exchangeLabel(exchange: string): string {
   return map[exchange] || exchange;
 }
 
+function sortLabel(sortBy: OpportunitySortMode): string {
+  switch (sortBy) {
+    case "executability":
+      return "operabilidade";
+    case "gap":
+      return "gap";
+    case "volume":
+      return "volume";
+    case "volatility":
+      return "volatilidade";
+    case "spread":
+      return "spread";
+    case "score":
+    default:
+      return "score tecnico";
+  }
+}
+
 export function OpportunitiesTable({
   opportunities,
   loading,
@@ -76,109 +105,223 @@ export function OpportunitiesTable({
   const [exchangeFilter, setExchangeFilter] = useState<string>("all");
   const [movementFilter, setMovementFilter] = useState<string>("all");
   const [minScore, setMinScore] = useState("0");
-  const [sortBy, setSortBy] = useState<string>("score");
+  const [sortBy, setSortBy] = useState<OpportunitySortMode>("score");
   const [arbitrageOnly, setArbitrageOnly] = useState(false);
+  const [operableOnly, setOperableOnly] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+
+  const deferredSearch = useDeferredValue(search);
+  const executabilityAvailable = opportunities.some(hasExecutability);
 
   const filtered = opportunities.filter((opportunity) => {
-    if (search && !opportunity.pair.toLowerCase().includes(search.toLowerCase())) return false;
+    if (deferredSearch && !opportunity.pair.toLowerCase().includes(deferredSearch.toLowerCase())) return false;
     if (exchangeFilter !== "all" && opportunity.exchange !== exchangeFilter) return false;
     if (movementFilter !== "all" && opportunity.movement_type !== movementFilter) return false;
-    if (Number(minScore) > 0 && opportunity.score < Number(minScore)) return false;
+    if (Number(minScore) > 0 && getTechnicalScore(opportunity) < Number(minScore)) return false;
     if (arbitrageOnly && !opportunity.arbitrage_available) return false;
+    if (operableOnly && !isOperableSignal(opportunity)) return false;
     return true;
   });
 
   const sorted = [...filtered].sort((left, right) => {
-    switch (sortBy) {
-      case "gap":
-        return right.cross_exchange_gap_pct - left.cross_exchange_gap_pct;
-      case "volume":
-        return right.quote_volume_24h - left.quote_volume_24h;
-      case "volatility":
-        return right.volatility_pct - left.volatility_pct;
-      case "spread":
-        return left.spread_pct - right.spread_pct;
-      default:
-        return right.score - left.score;
+    const primaryDelta = getSortValue(right, sortBy) - getSortValue(left, sortBy);
+    if (primaryDelta !== 0) {
+      return primaryDelta;
     }
+
+    const technicalDelta = getTechnicalScore(right) - getTechnicalScore(left);
+    if (technicalDelta !== 0) {
+      return technicalDelta;
+    }
+
+    const executabilityDelta = (getExecutabilityScore(right) ?? -1) - (getExecutabilityScore(left) ?? -1);
+    if (executabilityDelta !== 0) {
+      return executabilityDelta;
+    }
+
+    return Date.parse(right.detected_at) - Date.parse(left.detected_at);
   });
+
+  const activeFiltersCount = [
+    deferredSearch.trim().length > 0,
+    Number(minScore) > 0,
+    exchangeFilter !== "all",
+    movementFilter !== "all",
+    sortBy !== "score",
+    arbitrageOnly,
+    operableOnly,
+  ].filter(Boolean).length;
+
+  const topTechnicalScore = sorted[0] ? getTechnicalScore(sorted[0]) : 0;
+  const topExecutabilityScore = sorted[0] ? getExecutabilityScore(sorted[0]) : null;
+  const operableCount = opportunities.filter(isOperableSignal).length;
+  const interestingCount = opportunities.filter(isInterestingSignal).length;
 
   return (
     <Card className="rounded-2xl">
-      <CardHeader className="pb-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="text-lg">Oportunidades Detectadas</CardTitle>
-          <div className="flex flex-wrap gap-2">
-            <Input
-              placeholder="Buscar par..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="h-9 w-full sm:w-40"
-            />
-            <Input
-              placeholder="Score min."
-              type="number"
-              value={minScore}
-              onChange={(event) => setMinScore(event.target.value)}
-              className="h-9 w-full sm:w-28"
-            />
-            <Select value={exchangeFilter} onValueChange={(value) => setExchangeFilter(value ?? "all")}>
-              <SelectTrigger className="h-9 w-full sm:w-36">
-                <SelectValue placeholder="Exchange" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="novadax">NovaDAX</SelectItem>
-                <SelectItem value="mercado_bitcoin">Mercado BTC</SelectItem>
-                <SelectItem value="binance">Binance</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={movementFilter} onValueChange={(value) => setMovementFilter(value ?? "all")}>
-              <SelectTrigger className="h-9 w-full sm:w-36">
-                <SelectValue placeholder="Movimento" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="strong_range">Forte</SelectItem>
-                <SelectItem value="spike">Spike</SelectItem>
-                <SelectItem value="weak">Fraco</SelectItem>
-                <SelectItem value="trap">Armadilha</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={sortBy} onValueChange={(value) => setSortBy(value ?? "score")}>
-              <SelectTrigger className="h-9 w-full sm:w-36">
-                <SelectValue placeholder="Ordenar" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="score">Score</SelectItem>
-                <SelectItem value="gap">Gap</SelectItem>
-                <SelectItem value="volume">Volume</SelectItem>
-                <SelectItem value="volatility">Volatilidade</SelectItem>
-                <SelectItem value="spread">Spread</SelectItem>
-              </SelectContent>
-            </Select>
-            <label className="flex h-9 w-full items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground sm:w-auto">
-              <input
-                type="checkbox"
-                checked={arbitrageOnly}
-                onChange={(event) => setArbitrageOnly(event.target.checked)}
+      <CardHeader className="space-y-4 pb-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-1">
+            <CardTitle className="text-lg">Oportunidades Detectadas</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {loading
+                ? "Atualizando sinais em tempo real..."
+                : `${sorted.length} sinais visiveis • ordenado por ${sortLabel(sortBy)}${
+                    sortBy === "executability" && topExecutabilityScore != null
+                      ? ` • melhor operabilidade ${topExecutabilityScore.toFixed(1)}`
+                      : ` • melhor score ${topTechnicalScore.toFixed(1)}`
+                  }`}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 sm:flex">
+            <SummaryCard label="Resultados" value={String(sorted.length)} />
+            <SummaryCard label="Operaveis" value={String(operableCount)} />
+            <SummaryCard label="Interessantes" value={String(interestingCount)} />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-muted/20 p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                Ranking principal
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={sortBy === "score" ? "default" : "outline"}
+                  onClick={() => setSortBy("score")}
+                >
+                  Score tecnico
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={sortBy === "executability" ? "default" : "outline"}
+                  disabled={!executabilityAvailable}
+                  onClick={() => setSortBy("executability")}
+                >
+                  Operabilidade
+                </Button>
+              </div>
+            </div>
+
+            {!executabilityAvailable ? (
+              <div className="rounded-xl border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                Payload atual ainda nao traz executabilidade. Mantendo leitura tecnica.
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 sm:hidden">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Search className="h-3.5 w-3.5" />
+              <span>Busca e refinamento</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobileFiltersOpen((current) => !current)}
+              className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              {mobileFiltersOpen ? "Ocultar filtros" : "Mostrar filtros"}
+            </button>
+          </div>
+
+          <div className={cn("hidden sm:block", mobileFiltersOpen && "block sm:block")}>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+              <Input
+                placeholder="Buscar par..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="h-10 sm:h-9 lg:col-span-2"
               />
-              Arbitragem
-            </label>
+              <Input
+                placeholder="Score min."
+                type="number"
+                value={minScore}
+                onChange={(event) => setMinScore(event.target.value)}
+                className="h-10 sm:h-9"
+              />
+              <Select value={exchangeFilter} onValueChange={(value) => setExchangeFilter(value ?? "all")}>
+                <SelectTrigger className="h-10 sm:h-9">
+                  <SelectValue placeholder="Exchange" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="novadax">NovaDAX</SelectItem>
+                  <SelectItem value="mercado_bitcoin">Mercado BTC</SelectItem>
+                  <SelectItem value="binance">Binance</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={movementFilter} onValueChange={(value) => setMovementFilter(value ?? "all")}>
+                <SelectTrigger className="h-10 sm:h-9">
+                  <SelectValue placeholder="Movimento" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="strong_range">Forte</SelectItem>
+                  <SelectItem value="spike">Spike</SelectItem>
+                  <SelectItem value="weak">Fraco</SelectItem>
+                  <SelectItem value="trap">Armadilha</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={sortBy} onValueChange={(value) => setSortBy((value as OpportunitySortMode) ?? "score")}>
+                <SelectTrigger className="h-10 sm:h-9">
+                  <SelectValue placeholder="Ordenar" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="score">Score tecnico</SelectItem>
+                  <SelectItem value="executability" disabled={!executabilityAvailable}>
+                    Operabilidade
+                  </SelectItem>
+                  <SelectItem value="gap">Gap</SelectItem>
+                  <SelectItem value="volume">Volume</SelectItem>
+                  <SelectItem value="volatility">Volatilidade</SelectItem>
+                  <SelectItem value="spread">Spread</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-2">
+              <label className="inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-sm text-muted-foreground sm:h-9">
+                <input
+                  type="checkbox"
+                  checked={operableOnly}
+                  disabled={!executabilityAvailable}
+                  onChange={(event) => setOperableOnly(event.target.checked)}
+                />
+                Operaveis
+              </label>
+              <label className="inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-sm text-muted-foreground sm:h-9">
+                <input
+                  type="checkbox"
+                  checked={arbitrageOnly}
+                  onChange={(event) => setArbitrageOnly(event.target.checked)}
+                />
+                Arbitragem
+              </label>
+              <div className="inline-flex h-10 items-center gap-2 rounded-xl border border-dashed px-3 text-sm text-muted-foreground sm:h-9">
+                <span>{activeFiltersCount} filtros ativos</span>
+              </div>
+            </div>
           </div>
         </div>
       </CardHeader>
+
       <CardContent className="p-0">
         <div className="space-y-3 px-4 pb-4 sm:hidden">
           {loading ? (
             Array.from({ length: 5 }).map((_, index) => (
-              <div key={index} className="rounded-xl border p-4">
+              <div key={index} className="rounded-2xl border p-4">
                 <div className="space-y-3">
                   <div className="h-5 w-24 animate-pulse rounded bg-muted" />
                   <div className="h-4 w-32 animate-pulse rounded bg-muted" />
                   <div className="grid grid-cols-2 gap-2">
-                    {Array.from({ length: 4 }).map((__, cellIndex) => (
-                      <div key={cellIndex} className="h-14 animate-pulse rounded-lg bg-muted" />
+                    {Array.from({ length: 6 }).map((__, cellIndex) => (
+                      <div key={cellIndex} className="h-16 animate-pulse rounded-xl bg-muted" />
                     ))}
                   </div>
                 </div>
@@ -189,72 +332,120 @@ export function OpportunitiesTable({
               Nenhuma oportunidade encontrada
             </div>
           ) : (
-            sorted.map((opportunity) => (
-              <button
-                key={opportunity.id}
-                type="button"
-                data-testid={`opportunity-${opportunity.id}`}
-                className={cn(
-                  "w-full rounded-xl border p-4 text-left transition-colors",
-                  opportunity.score >= 70 && "bg-emerald-500/5 hover:bg-emerald-500/10",
-                  opportunity.score >= 40 && opportunity.score < 70 && "hover:bg-yellow-500/5",
-                  opportunity.arbitrage_available && "ring-1 ring-blue-500/20",
-                )}
-                onClick={() => onSelect?.(opportunity)}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-base font-semibold">{opportunity.pair.replace("_", "/")}</p>
-                    <p className="text-sm text-muted-foreground">{exchangeLabel(opportunity.exchange)}</p>
+            sorted.map((opportunity) => {
+              const technicalScore = getTechnicalScore(opportunity);
+              const executabilityScore = getExecutabilityScore(opportunity);
+              const reasons = getOperabilityReasons(opportunity);
+
+              return (
+                <button
+                  key={opportunity.id}
+                  type="button"
+                  data-testid={`opportunity-${opportunity.id}`}
+                  className={cn(
+                    "w-full rounded-2xl border p-4 text-left transition-colors",
+                    technicalScore >= 70 && "bg-emerald-500/5 hover:bg-emerald-500/10",
+                    technicalScore >= 40 && technicalScore < 70 && "bg-yellow-500/5 hover:bg-yellow-500/10",
+                    opportunity.arbitrage_available && "ring-1 ring-blue-500/20",
+                  )}
+                  onClick={() => onSelect?.(opportunity)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-lg font-semibold leading-none">{opportunity.pair.replace("_", "/")}</p>
+                      <p className="text-sm text-muted-foreground">{exchangeLabel(opportunity.exchange)}</p>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Detectado{" "}
+                        {new Date(opportunity.detected_at).toLocaleTimeString("pt-BR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <Badge
+                        variant="outline"
+                        className={cn("rounded-full px-2.5 py-1 font-bold tabular-nums", scoreColor(technicalScore))}
+                      >
+                        Tec {technicalScore.toFixed(1)}
+                      </Badge>
+                      {executabilityScore != null ? (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full px-2.5 py-1 font-bold tabular-nums",
+                            getExecutabilityHighlight(opportunity),
+                          )}
+                        >
+                          Op {executabilityScore.toFixed(1)}
+                        </Badge>
+                      ) : null}
+                    </div>
                   </div>
-                  <Badge
-                    variant="outline"
-                    className={cn("font-bold tabular-nums", scoreColor(opportunity.score))}
-                  >
-                    {opportunity.score}
-                  </Badge>
-                </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {movementBadge(opportunity.movement_type)}
-                  {opportunity.arbitrage_available ? (
-                    <Badge variant="outline" className="border-blue-500/20 text-blue-500">
-                      Gap {opportunity.cross_exchange_gap_pct.toFixed(2)}%
-                    </Badge>
-                  ) : null}
-                </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    {movementBadge(opportunity.movement_type)}
+                    {reasons.map((reason) => (
+                      <Badge
+                        key={`${opportunity.id}-${reason.label}`}
+                        variant="outline"
+                        className={cn("border px-2 py-0.5 text-[11px]", getReasonToneClasses(reason.tone))}
+                      >
+                        {reason.label}
+                      </Badge>
+                    ))}
+                    {opportunity.arbitrage_available ? (
+                      <Badge variant="outline" className="border-blue-500/20 text-blue-500">
+                        Gap {opportunity.cross_exchange_gap_pct.toFixed(2)}%
+                      </Badge>
+                    ) : null}
+                  </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <MobileMetric label="Preço" value={formatPrice(opportunity.last_price)} />
-                  <MobileMetric
-                    label="Variação"
-                    value={`${opportunity.change_pct >= 0 ? "+" : ""}${opportunity.change_pct.toFixed(2)}%`}
-                    valueClass={opportunity.change_pct >= 0 ? "text-emerald-500" : "text-red-500"}
-                  />
-                  <MobileMetric label="Volatilidade" value={`${opportunity.volatility_pct.toFixed(2)}%`} />
-                  <MobileMetric label="Spread" value={`${opportunity.spread_pct.toFixed(4)}%`} />
-                  <MobileMetric label="Volume 24h" value={formatCompactVolume(opportunity.quote_volume_24h)} />
-                  <MobileMetric label="Liquidez" value={opportunity.liquidity_units.toLocaleString("pt-BR")} />
-                </div>
-              </button>
-            ))
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <MobileMetric label="Preco" value={formatCurrency(opportunity.last_price)} highlight />
+                    <MobileMetric
+                      label="Variacao"
+                      value={formatSignedPercent(opportunity.change_pct)}
+                      valueClass={opportunity.change_pct >= 0 ? "text-emerald-500" : "text-red-500"}
+                      highlight
+                    />
+                    <MobileMetric label="Volume 24h" value={formatCurrencyCompact(opportunity.quote_volume_24h)} />
+                    <MobileMetric label="Liquidez" value={formatNotionalOrFallback(opportunity)} />
+                    <MobileMetric label="Spread" value={`${opportunity.spread_pct.toFixed(4)}%`} />
+                    <MobileMetric
+                      label={executabilityScore != null ? "Slippage saida" : "Volatilidade"}
+                      value={
+                        executabilityScore != null
+                          ? formatBps(opportunity.estimated_sell_slippage_bps)
+                          : `${opportunity.volatility_pct.toFixed(2)}%`
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-3 text-xs text-muted-foreground">
+                    <span>Toque para abrir os detalhes</span>
+                    <span>Ordenado por {sortLabel(sortBy)}</span>
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
 
         <div className="hidden sm:block">
-          <ScrollArea className="h-[500px]">
+          <ScrollArea className="h-[540px]">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-16">Score</TableHead>
+                  <TableHead className="w-28">Ranking</TableHead>
                   <TableHead>Par</TableHead>
                   <TableHead>Exchange</TableHead>
-                  <TableHead>Preço</TableHead>
-                  <TableHead>Variação</TableHead>
-                  <TableHead>Volatilidade</TableHead>
+                  <TableHead>Preco</TableHead>
+                  <TableHead>Variacao</TableHead>
                   <TableHead>Volume 24h</TableHead>
                   <TableHead>Liquidez</TableHead>
                   <TableHead>Spread</TableHead>
+                  <TableHead>Operabilidade</TableHead>
                   <TableHead>Movimento</TableHead>
                 </TableRow>
               </TableHeader>
@@ -276,66 +467,112 @@ export function OpportunitiesTable({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  sorted.map((opportunity) => (
-                    <TableRow
-                      key={opportunity.id}
-                      data-testid={`opportunity-${opportunity.id}`}
-                      className={cn(
-                        "cursor-pointer transition-colors",
-                        opportunity.score >= 70 && "bg-emerald-500/5 hover:bg-emerald-500/10",
-                        opportunity.score >= 40 && opportunity.score < 70 && "hover:bg-yellow-500/5",
-                        opportunity.arbitrage_available && "ring-1 ring-blue-500/20",
-                      )}
-                      onClick={() => onSelect?.(opportunity)}
-                    >
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={cn("font-bold tabular-nums", scoreColor(opportunity.score))}
-                        >
-                          {opportunity.score}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-medium">{opportunity.pair}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {exchangeLabel(opportunity.exchange)}
-                      </TableCell>
-                      <TableCell className="tabular-nums">{formatPrice(opportunity.last_price)}</TableCell>
-                      <TableCell>
-                        <span
-                          className={cn(
-                            "tabular-nums font-medium",
-                            opportunity.change_pct >= 0 ? "text-emerald-500" : "text-red-500"
-                          )}
-                        >
-                          {opportunity.change_pct >= 0 ? "+" : ""}
-                          {opportunity.change_pct.toFixed(2)}%
-                        </span>
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {opportunity.volatility_pct.toFixed(2)}%
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {formatCompactVolume(opportunity.quote_volume_24h)}
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {opportunity.liquidity_units.toLocaleString("pt-BR")}
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {opportunity.spread_pct.toFixed(4)}%
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          {movementBadge(opportunity.movement_type)}
-                          {opportunity.arbitrage_available ? (
-                            <span className="text-[11px] font-medium text-blue-500">
-                              Gap {opportunity.cross_exchange_gap_pct.toFixed(2)}%
+                  sorted.map((opportunity) => {
+                    const technicalScore = getTechnicalScore(opportunity);
+                    const executabilityScore = getExecutabilityScore(opportunity);
+                    const reasons = getOperabilityReasons(opportunity);
+
+                    return (
+                      <TableRow
+                        key={opportunity.id}
+                        data-testid={`opportunity-${opportunity.id}`}
+                        className={cn(
+                          "cursor-pointer transition-colors",
+                          technicalScore >= 70 && "bg-emerald-500/5 hover:bg-emerald-500/10",
+                          technicalScore >= 40 && technicalScore < 70 && "hover:bg-yellow-500/5",
+                          opportunity.arbitrage_available && "ring-1 ring-blue-500/20",
+                        )}
+                        onClick={() => onSelect?.(opportunity)}
+                      >
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <Badge variant="outline" className={cn("font-bold tabular-nums", scoreColor(technicalScore))}>
+                              {technicalScore.toFixed(1)}
+                            </Badge>
+                            <span className="text-[11px] text-muted-foreground">Tec</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium">{opportunity.pair}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {exchangeLabel(opportunity.exchange)}
+                        </TableCell>
+                        <TableCell className="tabular-nums">{formatCurrency(opportunity.last_price)}</TableCell>
+                        <TableCell>
+                          <span
+                            className={cn(
+                              "tabular-nums font-medium",
+                              opportunity.change_pct >= 0 ? "text-emerald-500" : "text-red-500",
+                            )}
+                          >
+                            {formatSignedPercent(opportunity.change_pct)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="tabular-nums">
+                          <div className="flex flex-col">
+                            <span>{formatCurrencyCompact(opportunity.quote_volume_24h)}</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              Vol {opportunity.volatility_pct.toFixed(2)}%
                             </span>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                          </div>
+                        </TableCell>
+                        <TableCell className="tabular-nums">
+                          <div className="flex flex-col">
+                            <span>{formatNotionalOrFallback(opportunity)}</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {opportunity.liquidity_units.toLocaleString("pt-BR")} un.
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="tabular-nums">{opportunity.spread_pct.toFixed(4)}%</TableCell>
+                        <TableCell>
+                          {executabilityScore != null ? (
+                            <div className="flex flex-col gap-1">
+                              <Badge
+                                variant="outline"
+                                className={cn("w-fit font-semibold", getExecutabilityHighlight(opportunity))}
+                              >
+                                {executabilityScore.toFixed(1)}
+                              </Badge>
+                              <span className="text-[11px] text-muted-foreground">
+                                {isOperableSignal(opportunity) ? "Operavel" : "Monitorar"} • saida{" "}
+                                {formatBps(opportunity.estimated_sell_slippage_bps)}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-sm font-medium text-muted-foreground">Tecnico</span>
+                              <span className="text-[11px] text-muted-foreground">Payload legado</span>
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {movementBadge(opportunity.movement_type)}
+                              {opportunity.arbitrage_available ? (
+                                <span className="text-[11px] font-medium text-blue-500">
+                                  Gap {opportunity.cross_exchange_gap_pct.toFixed(2)}%
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {reasons.map((reason) => (
+                                <span
+                                  key={`${opportunity.id}-desktop-${reason.label}`}
+                                  className={cn(
+                                    "rounded-full border px-2 py-0.5 text-[11px]",
+                                    getReasonToneClasses(reason.tone),
+                                  )}
+                                >
+                                  {reason.label}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -346,17 +583,28 @@ export function OpportunitiesTable({
   );
 }
 
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border bg-muted/25 px-3 py-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-sm font-semibold">{value}</p>
+    </div>
+  );
+}
+
 function MobileMetric({
   label,
   value,
   valueClass,
+  highlight = false,
 }: {
   label: string;
   value: string;
   valueClass?: string;
+  highlight?: boolean;
 }) {
   return (
-    <div className="rounded-lg bg-muted/50 p-3">
+    <div className={cn("rounded-xl border border-border/60 bg-muted/35 p-3", highlight && "bg-background/70")}>
       <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className={cn("mt-1 text-sm font-semibold", valueClass)}>{value}</p>
     </div>

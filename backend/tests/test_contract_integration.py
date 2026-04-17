@@ -46,6 +46,20 @@ def _fake_opportunity(**overrides) -> Opportunity:
         score=72.5,
         technical_score=68.3,
         score_version="v1",
+        executability_version="v1",
+        movement_version="v1",
+        profile_version="v1",
+        executability_score=None,
+        executability_band=None,
+        interesting_signal=None,
+        operable_signal=None,
+        bid_notional_top_n=None,
+        ask_notional_top_n=None,
+        total_notional_top_n=None,
+        estimated_buy_slippage_bps=None,
+        estimated_sell_slippage_bps=None,
+        fillable_notional_within_slippage_cap=None,
+        movement_persistence_score=None,
         volatility_pct=3.2,
         volume_24h=500.0,
         quote_volume_24h=60_000.0,
@@ -149,7 +163,7 @@ def test_dashboard_stats_uses_snapshot_fallback_when_no_local_state(monkeypatch)
 # ---------------------------------------------------------------------------
 
 def test_opportunities_contract_includes_technical_fields(monkeypatch):
-    """Each opportunity must include technical_score, score_version and signal id."""
+    """Each opportunity must include technical and executability contract fields."""
     opp = _fake_opportunity()
     routes.update_state([opp], datetime.now(timezone.utc))
     _session_and_workspace_patches(monkeypatch)
@@ -169,6 +183,20 @@ def test_opportunities_contract_includes_technical_fields(monkeypatch):
     assert "technical_score" in item
     assert "score_version" in item
     assert "technical_signal_id" in item
+    assert "executability_version" in item
+    assert "movement_version" in item
+    assert "profile_version" in item
+    assert "executability_score" in item
+    assert "executability_band" in item
+    assert "interesting_signal" in item
+    assert "operable_signal" in item
+    assert "bid_notional_top_n" in item
+    assert "ask_notional_top_n" in item
+    assert "total_notional_top_n" in item
+    assert "estimated_buy_slippage_bps" in item
+    assert "estimated_sell_slippage_bps" in item
+    assert "fillable_notional_within_slippage_cap" in item
+    assert "movement_persistence_score" in item
     assert item["score_version"] == "v1"
 
 
@@ -199,6 +227,44 @@ def test_opportunities_filter_by_min_score(monkeypatch):
     ids = [o["id"] for o in resp.json()]
     assert "high" in ids
     assert "low" not in ids
+
+
+def test_opportunities_can_sort_by_executability(monkeypatch):
+    lower_exec = _fake_opportunity(id="lower-exec", executability_score=42.0, executability_band="fair")
+    higher_exec = _fake_opportunity(id="higher-exec", executability_score=78.0, executability_band="good")
+    routes.update_state([lower_exec, higher_exec], datetime.now(timezone.utc))
+    _session_and_workspace_patches(monkeypatch)
+
+    async def _no_snapshots():
+        return []
+
+    monkeypatch.setattr(routes, "read_opportunity_snapshots", _no_snapshots)
+
+    client = _create_client()
+    resp = client.get("/api/opportunities?sort_by=executability", headers={"X-Admin-Token": "tok"})
+
+    assert resp.status_code == 200
+    ids = [o["id"] for o in resp.json()]
+    assert ids[:2] == ["higher-exec", "lower-exec"]
+
+
+def test_opportunities_can_filter_operable_only(monkeypatch):
+    inoperable = _fake_opportunity(id="inoperable", operable_signal=False, executability_score=35.0)
+    operable = _fake_opportunity(id="operable", operable_signal=True, executability_score=75.0)
+    routes.update_state([inoperable, operable], datetime.now(timezone.utc))
+    _session_and_workspace_patches(monkeypatch)
+
+    async def _no_snapshots():
+        return []
+
+    monkeypatch.setattr(routes, "read_opportunity_snapshots", _no_snapshots)
+
+    client = _create_client()
+    resp = client.get("/api/opportunities?operable_only=true", headers={"X-Admin-Token": "tok"})
+
+    assert resp.status_code == 200
+    ids = [o["id"] for o in resp.json()]
+    assert ids == ["operable"]
 
 
 def test_opportunity_detail_returns_single_item(monkeypatch):
@@ -276,7 +342,7 @@ def test_config_contract_includes_telegram_policy_fields(monkeypatch):
     resp = client.get("/api/config", headers={"X-Admin-Token": "tok"})
 
     assert resp.status_code == 200
-    body = resp.json()
+    body = resp.json()["config"]
     assert body["telegram_alert_threshold"] == 75.0
     assert body["telegram_alert_cooldown_seconds"] == 600
     assert body["telegram_alert_types"] == ["high_score"]
@@ -324,9 +390,19 @@ def test_opportunity_model_round_trips_technical_fields():
     data = opp.model_dump(mode="json")
     assert data["technical_score"] == 68.3
     assert data["score_version"] == "v1"
+    assert data["executability_version"] == "v1"
+    assert data["movement_version"] == "v1"
+    assert data["profile_version"] == "v1"
     assert data["technical_signal_id"] == "sig-abc-123"
+    assert "executability_score" in data
+    assert "executability_band" in data
+    assert "interesting_signal" in data
+    assert "operable_signal" in data
 
     restored = Opportunity(**data)
     assert restored.technical_score == opp.technical_score
     assert restored.score_version == opp.score_version
+    assert restored.executability_version == opp.executability_version
+    assert restored.movement_version == opp.movement_version
+    assert restored.profile_version == opp.profile_version
     assert restored.technical_signal_id == opp.technical_signal_id
