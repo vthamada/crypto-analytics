@@ -102,7 +102,7 @@ async def scan_loop() -> None:
     while True:
         cycle_started = time.perf_counter()
         cycle_id = f"cycle-{int(time.time())}"
-        now = datetime.now(timezone.utc)
+        now = utcnow()
         scan_monitor.begin_cycle()
         await update_scanner_runtime_state(started_at=now)
         try:
@@ -121,7 +121,7 @@ async def scan_loop() -> None:
 
             scanner.set_historical_calibration(await get_historical_pair_calibration())
             opportunities = await scanner.scan_all()
-            now = datetime.now(timezone.utc)
+            now = utcnow()
             update_state(opportunities, now)
 
             # Persist repetition counts
@@ -263,8 +263,8 @@ async def scan_loop() -> None:
                 duration_ms=duration_ms,
             )
             await update_scanner_runtime_state(
-                completed_at=datetime.now(timezone.utc),
-                success_at=datetime.now(timezone.utc),
+                completed_at=utcnow(),
+                success_at=utcnow(),
                 duration_ms=duration_ms,
                 opportunities_count=len(opportunities),
             )
@@ -274,7 +274,7 @@ async def scan_loop() -> None:
             scan_monitor.fail_cycle(str(e), duration_ms=duration_ms)
             logger.error("scan_loop_error error=%s", e, exc_info=True)
             await update_scanner_runtime_state(
-                completed_at=datetime.now(timezone.utc),
+                completed_at=utcnow(),
                 duration_ms=duration_ms,
                 error=str(e),
             )

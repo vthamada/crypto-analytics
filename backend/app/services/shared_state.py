@@ -35,6 +35,12 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _normalize_db_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def calculate_technical_score(
     *,
     volatility_score: float,
@@ -78,9 +84,9 @@ async def update_scanner_runtime_state(
             session.add(record)
 
         if started_at is not None:
-            record.last_cycle_started_at = started_at
+            record.last_cycle_started_at = _normalize_db_datetime(started_at)
         if completed_at is not None:
-            record.last_cycle_completed_at = completed_at
+            record.last_cycle_completed_at = _normalize_db_datetime(completed_at)
         if duration_ms is not None:
             record.last_cycle_duration_ms = duration_ms
         if error is not None:
@@ -88,7 +94,7 @@ async def update_scanner_runtime_state(
         elif completed_at is not None:
             record.last_cycle_error = None
         if success_at is not None:
-            record.last_success_at = success_at
+            record.last_success_at = _normalize_db_datetime(success_at)
         if opportunities_count is not None:
             record.opportunities_count = opportunities_count
         record.score_version = SCORE_VERSION

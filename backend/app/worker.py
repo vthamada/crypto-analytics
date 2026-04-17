@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
 
 from app.api.routes import get_scan_config, set_scan_config, update_state, project_workspace_opportunity
 from app.models.database import init_db
@@ -30,6 +29,7 @@ from app.services.scan_runtime import wait_for_refresh_or_timeout
 from app.services.scanner import Scanner
 from app.services.telegram import send_telegram_alert
 from app.services.outcome_evaluator import evaluate_pending_outcomes
+from app.services.shared_state import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ async def run_worker() -> None:
     while True:
         cycle_started = time.perf_counter()
         cycle_id = f"cycle-{int(time.time())}"
-        now = datetime.now(timezone.utc)
+        now = utcnow()
         scan_monitor.begin_cycle()
         await update_scanner_runtime_state(started_at=now)
 
@@ -63,7 +63,7 @@ async def run_worker() -> None:
             scanner.load_repetition_counts(persisted_reps)
             scanner.set_historical_calibration(await get_historical_pair_calibration())
             opportunities = await scanner.scan_all()
-            now = datetime.now(timezone.utc)
+            now = utcnow()
             update_state(opportunities, now)
 
             # Persist repetition counts
@@ -150,8 +150,8 @@ async def run_worker() -> None:
                 duration_ms=duration_ms,
             )
             await update_scanner_runtime_state(
-                completed_at=datetime.now(timezone.utc),
-                success_at=datetime.now(timezone.utc),
+                completed_at=utcnow(),
+                success_at=utcnow(),
                 duration_ms=duration_ms,
                 opportunities_count=len(opportunities),
             )
@@ -160,7 +160,7 @@ async def run_worker() -> None:
             scan_monitor.fail_cycle(str(exc), duration_ms=duration_ms)
             logger.exception("worker_scan_failed error=%s", exc)
             await update_scanner_runtime_state(
-                completed_at=datetime.now(timezone.utc),
+                completed_at=utcnow(),
                 duration_ms=duration_ms,
                 error=str(exc),
             )
