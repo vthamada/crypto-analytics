@@ -8,7 +8,13 @@ from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.database import OpportunityRecord, ConfigRecord, WorkspaceConfigRecord, async_session
+from app.models.database import (
+    OpportunityRecord,
+    ConfigRecord,
+    WorkspaceConfigRecord,
+    async_session,
+    normalize_db_datetime,
+)
 from app.models.schemas import AppConfig, HistoryRecord, MovementType, Opportunity, ScoreWeights
 
 logger = logging.getLogger(__name__)
@@ -216,7 +222,7 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
                 movement_type=opp.movement_type.value,
                 last_price=opp.last_price,
                 change_pct=opp.change_pct,
-                detected_at=opp.detected_at,
+                detected_at=normalize_db_datetime(opp.detected_at),
                 duration_minutes=opp.duration_minutes,
                 cross_exchange_gap_pct=opp.cross_exchange_gap_pct,
                 cross_exchange_reference_exchange=(

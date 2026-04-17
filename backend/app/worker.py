@@ -23,13 +23,13 @@ from app.services.shared_state import (
     save_technical_signals,
     save_workspace_projections_batch,
     update_scanner_runtime_state,
+    utcnow,
     write_opportunity_snapshots,
 )
 from app.services.scan_runtime import wait_for_refresh_or_timeout
 from app.services.scanner import Scanner
 from app.services.telegram import send_telegram_alert
 from app.services.outcome_evaluator import evaluate_pending_outcomes
-from app.services.shared_state import utcnow
 
 logger = logging.getLogger(__name__)
 

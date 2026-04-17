@@ -22,6 +22,7 @@ from app.models.database import (
     TechnicalSignalRecord,
     WorkspaceSignalProjectionRecord,
     async_session,
+    normalize_db_datetime,
 )
 from app.models.schemas import AppConfig, Opportunity, ScoreWeights
 
@@ -33,12 +34,6 @@ _DEDUP_SIGNAL_WINDOW_MINUTES = 5
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _normalize_db_datetime(value: datetime) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        return value
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def calculate_technical_score(
@@ -84,9 +79,9 @@ async def update_scanner_runtime_state(
             session.add(record)
 
         if started_at is not None:
-            record.last_cycle_started_at = _normalize_db_datetime(started_at)
+            record.last_cycle_started_at = normalize_db_datetime(started_at)
         if completed_at is not None:
-            record.last_cycle_completed_at = _normalize_db_datetime(completed_at)
+            record.last_cycle_completed_at = normalize_db_datetime(completed_at)
         if duration_ms is not None:
             record.last_cycle_duration_ms = duration_ms
         if error is not None:
@@ -94,7 +89,7 @@ async def update_scanner_runtime_state(
         elif completed_at is not None:
             record.last_cycle_error = None
         if success_at is not None:
-            record.last_success_at = _normalize_db_datetime(success_at)
+            record.last_success_at = normalize_db_datetime(success_at)
         if opportunities_count is not None:
             record.opportunities_count = opportunities_count
         record.score_version = SCORE_VERSION
@@ -157,7 +152,7 @@ async def write_opportunity_snapshots(
                 movement_type=opp.movement_type.value,
                 last_price=opp.last_price,
                 change_pct=opp.change_pct,
-                detected_at=opp.detected_at,
+                detected_at=normalize_db_datetime(opp.detected_at),
                 historical_confidence=opp.historical_confidence,
                 volatility_score=opp.volatility_score,
                 volume_score=opp.volume_score,
@@ -286,7 +281,7 @@ async def save_technical_signals(opportunities: list[Opportunity]) -> dict[str, 
                 ),
                 cross_exchange_reference_price=opp.cross_exchange_reference_price,
                 arbitrage_available=opp.arbitrage_available,
-                detected_at=opp.detected_at,
+                detected_at=normalize_db_datetime(opp.detected_at),
             )
             session.add(record)
             signal_map[opp.id] = signal_id
@@ -373,7 +368,7 @@ async def create_pending_outcomes(signals: list[dict]) -> int:
                 exchange=sig["exchange"],
                 pair=sig["pair"],
                 entry_price=sig["entry_price"],
-                signal_detected_at=sig["signal_detected_at"],
+                signal_detected_at=normalize_db_datetime(sig["signal_detected_at"]),
                 created_at=utcnow(),
             )
             session.add(record)

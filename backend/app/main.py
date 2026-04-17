@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 import time
 
 from fastapi import FastAPI

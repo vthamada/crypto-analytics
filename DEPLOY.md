@@ -113,9 +113,13 @@ Configuracao recomendada:
 | Runtime | `Python` |
 | Root Directory | `backend` |
 | Build Command | `pip install .` |
-| Pre-Deploy Command | `alembic upgrade head` |
 | Start Command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1` |
 | Health Check Path | `/api/health` |
+
+Observacao:
+
+- o projeto ja executa migracoes no startup via `init_db()`, entao o `Pre-Deploy Command` nao e obrigatorio
+- no fluxo por `render.yaml`/Blueprint, manter sem `Pre-Deploy Command` evita incompatibilidades com configuracoes de plano
 
 Variaveis de ambiente minimas da API:
 
@@ -169,8 +173,12 @@ Configuracao recomendada:
 | Runtime | `Python` |
 | Root Directory | `backend` |
 | Build Command | `pip install .` |
-| Pre-Deploy Command | `alembic upgrade head` |
+| Plan | `Starter` |
 | Start Command | `python -m app.worker` |
+
+Observacao:
+
+- assim como na API, o startup do worker tambem passa por `init_db()`, entao o `Pre-Deploy Command` nao e obrigatorio
 
 Variaveis de ambiente minimas do worker:
 
@@ -178,6 +186,7 @@ Variaveis de ambiente minimas do worker:
 |---|---|
 | `DATABASE_URL` | URL async do Supabase |
 | `AUTH_SECRET_KEY` | mesmo valor da API |
+| `SCANNER_ENABLED` | `true` |
 | `LOG_LEVEL` | `INFO` |
 | `SCAN_INTERVAL_SECONDS` | `30` |
 
@@ -261,6 +270,7 @@ LOG_AGGREGATION_TOKEN=
 ```env
 DATABASE_URL=postgresql+asyncpg://postgres.xxx:senha@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
 AUTH_SECRET_KEY=gere-um-segredo-longo-e-aleatorio
+SCANNER_ENABLED=true
 SCAN_INTERVAL_SECONDS=30
 LOG_LEVEL=INFO
 

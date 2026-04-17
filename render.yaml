@@ -36,7 +36,7 @@ services:
   - type: worker
     name: crypto-analytics-worker
     runtime: python
-    plan: free
+    plan: starter
     rootDir: backend
     buildCommand: pip install .
     startCommand: python -m app.worker
@@ -45,6 +45,8 @@ services:
         sync: false
       - key: AUTH_SECRET_KEY
         sync: false
+      - key: SCANNER_ENABLED
+        value: "true"
       - key: SCAN_INTERVAL_SECONDS
         value: "30"
       - key: LOG_LEVEL
