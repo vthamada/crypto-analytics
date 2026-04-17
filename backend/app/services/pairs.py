@@ -19,7 +19,7 @@ _pair_catalog_generated_at: datetime | None = None
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _sort_pair_key(pair: str) -> tuple[str, str]:

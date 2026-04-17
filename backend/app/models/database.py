@@ -19,7 +19,9 @@ class Base(DeclarativeBase):
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    # Database columns are stored as TIMESTAMP WITHOUT TIME ZONE in Postgres.
+    # Keep values in UTC, but strip tzinfo so asyncpg can bind them safely.
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class OpportunityRecord(Base):

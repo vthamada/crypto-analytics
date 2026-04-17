@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 @dataclass

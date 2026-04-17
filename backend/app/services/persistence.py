@@ -19,7 +19,7 @@ _last_history_retention_run: datetime | None = None
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def ensure_utc_datetime(value: datetime) -> datetime:
