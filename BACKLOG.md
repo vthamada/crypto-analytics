@@ -1,6 +1,6 @@
 # Backlog
 
-Ultima revisao: 2026-04-17
+Ultima revisao: 2026-04-18
 
 Legenda: `[x]` concluido · `[ ]` pendente · `[~]` parcialmente feito
 
@@ -34,6 +34,12 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 ---
 
 ## Concluido (historico)
+
+### Plano de executabilidade operacional
+- [x] Release E â€” trading profile por workspace, thresholds operacionais e filtros de alerta
+- [x] Release F â€” `duration_minutes`, `movement_persistence_score` e taxonomia `movement_regime`
+- [x] Release G â€” reweighting conservador por outcome e analytics operacionais por bucket
+- [x] Release H â€” dual-write com `raw_market_observations` e deduplicacao semantica do historico
 
 ### Seguranca e acesso
 - [x] Proteger `/api/config` com autenticacao e autorizacao

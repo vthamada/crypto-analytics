@@ -32,7 +32,7 @@ import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/inline-error-state";
 import { SessionRequiredState } from "@/components/session-required-state";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { getHistory, getAnalytics } from "@/lib/api";
+import { getHistory, getOperationalAnalytics } from "@/lib/api";
 import { useHasAuthenticatedWorkspace } from "@/hooks/use-has-authenticated-workspace";
 import type { Analytics, HistoryRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -124,7 +124,7 @@ function HistoryContent() {
     try {
       const [hist, anal] = await Promise.all([
         getHistory({ hours: parseInt(hours, 10), limit: 100, offset: page * 100 }),
-        getAnalytics({ hours: parseInt(hours, 10) }),
+        getOperationalAnalytics({ hours: parseInt(hours, 10) }),
       ]);
       setRecords(hist);
       setAnalytics(anal);
@@ -201,6 +201,15 @@ function HistoryContent() {
                 {analytics.avg_cross_exchange_gap_pct.toFixed(2)}%
               </p>
               <p className="text-xs text-muted-foreground">Diferença média entre exchanges</p>
+            </CardContent>
+          </Card>
+          <Card className="rounded-2xl">
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground">Perfil ativo</p>
+              <p className="mt-1 text-lg font-bold">
+                {Object.keys(analytics.profile_distribution ?? {})[0]?.replace("_", " ") ?? "workspace"}
+              </p>
+              <p className="text-xs text-muted-foreground">Agregados recalculados para o workspace atual</p>
             </CardContent>
           </Card>
         </div>

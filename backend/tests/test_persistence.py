@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.models.database import Base, OpportunityRecord
 from app.services import persistence
+from app.models.schemas import AppConfig, Exchange, MovementRegime, MovementType, Opportunity
 
 
 def test_filtered_analytics_respects_hours(monkeypatch):
@@ -226,3 +227,91 @@ def test_serialize_history_record_marks_naive_detected_at_as_utc():
     assert serialized["estimated_sell_slippage_bps"] == 19.0
     assert serialized["fillable_notional_within_slippage_cap"] == 5000
     assert serialized["movement_persistence_score"] == 0.45
+
+
+def test_workspace_operability_recalculates_slippage_from_profile():
+    record = OpportunityRecord(
+        id="profiled-history",
+        exchange="binance",
+        pair="BTC_BRL",
+        score=70,
+        volatility_pct=5,
+        volume_24h=1000,
+        quote_volume_24h=200000,
+        liquidity_units=5000,
+        spread_pct=0.2,
+        movement_type="strong_range",
+        last_price=100,
+        change_pct=4,
+        detected_at=datetime(2026, 4, 15, 18, 55, 30),
+        duration_minutes=12,
+        bid_notional_top_n=18000,
+        ask_notional_top_n=17000,
+        estimated_buy_slippage_bps=10,
+        estimated_sell_slippage_bps=12,
+        fillable_notional_within_slippage_cap=5000,
+        baseline_order_notional_brl=1000,
+        movement_persistence_score=0.5,
+    )
+
+    config = AppConfig(
+        enabled_pairs=["BTC_BRL"],
+        enabled_exchanges=[Exchange.BINANCE],
+        trading_profile="agressivo",
+        order_notional_brl=1500,
+        max_entry_slippage_bps=35,
+        max_exit_slippage_bps=45,
+        min_quote_volume_brl=30000,
+    )
+
+    serialized = persistence.serialize_history_record(record, config)
+
+    assert serialized["executability_score"] is not None
+    assert serialized["operable_signal"] is True
+    assert serialized["estimated_sell_slippage_bps"] > 12
+
+
+def test_save_opportunities_uses_semantic_dedup(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"semantic-dedup-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(persistence, "async_session", session_factory)
+
+        base_kwargs = dict(
+            exchange=Exchange.BINANCE,
+            pair="BTC_BRL",
+            score=70,
+            volatility_pct=5,
+            volume_24h=1000,
+            quote_volume_24h=200000,
+            liquidity_units=5000,
+            spread_pct=0.2,
+            movement_type=MovementType.STRONG_RANGE,
+            movement_regime=MovementRegime.TREND_CONTINUATION,
+            last_price=100,
+            change_pct=4,
+            duration_minutes=5,
+        )
+
+        opp1 = Opportunity(id="sem-1", semantic_signal_key="binance:BTC_BRL:strong_range:trend", **base_kwargs)
+        opp2 = Opportunity(id="sem-2", semantic_signal_key="binance:BTC_BRL:strong_range:trend", **base_kwargs)
+
+        await persistence.save_opportunities([opp1])
+        await persistence.save_opportunities([opp2])
+
+        rows = await persistence.get_history(limit=10)
+        assert [row["id"] for row in rows] == ["sem-1"]
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())

@@ -352,6 +352,8 @@ Status: concluida em 2026-04-17.
 
 ## Release E - Workspace Trading Profile, Thresholds E Alertas
 
+Status: concluida em 2026-04-18.
+
 ### Task 10: Introduzir trading profile por workspace
 
 **Files:**
@@ -362,16 +364,16 @@ Status: concluida em 2026-04-17.
 - Test: `backend/tests/test_api_routes.py`
 - Test: `backend/tests/test_persistence.py`
 
-- [ ] Adicionar em `AppConfig` ou configuracao derivada:
+- [x] Adicionar em `AppConfig` ou configuracao derivada:
   - `trading_profile: Literal["conservador", "intraday_liquido", "agressivo", "scalp"]`
   - `order_notional_brl`
   - `max_entry_slippage_bps`
   - `max_exit_slippage_bps`
   - `min_quote_volume_brl`
 
-- [ ] Implementar defaults seguros por perfil.
+- [x] Implementar defaults seguros por perfil.
 
-- [ ] Expor e salvar no endpoint de configuracao.
+- [x] Expor e salvar no endpoint de configuracao.
 
 - [ ] Verificacao:
   - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_api_routes.py backend\tests\test_persistence.py -v`
@@ -387,11 +389,11 @@ Status: concluida em 2026-04-17.
 - Modify: `backend/app/services/telegram.py`
 - Test: `backend/tests/test_scanner.py`
 
-- [ ] Usar `order_notional_brl` do perfil no calculo de slippage.
+- [x] Usar `order_notional_brl` do perfil no calculo de slippage.
 
-- [ ] Usar limites por perfil para `operable_signal`.
+- [x] Usar limites por perfil para `operable_signal`.
 
-- [ ] Atualizar regras de alerta para aceitar:
+- [x] Atualizar regras de alerta para aceitar:
   - apenas operaveis
   - operaveis por faixa de score
   - operaveis apenas de exchanges/pairs selecionados
@@ -405,6 +407,8 @@ Status: concluida em 2026-04-17.
 
 ## Release F - Duracao Util E Taxonomia V2
 
+Status: concluida em 2026-04-18.
+
 ### Task 12: Popular `duration_minutes` e `movement_persistence_score`
 
 **Files:**
@@ -414,11 +418,11 @@ Status: concluida em 2026-04-17.
 - Test: `backend/tests/test_runtime_persistence.py`
 - Test: `backend/tests/test_scanner.py`
 
-- [ ] Derivar duracao a partir de repeticao em ciclos consecutivos e estabilidade minima.
+- [x] Derivar duracao a partir de repeticao em ciclos consecutivos e estabilidade minima.
 
-- [ ] Persistir `movement_persistence_score`.
+- [x] Persistir `movement_persistence_score`.
 
-- [ ] Penalizar `operable_signal` quando a duracao util for muito curta.
+- [x] Penalizar `operable_signal` quando a duracao util for muito curta.
 
 - [ ] Verificacao:
   - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_runtime_persistence.py backend\tests\test_scanner.py -v`
@@ -433,16 +437,16 @@ Status: concluida em 2026-04-17.
 - Modify: `frontend/src/components/opportunities-table.tsx`
 - Test: `backend/tests/test_filters.py`
 
-- [ ] Introduzir `movement_class_v2` ou `movement_regime` sem remover `movement_type`.
+- [x] Introduzir `movement_class_v2` ou `movement_regime` sem remover `movement_type`.
 
-- [ ] Mapeamento inicial sugerido:
+- [x] Mapeamento inicial sugerido:
   - `trend_continuation`
   - `breakout_clean`
   - `breakout_exhaustion`
   - `mean_reversion_candidate`
   - `illiquid_spike`
 
-- [ ] Continuar exibindo labels legadas enquanto o frontend nao migrar totalmente.
+- [x] Continuar exibindo labels legadas enquanto o frontend nao migrar totalmente.
 
 - [ ] Verificacao:
   - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_filters.py backend\tests\test_scanner.py -v`
@@ -454,6 +458,8 @@ Status: concluida em 2026-04-17.
 
 ## Release G - Reweighting Por Outcome E Analytics Operacionais
 
+Status: concluida em 2026-04-18.
+
 ### Task 14: Criar agregados operacionais por bucket
 
 **Files:**
@@ -462,7 +468,7 @@ Status: concluida em 2026-04-17.
 - Test: `backend/tests/test_persistence.py`
 - Test: `backend/tests/test_signal_outcomes.py`
 
-- [ ] Criar consultas agregadas por:
+- [x] Criar consultas agregadas por:
   - faixa de `score`
   - faixa de `executability_score`
   - exchange
@@ -470,7 +476,7 @@ Status: concluida em 2026-04-17.
   - tipo de movimento
   - perfil
 
-- [ ] Expor endpoint interno ou administrativo para analytics de calibracao.
+- [x] Expor endpoint interno ou administrativo para analytics de calibracao.
 
 - [ ] Verificacao:
   - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_persistence.py backend\tests\test_signal_outcomes.py -v`
@@ -486,13 +492,13 @@ Status: concluida em 2026-04-17.
 - Test: `backend/tests/test_signal_outcomes.py`
 - Test: `backend/tests/test_scanner.py`
 
-- [ ] Substituir `historical_confidence` por uma calibracao mais explicita, ou manter o nome mas recalcular com base em buckets reais.
+- [x] Substituir `historical_confidence` por uma calibracao mais explicita, ou manter o nome mas recalcular com base em buckets reais.
 
-- [ ] Limitar o multiplicador final para evitar dominancia excessiva:
+- [x] Limitar o multiplicador final para evitar dominancia excessiva:
   - piso sugerido: `0.90`
   - teto sugerido: `1.15`
 
-- [ ] Persistir `reweighting_version`.
+- [x] Persistir `reweighting_version`.
 
 - [ ] Verificacao:
   - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_signal_outcomes.py backend\tests\test_scanner.py -v`
@@ -503,6 +509,8 @@ Status: concluida em 2026-04-17.
 
 ## Release H - Migracao Estrutural Do Historico
 
+Status: concluida em 2026-04-18.
+
 ### Task 16: Preparar escrita dual para camadas separadas
 
 **Files:**
@@ -512,15 +520,15 @@ Status: concluida em 2026-04-17.
 - Test: `backend/tests/test_runtime_persistence.py`
 - Test: `backend/tests/test_persistence.py`
 
-- [ ] Introduzir camadas mais explicitas:
+- [x] Introduzir camadas mais explicitas:
   - `raw_market_observations`
   - `technical_signals`
   - `workspace_signal_projections`
   - `signal_outcomes`
 
-- [ ] Habilitar dual-write durante fase de transicao.
+- [x] Habilitar dual-write durante fase de transicao.
 
-- [ ] Nao desligar leituras antigas nesta release.
+- [x] Nao desligar leituras antigas nesta release.
 
 - [ ] Verificacao:
   - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_runtime_persistence.py backend\tests\test_persistence.py -v`
@@ -535,14 +543,14 @@ Status: concluida em 2026-04-17.
 - Modify: `frontend/src/app/history/page.tsx`
 - Test: `backend/tests/test_persistence.py`
 
-- [ ] Mudar deduplicacao para semantica de sinal, nao apenas janela fixa de 5 minutos.
+- [x] Mudar deduplicacao para semantica de sinal, nao apenas janela fixa de 5 minutos.
 
-- [ ] Definir retencao por camada:
+- [x] Definir retencao por camada:
   - feed operacional curto
   - historico analitico medio prazo
   - agregados longo prazo
 
-- [ ] Migrar a tela de historico para a nova leitura quando os dados estiverem estaveis.
+- [x] Migrar a tela de historico para a nova leitura quando os dados estiverem estaveis.
 
 - [ ] Verificacao:
   - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_persistence.py -v`

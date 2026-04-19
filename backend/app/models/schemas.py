@@ -23,6 +23,14 @@ class MovementType(str, Enum):
     TRAP = "trap"
 
 
+class MovementRegime(str, Enum):
+    TREND_CONTINUATION = "trend_continuation"
+    BREAKOUT_CLEAN = "breakout_clean"
+    BREAKOUT_EXHAUSTION = "breakout_exhaustion"
+    MEAN_REVERSION_CANDIDATE = "mean_reversion_candidate"
+    ILLIQUID_SPIKE = "illiquid_spike"
+
+
 class Ticker(BaseModel):
     exchange: Exchange
     pair: str
@@ -77,7 +85,9 @@ class Opportunity(BaseModel):
     executability_version: str = "v1"
     movement_version: str = "v1"
     profile_version: str = "v1"
+    reweighting_version: str = "v1"
     technical_signal_id: str | None = None
+    semantic_signal_key: str | None = None
     executability_score: float | None = None
     executability_band: str | None = None
     interesting_signal: bool | None = None
@@ -93,7 +103,9 @@ class Opportunity(BaseModel):
     estimated_buy_slippage_bps: float | None = None
     estimated_sell_slippage_bps: float | None = None
     fillable_notional_within_slippage_cap: float | None = None
+    baseline_order_notional_brl: float | None = None
     movement_type: MovementType
+    movement_regime: MovementRegime | None = None
     movement_persistence_score: float | None = None
     last_price: float
     change_pct: float
@@ -139,10 +151,19 @@ class AppConfig(BaseModel):
     ]
     enabled_pairs: list[str] = Field(default_factory=list)
     scan_interval_seconds: int = 30
+    trading_profile: Literal["conservador", "intraday_liquido", "agressivo", "scalp"] = "intraday_liquido"
+    order_notional_brl: float | None = None
+    max_entry_slippage_bps: float | None = None
+    max_exit_slippage_bps: float | None = None
+    min_quote_volume_brl: float | None = None
     telegram_enabled: bool = True
     telegram_alert_threshold: float = 60.0
     telegram_alert_cooldown_seconds: int = 900
     telegram_alert_types: list[str] = Field(default_factory=lambda: ["high_score", "arbitrage"])
+    telegram_operable_only: bool = False
+    telegram_min_executability_score: float | None = None
+    telegram_alert_exchanges: list[Exchange] = Field(default_factory=list)
+    telegram_alert_pairs: list[str] = Field(default_factory=list)
     # Credenciais (sobrepõem variáveis de ambiente quando preenchidas)
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
@@ -180,7 +201,9 @@ class HistoryRecord(BaseModel):
     executability_version: str = "v1"
     movement_version: str = "v1"
     profile_version: str = "v1"
+    reweighting_version: str = "v1"
     technical_signal_id: str | None = None
+    semantic_signal_key: str | None = None
     executability_score: float | None = None
     executability_band: str | None = None
     interesting_signal: bool | None = None
@@ -196,7 +219,9 @@ class HistoryRecord(BaseModel):
     estimated_buy_slippage_bps: float | None = None
     estimated_sell_slippage_bps: float | None = None
     fillable_notional_within_slippage_cap: float | None = None
+    baseline_order_notional_brl: float | None = None
     movement_type: MovementType
+    movement_regime: MovementRegime | None = None
     movement_persistence_score: float | None = None
     last_price: float
     change_pct: float

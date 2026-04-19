@@ -60,6 +60,7 @@ from app.services.shared_state import get_scanner_runtime_state, read_opportunit
 from app.services.persistence import (
     DEFAULT_WORKSPACE_ID,
     get_filtered_analytics,
+    get_workspace_operability_fields,
     get_history,
     get_workspace_score,
     load_config,
@@ -217,6 +218,19 @@ def project_workspace_opportunity(opportunity: Opportunity, config: AppConfig) -
         historical_confidence=opportunity.historical_confidence,
         weights=config.weights,
     )
+    operability = get_workspace_operability_fields(
+        bid_notional_top_n=opportunity.bid_notional_top_n,
+        ask_notional_top_n=opportunity.ask_notional_top_n,
+        spread_pct=opportunity.spread_pct,
+        quote_volume_24h=opportunity.quote_volume_24h,
+        fillable_notional_within_slippage_cap=opportunity.fillable_notional_within_slippage_cap,
+        baseline_order_notional_brl=opportunity.baseline_order_notional_brl,
+        estimated_buy_slippage_bps=opportunity.estimated_buy_slippage_bps,
+        estimated_sell_slippage_bps=opportunity.estimated_sell_slippage_bps,
+        movement_persistence_score=opportunity.movement_persistence_score,
+        config=config,
+    )
+    data.update(operability)
     return Opportunity(**data)
 
 
@@ -290,12 +304,21 @@ class ConfigUpdate(BaseModel):
     enabled_exchanges: list[Exchange] | None = None
     enabled_pairs: list[str] | None = None
     scan_interval_seconds: int | None = None
+    trading_profile: str | None = None
+    order_notional_brl: float | None = None
+    max_entry_slippage_bps: float | None = None
+    max_exit_slippage_bps: float | None = None
+    min_quote_volume_brl: float | None = None
     telegram_enabled: bool | None = None
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     telegram_alert_threshold: float | None = None
     telegram_alert_cooldown_seconds: int | None = None
     telegram_alert_types: list[str] | None = None
+    telegram_operable_only: bool | None = None
+    telegram_min_executability_score: float | None = None
+    telegram_alert_exchanges: list[Exchange] | None = None
+    telegram_alert_pairs: list[str] | None = None
     novadax_api_key: str | None = None
     novadax_api_secret: str | None = None
     mb_api_key: str | None = None
@@ -751,6 +774,26 @@ async def analytics(
     session_info: UserSession = Depends(require_user_session),
 ):
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
+    return await get_filtered_analytics(
+        exchange=exchange,
+        pair=pair,
+        min_score=min_score,
+        hours=hours,
+        workspace_config=config,
+    )
+
+
+@router.get("/analytics/operational")
+async def operational_analytics(
+    exchange: str | None = None,
+    pair: str | None = None,
+    min_score: float | None = None,
+    hours: int | None = None,
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    workspace, config = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_admin_role(workspace)
     return await get_filtered_analytics(
         exchange=exchange,
         pair=pair,

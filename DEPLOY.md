@@ -40,6 +40,7 @@ Valide localmente antes do primeiro deploy:
 cd backend
 python -m pytest tests -q
 alembic heads
+python scripts/verify_operational_readiness.py
 ```
 
 ### Frontend
@@ -309,7 +310,20 @@ select count(*) from opportunities;
 select count(*) from technical_signals;
 select count(*) from signal_outcomes;
 select count(*) from opportunity_snapshots;
+select count(*) from raw_market_observations;
 ```
+
+9. Rode o verificador operacional:
+
+```bash
+cd backend
+python scripts/verify_operational_readiness.py
+```
+
+Resultado esperado:
+- contagens nao nulas nas camadas novas
+- campos operacionais populados nas oportunidades recentes
+- sem erro de acesso ao schema `0007`
 
 ## Troubleshooting
 

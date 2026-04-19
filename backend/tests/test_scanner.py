@@ -58,6 +58,10 @@ def test_scan_all_returns_opportunities(monkeypatch, sample_ticker, sample_order
     assert opportunities[0].executability_band is not None
     assert opportunities[0].interesting_signal is True
     assert opportunities[0].operable_signal in {True, False}
+    assert opportunities[0].movement_regime is not None
+    assert opportunities[0].movement_persistence_score is not None
+    assert opportunities[0].baseline_order_notional_brl is not None
+    assert opportunities[0].duration_minutes > 0
 
 
 def test_scan_all_enriches_cross_exchange_context(monkeypatch, sample_order_book, sample_klines):

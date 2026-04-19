@@ -139,6 +139,54 @@ def test_update_config_preserves_existing_secret_on_blank(monkeypatch):
     assert response.json()["configured_secrets"]["telegram_bot_token"] is True
 
 
+def test_update_config_accepts_operational_profile_fields(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+
+    saved_configs = []
+
+    async def fake_save_workspace_config(workspace_id, config):
+        saved_configs.append((workspace_id, config))
+        return None
+
+    async def fake_audit(*args, **kwargs):
+        return None
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(role="owner"), AppConfig()
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    monkeypatch.setattr(routes, "save_workspace_config", fake_save_workspace_config)
+    monkeypatch.setattr(routes, "record_audit_event", fake_audit)
+
+    client = create_test_client()
+    response = client.put(
+        "/api/config",
+        headers={"X-Admin-Token": "secret-token"},
+        json={
+            "trading_profile": "scalp",
+            "order_notional_brl": 850,
+            "max_entry_slippage_bps": 11,
+            "max_exit_slippage_bps": 14,
+            "min_quote_volume_brl": 120000,
+            "telegram_operable_only": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert saved_configs[0][1].trading_profile == "scalp"
+    assert saved_configs[0][1].telegram_operable_only is True
+
+
 def test_health_includes_runtime_snapshot(monkeypatch):
     monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
     routes.set_scan_config(AppConfig())

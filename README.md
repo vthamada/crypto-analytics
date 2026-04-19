@@ -62,6 +62,7 @@ docker compose up --build
 cd backend
 python -m pytest tests -q
 python -m compileall app tests
+python scripts/verify_operational_readiness.py
 ```
 
 ### Frontend
@@ -84,6 +85,7 @@ npm --prefix frontend run e2e
 - Dashboard com leitura dual para payload legado/novo e explicabilidade operacional no card e no detalhe do sinal
 - Worker dedicado como fluxo padrao de scan
 - Politica de Telegram configuravel por workspace
+- `trading_profile` por workspace e analytics operacionais
 - Health check com `mode` (`scanner` ou `api_only`) e `scanner_state`
 - Suite backend e E2E frontend ativas no repositorio
 
@@ -91,4 +93,5 @@ npm --prefix frontend run e2e
 
 - Runtime e comportamento atual: [SYSTEM_STATE.md](SYSTEM_STATE.md)
 - Prioridades e roadmap: [BACKLOG.md](BACKLOG.md)
+- Proxima iteracao operacional: [docs/superpowers/plans/2026-04-18-post-release-operationalization-plan.md](docs/superpowers/plans/2026-04-18-post-release-operationalization-plan.md)
 - Deploy: [DEPLOY.md](DEPLOY.md)

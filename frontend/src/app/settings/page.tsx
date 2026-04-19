@@ -10,6 +10,13 @@ import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -162,7 +169,19 @@ const CONFIG_UPDATE_FIELD_LABELS: Record<string, string> = {
   enabled_exchanges: "exchanges",
   enabled_pairs: "pares",
   scan_interval_seconds: "intervalo do scanner",
+  trading_profile: "perfil operacional",
+  order_notional_brl: "notional por ordem",
+  max_entry_slippage_bps: "slippage max entrada",
+  max_exit_slippage_bps: "slippage max saída",
+  min_quote_volume_brl: "volume mínimo do perfil",
   telegram_enabled: "Telegram",
+  telegram_alert_threshold: "threshold Telegram",
+  telegram_alert_cooldown_seconds: "cooldown Telegram",
+  telegram_alert_types: "tipos de alerta",
+  telegram_operable_only: "somente operáveis no Telegram",
+  telegram_min_executability_score: "mínimo de operabilidade no Telegram",
+  telegram_alert_exchanges: "exchanges do Telegram",
+  telegram_alert_pairs: "pares do Telegram",
   telegram_bot_token: "bot do Telegram",
   telegram_chat_id: "chat do Telegram",
   novadax_api_key: "API key NovaDAX",
@@ -173,18 +192,15 @@ const CONFIG_UPDATE_FIELD_LABELS: Record<string, string> = {
   binance_api_secret: "API secret Binance",
 };
 
-const SENSITIVE_FIELDS = [
-  "telegram_bot_token",
-  "telegram_chat_id",
-  "novadax_api_key",
-  "novadax_api_secret",
-  "mb_api_key",
-  "mb_api_secret",
-  "binance_api_key",
-  "binance_api_secret",
-] as const;
-
-type SensitiveField = (typeof SENSITIVE_FIELDS)[number];
+type SensitiveField =
+  | "telegram_bot_token"
+  | "telegram_chat_id"
+  | "novadax_api_key"
+  | "novadax_api_secret"
+  | "mb_api_key"
+  | "mb_api_secret"
+  | "binance_api_key"
+  | "binance_api_secret";
 
 function buildOperationalConfigPayload(config: AppConfig): Partial<AppConfig> {
   return {
@@ -193,7 +209,19 @@ function buildOperationalConfigPayload(config: AppConfig): Partial<AppConfig> {
     enabled_exchanges: config.enabled_exchanges,
     enabled_pairs: config.enabled_pairs,
     scan_interval_seconds: config.scan_interval_seconds,
+    trading_profile: config.trading_profile,
+    order_notional_brl: config.order_notional_brl,
+    max_entry_slippage_bps: config.max_entry_slippage_bps,
+    max_exit_slippage_bps: config.max_exit_slippage_bps,
+    min_quote_volume_brl: config.min_quote_volume_brl,
     telegram_enabled: config.telegram_enabled,
+    telegram_alert_threshold: config.telegram_alert_threshold,
+    telegram_alert_cooldown_seconds: config.telegram_alert_cooldown_seconds,
+    telegram_alert_types: config.telegram_alert_types,
+    telegram_operable_only: config.telegram_operable_only,
+    telegram_min_executability_score: config.telegram_min_executability_score,
+    telegram_alert_exchanges: config.telegram_alert_exchanges,
+    telegram_alert_pairs: config.telegram_alert_pairs,
   };
 }
 
@@ -1587,6 +1615,137 @@ export default function SettingsPage() {
                       thresholds: { ...config.thresholds, max_spread_pct: nextValue },
                     })
                   }
+                />
+              </SettingRow>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-semibold">Perfil operacional</CardTitle>
+              <CardDescription>
+                Ajusta o tamanho de ordem, limites de slippage, persistência mínima e os filtros de alerta por workspace.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <SettingRow
+                label="Perfil de trading"
+                description="Preset base para operabilidade e filtros de execução"
+              >
+                <Select
+                  value={config.trading_profile}
+                  onValueChange={(value) =>
+                    setConfig({
+                      ...config,
+                      trading_profile: (value as AppConfig["trading_profile"]) ?? "intraday_liquido",
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-9 w-60">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="conservador">Conservador</SelectItem>
+                    <SelectItem value="intraday_liquido">Intraday líquido</SelectItem>
+                    <SelectItem value="agressivo">Agressivo</SelectItem>
+                    <SelectItem value="scalp">Scalp</SelectItem>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Notional por ordem (BRL)"
+                description="Tamanho base usado para estimar slippage e operabilidade"
+              >
+                <Input
+                  type="number"
+                  value={config.order_notional_brl ?? ""}
+                  onChange={(event) =>
+                    setConfig({ ...config, order_notional_brl: Number(event.target.value) || null })
+                  }
+                  className="h-9 w-40 font-medium"
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Slippage máximo de entrada (bps)"
+                description="Limite aceitável para o lado comprador"
+              >
+                <Input
+                  type="number"
+                  value={config.max_entry_slippage_bps ?? ""}
+                  onChange={(event) =>
+                    setConfig({ ...config, max_entry_slippage_bps: Number(event.target.value) || null })
+                  }
+                  className="h-9 w-40 font-medium"
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Slippage máximo de saída (bps)"
+                description="Limite aceitável para o lado vendedor"
+              >
+                <Input
+                  type="number"
+                  value={config.max_exit_slippage_bps ?? ""}
+                  onChange={(event) =>
+                    setConfig({ ...config, max_exit_slippage_bps: Number(event.target.value) || null })
+                  }
+                  className="h-9 w-40 font-medium"
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Volume mínimo do perfil (BRL)"
+                description="Filtro adicional para volume de quote além dos thresholds gerais"
+              >
+                <Input
+                  type="number"
+                  value={config.min_quote_volume_brl ?? ""}
+                  onChange={(event) =>
+                    setConfig({ ...config, min_quote_volume_brl: Number(event.target.value) || null })
+                  }
+                  className="h-9 w-40 font-medium"
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Somente operáveis no Telegram"
+                description="Suprime alertas de sinais interessantes mas não executáveis"
+              >
+                <Switch
+                  size="sm"
+                  checked={!!config.telegram_operable_only}
+                  onCheckedChange={(checked) => setConfig({ ...config, telegram_operable_only: checked })}
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Mínimo de operabilidade no Telegram"
+                description="Executability score mínimo para disparo de alertas"
+              >
+                <Input
+                  type="number"
+                  value={config.telegram_min_executability_score ?? ""}
+                  onChange={(event) =>
+                    setConfig({
+                      ...config,
+                      telegram_min_executability_score: Number(event.target.value) || null,
+                    })
+                  }
+                  className="h-9 w-40 font-medium"
                 />
               </SettingRow>
             </CardContent>

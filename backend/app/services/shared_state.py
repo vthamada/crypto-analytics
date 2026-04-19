@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import (
     OpportunitySnapshotRecord,
+    RawMarketObservationRecord,
     RepetitionCountRecord,
     ScannerRuntimeStateRecord,
     SignalOutcomeRecord,
@@ -32,6 +33,7 @@ SCORE_VERSION = "v1"
 EXECUTABILITY_VERSION = "v1"
 MOVEMENT_VERSION = "v1"
 PROFILE_VERSION = "v1"
+REWEIGHTING_VERSION = "v1"
 _DEDUP_SIGNAL_WINDOW_MINUTES = 5
 
 
@@ -156,6 +158,7 @@ async def write_opportunity_snapshots(
                 executability_version=opp.executability_version,
                 movement_version=opp.movement_version,
                 profile_version=opp.profile_version,
+                reweighting_version=opp.reweighting_version,
                 volatility_pct=opp.volatility_pct,
                 volume_24h=opp.volume_24h,
                 quote_volume_24h=opp.quote_volume_24h,
@@ -171,7 +174,9 @@ async def write_opportunity_snapshots(
                 estimated_buy_slippage_bps=opp.estimated_buy_slippage_bps,
                 estimated_sell_slippage_bps=opp.estimated_sell_slippage_bps,
                 fillable_notional_within_slippage_cap=opp.fillable_notional_within_slippage_cap,
+                baseline_order_notional_brl=opp.baseline_order_notional_brl,
                 movement_type=opp.movement_type.value,
+                movement_regime=opp.movement_regime.value if opp.movement_regime else None,
                 movement_persistence_score=opp.movement_persistence_score,
                 last_price=opp.last_price,
                 change_pct=opp.change_pct,
@@ -217,6 +222,7 @@ async def read_opportunity_snapshots() -> list[dict]:
                 "executability_version": getattr(r, "executability_version", EXECUTABILITY_VERSION),
                 "movement_version": getattr(r, "movement_version", MOVEMENT_VERSION),
                 "profile_version": getattr(r, "profile_version", PROFILE_VERSION),
+                "reweighting_version": getattr(r, "reweighting_version", REWEIGHTING_VERSION),
                 "volatility_pct": r.volatility_pct,
                 "volume_24h": r.volume_24h,
                 "quote_volume_24h": r.quote_volume_24h,
@@ -232,7 +238,9 @@ async def read_opportunity_snapshots() -> list[dict]:
                 "estimated_buy_slippage_bps": getattr(r, "estimated_buy_slippage_bps", None),
                 "estimated_sell_slippage_bps": getattr(r, "estimated_sell_slippage_bps", None),
                 "fillable_notional_within_slippage_cap": getattr(r, "fillable_notional_within_slippage_cap", None),
+                "baseline_order_notional_brl": getattr(r, "baseline_order_notional_brl", None),
                 "movement_type": r.movement_type,
+                "movement_regime": getattr(r, "movement_regime", None),
                 "movement_persistence_score": getattr(r, "movement_persistence_score", None),
                 "last_price": r.last_price,
                 "change_pct": r.change_pct,
@@ -269,14 +277,17 @@ async def save_technical_signals(opportunities: list[Opportunity]) -> dict[str, 
         recent_q = select(
             TechnicalSignalRecord.exchange,
             TechnicalSignalRecord.pair,
+            TechnicalSignalRecord.semantic_signal_key,
         ).where(TechnicalSignalRecord.detected_at >= cutoff)
         recent_result = await session.execute(recent_q)
-        recent_keys: set[tuple[str, str]] = {(r[0], r[1]) for r in recent_result.all()}
+        recent_rows = recent_result.all()
+        recent_keys: set[tuple[str, str]] = {(r[0], r[1]) for r in recent_rows}
+        recent_semantic_keys: set[str] = {r[2] for r in recent_rows if r[2]}
 
         for opp in opportunities:
             exchange_val = opp.exchange.value
             key = (exchange_val, opp.pair)
-            if key in recent_keys:
+            if key in recent_keys and (not opp.semantic_signal_key or opp.semantic_signal_key in recent_semantic_keys):
                 continue
 
             technical_score = calculate_technical_score(
@@ -299,6 +310,7 @@ async def save_technical_signals(opportunities: list[Opportunity]) -> dict[str, 
                 executability_version=opp.executability_version,
                 movement_version=opp.movement_version,
                 profile_version=opp.profile_version,
+                reweighting_version=opp.reweighting_version,
                 volatility_pct=opp.volatility_pct,
                 volatility_score=opp.volatility_score,
                 volume_24h=opp.volume_24h,
@@ -310,6 +322,7 @@ async def save_technical_signals(opportunities: list[Opportunity]) -> dict[str, 
                 spread_score=opp.spread_score,
                 repetition_score=opp.repetition_score,
                 movement_type=opp.movement_type.value,
+                movement_regime=opp.movement_regime.value if opp.movement_regime else None,
                 movement_multiplier=opp.movement_multiplier,
                 last_price=opp.last_price,
                 change_pct=opp.change_pct,
@@ -321,17 +334,48 @@ async def save_technical_signals(opportunities: list[Opportunity]) -> dict[str, 
                 ),
                 cross_exchange_reference_price=opp.cross_exchange_reference_price,
                 arbitrage_available=opp.arbitrage_available,
+                semantic_signal_key=opp.semantic_signal_key,
                 detected_at=normalize_db_datetime(opp.detected_at),
             )
             session.add(record)
             signal_map[opp.id] = signal_id
             recent_keys.add(key)
+            if opp.semantic_signal_key:
+                recent_semantic_keys.add(opp.semantic_signal_key)
 
         if signal_map:
             await session.commit()
 
     logger.info("technical_signals_saved count=%s", len(signal_map))
     return signal_map
+
+
+async def save_raw_market_observations(opportunities: list[Opportunity], cycle_id: str) -> int:
+    if not opportunities:
+        return 0
+
+    async with async_session() as session:
+        for opp in opportunities:
+            session.add(
+                RawMarketObservationRecord(
+                    observation_cycle_id=cycle_id,
+                    exchange=opp.exchange.value,
+                    pair=opp.pair,
+                    semantic_signal_key=opp.semantic_signal_key,
+                    movement_type=opp.movement_type.value,
+                    movement_regime=opp.movement_regime.value if opp.movement_regime else None,
+                    last_price=opp.last_price,
+                    quote_volume_24h=opp.quote_volume_24h,
+                    liquidity_units=opp.liquidity_units,
+                    spread_pct=opp.spread_pct,
+                    bid_notional_top_n=opp.bid_notional_top_n,
+                    ask_notional_top_n=opp.ask_notional_top_n,
+                    total_notional_top_n=opp.total_notional_top_n,
+                    detected_at=normalize_db_datetime(opp.detected_at),
+                )
+            )
+        await session.commit()
+    return len(opportunities)
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +394,7 @@ async def save_workspace_projections(
     executability_version: str = EXECUTABILITY_VERSION,
     movement_version: str = MOVEMENT_VERSION,
     profile_version: str = PROFILE_VERSION,
+    reweighting_version: str = REWEIGHTING_VERSION,
 ) -> None:
     async with async_session() as session:
         record = WorkspaceSignalProjectionRecord(
@@ -360,6 +405,7 @@ async def save_workspace_projections(
             executability_version=executability_version,
             movement_version=movement_version,
             profile_version=profile_version,
+            reweighting_version=reweighting_version,
             visible=visible,
             alert_eligible=alert_eligible,
             projection_reason=projection_reason,
@@ -390,6 +436,7 @@ async def save_workspace_projections_batch(
                 executability_version=proj.get("executability_version", EXECUTABILITY_VERSION),
                 movement_version=proj.get("movement_version", MOVEMENT_VERSION),
                 profile_version=proj.get("profile_version", PROFILE_VERSION),
+                reweighting_version=proj.get("reweighting_version", REWEIGHTING_VERSION),
                 visible=proj.get("visible", True),
                 alert_eligible=proj.get("alert_eligible", False),
                 projection_reason=proj.get("projection_reason"),

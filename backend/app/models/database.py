@@ -65,7 +65,9 @@ class OpportunityRecord(Base):
     executability_version = Column(String, nullable=True, default="v1")
     movement_version = Column(String, nullable=True, default="v1")
     profile_version = Column(String, nullable=True, default="v1")
+    reweighting_version = Column(String, nullable=True, default="v1")
     technical_signal_id = Column(String, nullable=True)
+    semantic_signal_key = Column(String, nullable=True, index=True)
     executability_score = Column(Float, nullable=True)
     executability_band = Column(String, nullable=True)
     interesting_signal = Column(Boolean, nullable=True)
@@ -76,6 +78,8 @@ class OpportunityRecord(Base):
     estimated_buy_slippage_bps = Column(Float, nullable=True)
     estimated_sell_slippage_bps = Column(Float, nullable=True)
     fillable_notional_within_slippage_cap = Column(Float, nullable=True)
+    baseline_order_notional_brl = Column(Float, nullable=True)
+    movement_regime = Column(String, nullable=True)
     movement_persistence_score = Column(Float, nullable=True)
 
 
@@ -223,6 +227,7 @@ class OpportunitySnapshotRecord(Base):
     executability_version = Column(String, nullable=False, default="v1")
     movement_version = Column(String, nullable=False, default="v1")
     profile_version = Column(String, nullable=False, default="v1")
+    reweighting_version = Column(String, nullable=False, default="v1")
     volatility_pct = Column(Float, nullable=False)
     volume_24h = Column(Float, nullable=False)
     quote_volume_24h = Column(Float, nullable=False)
@@ -238,7 +243,9 @@ class OpportunitySnapshotRecord(Base):
     estimated_buy_slippage_bps = Column(Float, nullable=True)
     estimated_sell_slippage_bps = Column(Float, nullable=True)
     fillable_notional_within_slippage_cap = Column(Float, nullable=True)
+    baseline_order_notional_brl = Column(Float, nullable=True)
     movement_type = Column(String, nullable=False)
+    movement_regime = Column(String, nullable=True)
     movement_persistence_score = Column(Float, nullable=True)
     last_price = Column(Float, nullable=False)
     change_pct = Column(Float, nullable=False)
@@ -268,6 +275,7 @@ class TechnicalSignalRecord(Base):
     executability_version = Column(String, nullable=False, default="v1")
     movement_version = Column(String, nullable=False, default="v1")
     profile_version = Column(String, nullable=False, default="v1")
+    reweighting_version = Column(String, nullable=False, default="v1")
     volatility_pct = Column(Float, nullable=False)
     volatility_score = Column(Float, default=0.0)
     volume_24h = Column(Float, nullable=False)
@@ -279,6 +287,7 @@ class TechnicalSignalRecord(Base):
     spread_score = Column(Float, default=0.0)
     repetition_score = Column(Float, default=0.0)
     movement_type = Column(String, nullable=False)
+    movement_regime = Column(String, nullable=True)
     movement_multiplier = Column(Float, default=1.0)
     last_price = Column(Float, nullable=False)
     change_pct = Column(Float, nullable=False)
@@ -287,6 +296,7 @@ class TechnicalSignalRecord(Base):
     cross_exchange_reference_exchange = Column(String, nullable=True)
     cross_exchange_reference_price = Column(Float, nullable=True)
     arbitrage_available = Column(Boolean, default=False, index=True)
+    semantic_signal_key = Column(String, nullable=True, index=True)
     detected_at = Column(DateTime, nullable=False, default=utcnow, index=True)
 
 
@@ -301,10 +311,32 @@ class WorkspaceSignalProjectionRecord(Base):
     executability_version = Column(String, nullable=False, default="v1")
     movement_version = Column(String, nullable=False, default="v1")
     profile_version = Column(String, nullable=False, default="v1")
+    reweighting_version = Column(String, nullable=False, default="v1")
     visible = Column(Boolean, nullable=False, default=True)
     alert_eligible = Column(Boolean, nullable=False, default=False)
     projection_reason = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+
+
+class RawMarketObservationRecord(Base):
+    __tablename__ = "raw_market_observations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    observation_cycle_id = Column(String, nullable=False, index=True)
+    exchange = Column(String, nullable=False, index=True)
+    pair = Column(String, nullable=False, index=True)
+    semantic_signal_key = Column(String, nullable=True, index=True)
+    movement_type = Column(String, nullable=False)
+    movement_regime = Column(String, nullable=True)
+    last_price = Column(Float, nullable=False)
+    quote_volume_24h = Column(Float, nullable=False)
+    liquidity_units = Column(Float, nullable=False)
+    spread_pct = Column(Float, nullable=False)
+    bid_notional_top_n = Column(Float, nullable=True)
+    ask_notional_top_n = Column(Float, nullable=True)
+    total_notional_top_n = Column(Float, nullable=True)
+    detected_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
 class SignalOutcomeRecord(Base):
@@ -408,7 +440,9 @@ async def ensure_schema_compatibility() -> None:
         "executability_version": "VARCHAR DEFAULT 'v1'",
         "movement_version": "VARCHAR DEFAULT 'v1'",
         "profile_version": "VARCHAR DEFAULT 'v1'",
+        "reweighting_version": "VARCHAR DEFAULT 'v1'",
         "technical_signal_id": "VARCHAR",
+        "semantic_signal_key": "VARCHAR",
         "executability_score": "FLOAT",
         "executability_band": "VARCHAR",
         "interesting_signal": "BOOLEAN",
@@ -419,6 +453,8 @@ async def ensure_schema_compatibility() -> None:
         "estimated_buy_slippage_bps": "FLOAT",
         "estimated_sell_slippage_bps": "FLOAT",
         "fillable_notional_within_slippage_cap": "FLOAT",
+        "baseline_order_notional_brl": "FLOAT",
+        "movement_regime": "VARCHAR",
         "movement_persistence_score": "FLOAT",
     }
 
@@ -427,6 +463,7 @@ async def ensure_schema_compatibility() -> None:
         "executability_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "reweighting_version": "VARCHAR DEFAULT 'v1' NOT NULL",
     }
 
     snapshot_columns = {
@@ -434,6 +471,7 @@ async def ensure_schema_compatibility() -> None:
         "executability_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "reweighting_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "bid_notional_top_n": "FLOAT",
         "ask_notional_top_n": "FLOAT",
         "total_notional_top_n": "FLOAT",
@@ -444,6 +482,8 @@ async def ensure_schema_compatibility() -> None:
         "estimated_buy_slippage_bps": "FLOAT",
         "estimated_sell_slippage_bps": "FLOAT",
         "fillable_notional_within_slippage_cap": "FLOAT",
+        "baseline_order_notional_brl": "FLOAT",
+        "movement_regime": "VARCHAR",
         "movement_persistence_score": "FLOAT",
     }
 
@@ -452,6 +492,9 @@ async def ensure_schema_compatibility() -> None:
         "executability_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "reweighting_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "movement_regime": "VARCHAR",
+        "semantic_signal_key": "VARCHAR",
     }
 
     workspace_projection_columns = {
@@ -459,6 +502,7 @@ async def ensure_schema_compatibility() -> None:
         "executability_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "reweighting_version": "VARCHAR DEFAULT 'v1' NOT NULL",
     }
 
     audit_columns = {
@@ -504,6 +548,7 @@ async def ensure_schema_compatibility() -> None:
             "opportunity_snapshots",
             "technical_signals",
             "workspace_signal_projections",
+            "raw_market_observations",
             "signal_outcomes",
             "repetition_counts",
         ):

@@ -141,6 +141,22 @@ def calculate_executability_score(
     return round(_clamp(raw) * 100, 1)
 
 
+def rescale_slippage_bps(
+    slippage_bps: float | None,
+    *,
+    baseline_order_notional_brl: float | None,
+    target_order_notional_brl: float,
+) -> float | None:
+    if slippage_bps is None:
+        return None
+    if not baseline_order_notional_brl or baseline_order_notional_brl <= 0 or target_order_notional_brl <= 0:
+        return slippage_bps
+
+    scaling_ratio = target_order_notional_brl / baseline_order_notional_brl
+    # Linear would over-penalize quickly. Use a mild square-root escalation.
+    return round(slippage_bps * math.sqrt(scaling_ratio), 2)
+
+
 def classify_executability_band(score: float | None) -> str | None:
     if score is None:
         return None

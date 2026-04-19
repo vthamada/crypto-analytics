@@ -12,6 +12,25 @@ Convencao deste repositorio:
 
 - Nenhuma entrada em aberto.
 
+## [2026-04-18]
+
+### Added
+- `workspace_profiles.py` com presets operacionais por workspace (`conservador`, `intraday_liquido`, `agressivo`, `scalp`) e thresholds derivados para notional, slippage e volume minimo.
+- Migration `0007_operational_profiles_and_history_layers` adicionando `reweighting_version`, `semantic_signal_key`, `movement_regime`, `baseline_order_notional_brl` e a nova tabela `raw_market_observations`.
+- Endpoint administrativo `/api/analytics/operational` para expor analytics recalculados com buckets de executabilidade, distribuicao de regime e perfil ativo do workspace.
+- Persistencia dual-write de `raw_market_observations` por ciclo, consolidando a separacao entre observacao bruta, sinal tecnico, projecao por workspace e outcome.
+
+### Changed
+- `project_workspace_opportunity()` e a serializacao do historico agora recalculam executabilidade e operabilidade por workspace com base no perfil operacional atual, sem quebrar o score tecnico.
+- O scanner passou a produzir `movement_regime`, `movement_persistence_score`, `duration_minutes`, `baseline_order_notional_brl`, `semantic_signal_key` e `reweighting_version`.
+- A deduplicacao do historico deixou de ser apenas `exchange+pair` por janela fixa e passou a considerar a chave semantica do sinal.
+- A calibracao historica agora usa `signal_outcomes` reais para reweighting conservador, mantendo o fator final entre `0.90` e `1.15`.
+- Alertas Telegram passaram a respeitar perfil operacional, `telegram_operable_only`, score minimo de executabilidade e escopo por exchange/par.
+- A tela de settings ganhou edicao do perfil operacional por workspace; a de historico passou a consumir analytics operacionais.
+
+### Fixed
+- Fallback da API para snapshots compartilhados voltou a funcionar em cenarios sem estado local apos a introducao dos filtros operacionais.
+
 ## [2026-04-17]
 
 ### Added

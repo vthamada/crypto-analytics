@@ -1,6 +1,12 @@
 export type Exchange = "novadax" | "mercado_bitcoin" | "binance";
 
 export type MovementType = "strong_range" | "spike" | "weak" | "trap";
+export type MovementRegime =
+  | "trend_continuation"
+  | "breakout_clean"
+  | "breakout_exhaustion"
+  | "mean_reversion_candidate"
+  | "illiquid_spike";
 
 export interface Kline {
   open_time: string;
@@ -22,7 +28,9 @@ export interface Opportunity {
   executability_version?: string;
   movement_version?: string;
   profile_version?: string;
+  reweighting_version?: string;
   technical_signal_id?: string | null;
+  semantic_signal_key?: string | null;
   executability_score?: number | null;
   executability_band?: string | null;
   interesting_signal?: boolean | null;
@@ -38,7 +46,9 @@ export interface Opportunity {
   estimated_buy_slippage_bps?: number | null;
   estimated_sell_slippage_bps?: number | null;
   fillable_notional_within_slippage_cap?: number | null;
+  baseline_order_notional_brl?: number | null;
   movement_type: MovementType;
+  movement_regime?: MovementRegime | null;
   movement_persistence_score?: number | null;
   last_price: number;
   change_pct: number;
@@ -91,7 +101,19 @@ export interface AppConfig {
   enabled_exchanges: Exchange[];
   enabled_pairs: string[];
   scan_interval_seconds: number;
+  trading_profile: "conservador" | "intraday_liquido" | "agressivo" | "scalp";
+  order_notional_brl?: number | null;
+  max_entry_slippage_bps?: number | null;
+  max_exit_slippage_bps?: number | null;
+  min_quote_volume_brl?: number | null;
   telegram_enabled: boolean;
+  telegram_alert_threshold?: number;
+  telegram_alert_cooldown_seconds?: number;
+  telegram_alert_types?: string[];
+  telegram_operable_only?: boolean;
+  telegram_min_executability_score?: number | null;
+  telegram_alert_exchanges?: Exchange[];
+  telegram_alert_pairs?: string[];
   telegram_bot_token: string;
   telegram_chat_id: string;
   novadax_api_key: string;
@@ -117,7 +139,9 @@ export interface HistoryRecord {
   executability_version?: string;
   movement_version?: string;
   profile_version?: string;
+  reweighting_version?: string;
   technical_signal_id?: string | null;
+  semantic_signal_key?: string | null;
   executability_score?: number | null;
   executability_band?: string | null;
   interesting_signal?: boolean | null;
@@ -133,7 +157,9 @@ export interface HistoryRecord {
   estimated_buy_slippage_bps?: number | null;
   estimated_sell_slippage_bps?: number | null;
   fillable_notional_within_slippage_cap?: number | null;
+  baseline_order_notional_brl?: number | null;
   movement_type: MovementType;
+  movement_regime?: MovementRegime | null;
   movement_persistence_score?: number | null;
   last_price: number;
   change_pct: number;
@@ -157,10 +183,13 @@ export interface Analytics {
   top_pairs: { pair: string; count: number }[];
   avg_score_by_exchange: { exchange: string; avg_score: number }[];
   score_distribution: Record<string, number>;
+  executability_distribution?: Record<string, number>;
   movement_distribution: Record<string, number>;
+  movement_regime_distribution?: Record<string, number>;
   hourly_distribution: Record<string, number>;
   arbitrage_count: number;
   avg_cross_exchange_gap_pct: number;
+  profile_distribution?: Record<string, number>;
 }
 
 export interface WorkspaceSummary {

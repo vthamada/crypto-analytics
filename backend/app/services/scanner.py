@@ -21,6 +21,7 @@ from app.services.shared_state import (
     SCORE_VERSION,
     calculate_technical_score,
 )
+from app.services.workspace_profiles import resolve_trading_profile
 from app.filters.volatility import calculate_volatility, passes_volatility_filter, calculate_recent_change
 from app.filters.volume import passes_volume_filter, volume_score
 from app.filters.executability import (
@@ -38,6 +39,7 @@ from app.filters.liquidity import (
 )
 from app.filters.spread import calculate_spread, passes_spread_filter, spread_score
 from app.filters.movement import classify_movement
+from app.filters.movement import classify_movement_regime
 from app.filters.scoring import calculate_score
 
 logger = logging.getLogger(__name__)
@@ -94,6 +96,23 @@ class Scanner:
     def set_historical_calibration(self, calibration: dict[str, dict[str, float]]) -> None:
         self._historical_calibration = calibration
 
+    def _build_semantic_signal_key(
+        self,
+        *,
+        exchange: Exchange,
+        pair: str,
+        movement_type: str,
+        movement_regime: str | None,
+    ) -> str:
+        return ":".join(
+            [
+                exchange.value,
+                pair,
+                movement_type,
+                movement_regime or "regime_unknown",
+            ]
+        )
+
     async def _get_scannable_pairs_by_exchange(self) -> dict[Exchange, list[str]]:
         enabled_exchanges = list(self._providers.keys())
         try:
@@ -130,6 +149,7 @@ class Scanner:
                 return None
 
             thresholds = self.config.thresholds
+            trading_profile = resolve_trading_profile(self.config)
 
             # Apply filters
             if not passes_volatility_filter(klines, thresholds.min_volatility_pct):
@@ -146,10 +166,31 @@ class Scanner:
 
             # Classify movement
             movement_type = classify_movement(klines)
+            movement_regime = classify_movement_regime(
+                klines,
+                spread_pct=round(calculate_spread(order_book), 4),
+                quote_volume_24h=ticker.quote_volume_24h,
+            )
 
             # Track repetition
             key = f"{provider.exchange}:{pair}"
             self._repetition_counts[key] = self._repetition_counts.get(key, 0) + 1
+            duration_minutes = round((self._repetition_counts[key] * self.config.scan_interval_seconds) / 60, 2)
+            persistence_baseline = min(duration_minutes / 20.0, 1.0)
+            movement_persistence_score = round(
+                min(
+                    1.0,
+                    persistence_baseline
+                    * (1.1 if movement_type.value in {"strong_range", "spike"} else 0.95),
+                ),
+                4,
+            )
+            semantic_signal_key = self._build_semantic_signal_key(
+                exchange=provider.exchange,
+                pair=pair,
+                movement_type=movement_type.value,
+                movement_regime=movement_regime.value,
+            )
 
             # Calculate score
             volatility_pct = calculate_volatility(klines)
@@ -165,16 +206,16 @@ class Scanner:
             estimated_buy_slippage_bps = estimate_slippage_bps(
                 order_book,
                 "buy",
-                order_notional_brl=DEFAULT_ORDER_NOTIONAL_BRL,
+                order_notional_brl=trading_profile.order_notional_brl,
             )
             estimated_sell_slippage_bps = estimate_slippage_bps(
                 order_book,
                 "sell",
-                order_notional_brl=DEFAULT_ORDER_NOTIONAL_BRL,
+                order_notional_brl=trading_profile.order_notional_brl,
             )
             fillable_notional_within_slippage_cap = min(
-                estimate_fillable_notional(order_book, DEFAULT_MAX_SLIPPAGE_BPS, "buy"),
-                estimate_fillable_notional(order_book, DEFAULT_MAX_SLIPPAGE_BPS, "sell"),
+                estimate_fillable_notional(order_book, trading_profile.max_entry_slippage_bps, "buy"),
+                estimate_fillable_notional(order_book, trading_profile.max_exit_slippage_bps, "sell"),
             )
             serialized_buy_slippage = (
                 None if estimated_buy_slippage_bps == float("inf") else round(estimated_buy_slippage_bps, 2)
@@ -191,7 +232,7 @@ class Scanner:
                 spread_pct=round(calculate_spread(order_book), 4),
                 quote_volume_24h=ticker.quote_volume_24h,
                 fillable_notional_within_slippage_cap=serialized_fillable_notional,
-                order_notional_brl=DEFAULT_ORDER_NOTIONAL_BRL,
+                order_notional_brl=trading_profile.order_notional_brl,
             )
             executability_band = classify_executability_band(executability_score)
 
@@ -208,9 +249,13 @@ class Scanner:
             interesting_signal = score >= 40
             operable_signal = (
                 executability_score >= DEFAULT_OPERABLE_EXECUTABILITY_SCORE
+                and ticker.quote_volume_24h >= trading_profile.min_quote_volume_brl
                 and serialized_sell_slippage is not None
-                and serialized_sell_slippage <= DEFAULT_MAX_SLIPPAGE_BPS
+                and serialized_sell_slippage <= trading_profile.max_exit_slippage_bps
+                and serialized_buy_slippage is not None
+                and serialized_buy_slippage <= trading_profile.max_entry_slippage_bps
                 and round(calculate_spread(order_book), 4) <= min(self.config.thresholds.max_spread_pct, DEFAULT_OPERABLE_SPREAD_PCT)
+                and movement_persistence_score >= 0.02
             )
 
             technical_score = calculate_technical_score(
@@ -237,6 +282,8 @@ class Scanner:
                 executability_band=executability_band,
                 interesting_signal=interesting_signal,
                 operable_signal=operable_signal,
+                semantic_signal_key=semantic_signal_key,
+                reweighting_version="v1",
                 volatility_pct=round(volatility_pct, 2),
                 volume_24h=ticker.volume_24h,
                 quote_volume_24h=ticker.quote_volume_24h,
@@ -248,10 +295,14 @@ class Scanner:
                 estimated_buy_slippage_bps=serialized_buy_slippage,
                 estimated_sell_slippage_bps=serialized_sell_slippage,
                 fillable_notional_within_slippage_cap=serialized_fillable_notional,
+                baseline_order_notional_brl=trading_profile.order_notional_brl,
                 movement_type=movement_type,
+                movement_regime=movement_regime,
+                movement_persistence_score=movement_persistence_score,
                 last_price=ticker.last_price,
                 change_pct=round(calculate_recent_change(klines), 2),
                 detected_at=datetime.now(timezone.utc),
+                duration_minutes=duration_minutes,
                 historical_confidence=historical_confidence,
                 volatility_score=round(volatility_component, 4),
                 volume_score=round(volume_component, 4),

@@ -337,6 +337,22 @@ export function getAnalytics(params?: {
   return fetchJSON(`/analytics${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
 }
 
+export function getOperationalAnalytics(params?: {
+  exchange?: string;
+  pair?: string;
+  min_score?: number;
+  hours?: number;
+}): Promise<Analytics> {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return fetchJSON(`/analytics/operational${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
+}
+
 // Config
 export function adminLogin(username: string, password: string): Promise<{
   access_token: string;

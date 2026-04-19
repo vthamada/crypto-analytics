@@ -19,6 +19,7 @@ from app.services.shared_state import (
     create_pending_outcomes,
     decay_stale_repetitions,
     load_repetition_counts,
+    save_raw_market_observations,
     save_repetition_counts,
     save_technical_signals,
     save_workspace_projections_batch,
@@ -30,6 +31,7 @@ from app.services.scan_runtime import wait_for_refresh_or_timeout
 from app.services.scanner import Scanner
 from app.services.telegram import send_telegram_alert
 from app.services.outcome_evaluator import evaluate_pending_outcomes
+from app.services.workspace_profiles import opportunity_matches_alert_scope
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,7 @@ async def run_worker() -> None:
 
             # Write shared snapshot for API decoupling
             await write_opportunity_snapshots(opportunities, cycle_id)
+            await save_raw_market_observations(opportunities, cycle_id)
 
             # Technical signals dual-write
             signal_map: dict[str, str] = {}
@@ -115,15 +118,28 @@ async def run_worker() -> None:
                             "executability_version": projected.executability_version,
                             "movement_version": projected.movement_version,
                             "profile_version": projected.profile_version,
+                            "reweighting_version": projected.reweighting_version,
                             "visible": True,
-                            "alert_eligible": projected.score >= alert_threshold,
+                            "alert_eligible": projected.score >= alert_threshold and opportunity_matches_alert_scope(projected, workspace_config),
                             "projection_reason": "config_match",
                         })
 
-                high_score = [opp for opp in projected_opportunities if opp.score >= alert_threshold]
-                if high_score:
+                high_score = [
+                    opp
+                    for opp in projected_opportunities
+                    if opp.score >= alert_threshold and opportunity_matches_alert_scope(opp, workspace_config)
+                ]
+                alert_types = getattr(workspace_config, "telegram_alert_types", ["high_score", "arbitrage"])
+                eligible = []
+                for opp in high_score:
+                    if "high_score" in alert_types:
+                        eligible.append(opp)
+                    elif "arbitrage" in alert_types and opp.arbitrage_available:
+                        eligible.append(opp)
+
+                if eligible:
                     await send_telegram_alert(
-                        high_score,
+                        eligible,
                         token=workspace_config.telegram_bot_token,
                         chat_id=workspace_config.telegram_chat_id,
                     )

@@ -11,16 +11,21 @@ from app.config import settings
 from app.models.database import (
     OpportunityRecord,
     ConfigRecord,
+    RawMarketObservationRecord,
+    SignalOutcomeRecord,
     WorkspaceConfigRecord,
     async_session,
     normalize_db_datetime,
 )
 from app.models.schemas import AppConfig, HistoryRecord, MovementType, Opportunity, ScoreWeights
+from app.filters.executability import calculate_executability_score, classify_executability_band, rescale_slippage_bps
+from app.services.workspace_profiles import highest_order_notional, resolve_trading_profile, widest_slippage_cap
 
 logger = logging.getLogger(__name__)
 
 
 _DEDUP_WINDOW_MINUTES = 5  # só salva o mesmo par+exchange uma vez a cada N minutos
+_SEMANTIC_DEDUP_WINDOW_MINUTES = 30
 _last_history_retention_run: datetime | None = None
 
 
@@ -77,18 +82,73 @@ def opportunity_matches_config(opportunity: Opportunity | HistoryRecord | Opport
     )
     enabled_exchanges = {item.value if hasattr(item, "value") else item for item in config.enabled_exchanges}
 
+    profile = resolve_trading_profile(config)
     return (
         exchange in enabled_exchanges
-        and opportunity.pair in config.enabled_pairs
+        and (not config.enabled_pairs or opportunity.pair in config.enabled_pairs)
         and opportunity.volatility_pct >= config.thresholds.min_volatility_pct
         and opportunity.liquidity_units >= config.thresholds.min_liquidity_units
         and opportunity.spread_pct <= config.thresholds.max_spread_pct
-        and (
-            opportunity.quote_volume_24h >= config.thresholds.min_volume_brl
-            or opportunity.quote_volume_24h >= config.thresholds.min_volume_brl_small
-        )
+        and opportunity.quote_volume_24h >= max(config.thresholds.min_volume_brl_small, profile.min_quote_volume_brl)
         and movement in {item.value if hasattr(item, "value") else item for item in MovementType}
     )
+
+
+def get_workspace_operability_fields(
+    *,
+    bid_notional_top_n: float | None,
+    ask_notional_top_n: float | None,
+    spread_pct: float,
+    quote_volume_24h: float,
+    fillable_notional_within_slippage_cap: float | None,
+    baseline_order_notional_brl: float | None,
+    estimated_buy_slippage_bps: float | None,
+    estimated_sell_slippage_bps: float | None,
+    movement_persistence_score: float | None,
+    config: AppConfig,
+) -> dict[str, object]:
+    if bid_notional_top_n is None and ask_notional_top_n is None:
+        return {}
+
+    profile = resolve_trading_profile(config)
+    buy_slippage = rescale_slippage_bps(
+        estimated_buy_slippage_bps,
+        baseline_order_notional_brl=baseline_order_notional_brl,
+        target_order_notional_brl=profile.order_notional_brl,
+    )
+    sell_slippage = rescale_slippage_bps(
+        estimated_sell_slippage_bps,
+        baseline_order_notional_brl=baseline_order_notional_brl,
+        target_order_notional_brl=profile.order_notional_brl,
+    )
+    executability_score = calculate_executability_score(
+        bid_notional_top_n=bid_notional_top_n or 0.0,
+        ask_notional_top_n=ask_notional_top_n or 0.0,
+        estimated_buy_slippage_bps=buy_slippage,
+        estimated_sell_slippage_bps=sell_slippage,
+        spread_pct=spread_pct,
+        quote_volume_24h=quote_volume_24h,
+        fillable_notional_within_slippage_cap=fillable_notional_within_slippage_cap,
+        order_notional_brl=profile.order_notional_brl,
+    )
+    operable_signal = (
+        executability_score >= 60.0
+        and quote_volume_24h >= profile.min_quote_volume_brl
+        and buy_slippage is not None
+        and sell_slippage is not None
+        and buy_slippage <= profile.max_entry_slippage_bps
+        and sell_slippage <= profile.max_exit_slippage_bps
+        and (movement_persistence_score or 0.0) >= 0.02
+        and spread_pct <= min(config.thresholds.max_spread_pct, 0.6)
+    )
+    return {
+        "executability_score": executability_score,
+        "executability_band": classify_executability_band(executability_score),
+        "operable_signal": operable_signal,
+        "estimated_buy_slippage_bps": buy_slippage,
+        "estimated_sell_slippage_bps": sell_slippage,
+        "baseline_order_notional_brl": profile.order_notional_brl,
+    }
 
 
 def serialize_history_record(record: OpportunityRecord, config: AppConfig | None = None) -> dict:
@@ -105,6 +165,20 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
             historical_confidence=record.historical_confidence or 1.0,
             weights=config.weights,
         )
+        workspace_operability = get_workspace_operability_fields(
+            bid_notional_top_n=getattr(record, "bid_notional_top_n", None),
+            ask_notional_top_n=getattr(record, "ask_notional_top_n", None),
+            spread_pct=record.spread_pct,
+            quote_volume_24h=record.quote_volume_24h,
+            fillable_notional_within_slippage_cap=getattr(record, "fillable_notional_within_slippage_cap", None),
+            baseline_order_notional_brl=getattr(record, "baseline_order_notional_brl", None),
+            estimated_buy_slippage_bps=getattr(record, "estimated_buy_slippage_bps", None),
+            estimated_sell_slippage_bps=getattr(record, "estimated_sell_slippage_bps", None),
+            movement_persistence_score=getattr(record, "movement_persistence_score", None),
+            config=config,
+        )
+    else:
+        workspace_operability = {}
 
     return {
         "id": record.id,
@@ -116,11 +190,13 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "executability_version": getattr(record, "executability_version", "v1"),
         "movement_version": getattr(record, "movement_version", "v1"),
         "profile_version": getattr(record, "profile_version", "v1"),
+        "reweighting_version": getattr(record, "reweighting_version", "v1"),
         "technical_signal_id": getattr(record, "technical_signal_id", None),
-        "executability_score": getattr(record, "executability_score", None),
-        "executability_band": getattr(record, "executability_band", None),
+        "semantic_signal_key": getattr(record, "semantic_signal_key", None),
+        "executability_score": workspace_operability.get("executability_score", getattr(record, "executability_score", None)),
+        "executability_band": workspace_operability.get("executability_band", getattr(record, "executability_band", None)),
         "interesting_signal": getattr(record, "interesting_signal", None),
-        "operable_signal": getattr(record, "operable_signal", None),
+        "operable_signal": workspace_operability.get("operable_signal", getattr(record, "operable_signal", None)),
         "volatility_pct": record.volatility_pct,
         "volume_24h": record.volume_24h,
         "quote_volume_24h": record.quote_volume_24h,
@@ -129,10 +205,12 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "ask_notional_top_n": getattr(record, "ask_notional_top_n", None),
         "total_notional_top_n": getattr(record, "total_notional_top_n", None),
         "spread_pct": record.spread_pct,
-        "estimated_buy_slippage_bps": getattr(record, "estimated_buy_slippage_bps", None),
-        "estimated_sell_slippage_bps": getattr(record, "estimated_sell_slippage_bps", None),
+        "estimated_buy_slippage_bps": workspace_operability.get("estimated_buy_slippage_bps", getattr(record, "estimated_buy_slippage_bps", None)),
+        "estimated_sell_slippage_bps": workspace_operability.get("estimated_sell_slippage_bps", getattr(record, "estimated_sell_slippage_bps", None)),
         "fillable_notional_within_slippage_cap": getattr(record, "fillable_notional_within_slippage_cap", None),
+        "baseline_order_notional_brl": workspace_operability.get("baseline_order_notional_brl", getattr(record, "baseline_order_notional_brl", None)),
         "movement_type": record.movement_type,
+        "movement_regime": getattr(record, "movement_regime", None),
         "movement_persistence_score": getattr(record, "movement_persistence_score", None),
         "last_price": record.last_price,
         "change_pct": record.change_pct,
@@ -172,6 +250,15 @@ def build_merged_scan_config(configs: list[AppConfig]) -> AppConfig:
                 enabled_pairs.append(pair)
 
     scan_interval_seconds = min(config.scan_interval_seconds for config in configs)
+    order_notional_brl = highest_order_notional(configs)
+    max_exit_slippage_bps = widest_slippage_cap(configs)
+    max_entry_slippage_bps = max(resolve_trading_profile(config).max_entry_slippage_bps for config in configs)
+    min_quote_volume_brl = min(resolve_trading_profile(config).min_quote_volume_brl for config in configs)
+    min_exec_candidates = [
+        config.telegram_min_executability_score
+        for config in configs
+        if config.telegram_min_executability_score is not None
+    ]
 
     return AppConfig(
         thresholds={
@@ -185,7 +272,23 @@ def build_merged_scan_config(configs: list[AppConfig]) -> AppConfig:
         enabled_exchanges=enabled_exchanges,
         enabled_pairs=enabled_pairs,
         scan_interval_seconds=scan_interval_seconds,
+        trading_profile="intraday_liquido",
+        order_notional_brl=order_notional_brl,
+        max_entry_slippage_bps=max_entry_slippage_bps,
+        max_exit_slippage_bps=max_exit_slippage_bps,
+        min_quote_volume_brl=min_quote_volume_brl,
         telegram_enabled=any(config.telegram_enabled for config in configs),
+        telegram_alert_threshold=max(config.telegram_alert_threshold for config in configs),
+        telegram_alert_cooldown_seconds=max(config.telegram_alert_cooldown_seconds for config in configs),
+        telegram_alert_types=list({alert_type for config in configs for alert_type in config.telegram_alert_types}),
+        telegram_operable_only=any(config.telegram_operable_only for config in configs),
+        telegram_min_executability_score=max(min_exec_candidates) if min_exec_candidates else None,
+        telegram_alert_exchanges=[
+            exchange
+            for exchange in enabled_exchanges
+            if any(not config.telegram_alert_exchanges or exchange in config.telegram_alert_exchanges for config in configs)
+        ],
+        telegram_alert_pairs=list({pair for config in configs for pair in config.telegram_alert_pairs}),
         telegram_bot_token=next((config.telegram_bot_token for config in configs if config.telegram_bot_token), ""),
         telegram_chat_id=next((config.telegram_chat_id for config in configs if config.telegram_chat_id), ""),
         novadax_api_key=next((config.novadax_api_key for config in configs if config.novadax_api_key), ""),
@@ -208,20 +311,25 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
         return
 
     async with async_session() as session:
-        cutoff = utcnow() - timedelta(minutes=_DEDUP_WINDOW_MINUTES)
+        cutoff = utcnow() - timedelta(minutes=_SEMANTIC_DEDUP_WINDOW_MINUTES)
 
         # Load (exchange, pair) keys that were already saved within the window
         recent_q = select(
             OpportunityRecord.exchange,
             OpportunityRecord.pair,
+            OpportunityRecord.semantic_signal_key,
         ).where(OpportunityRecord.detected_at >= cutoff)
         recent_result = await session.execute(recent_q)
-        recent_keys: set[tuple[str, str]] = {(r[0], r[1]) for r in recent_result.all()}
+        recent_rows = recent_result.all()
+        recent_keys: set[tuple[str, str]] = {(r[0], r[1]) for r in recent_rows}
+        recent_semantic_keys: set[str] = {r[2] for r in recent_rows if r[2]}
 
         new_count = 0
         for opp in opportunities:
             key = (opp.exchange.value, opp.pair)
-            if key in recent_keys:
+            if opp.semantic_signal_key and opp.semantic_signal_key in recent_semantic_keys:
+                continue
+            if not opp.semantic_signal_key and key in recent_keys:
                 continue  # already recorded recently — skip
 
             record = OpportunityRecord(
@@ -259,7 +367,9 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
                 executability_version=opp.executability_version,
                 movement_version=opp.movement_version,
                 profile_version=opp.profile_version,
+                reweighting_version=opp.reweighting_version,
                 technical_signal_id=opp.technical_signal_id,
+                semantic_signal_key=opp.semantic_signal_key,
                 executability_score=opp.executability_score,
                 executability_band=opp.executability_band,
                 interesting_signal=opp.interesting_signal,
@@ -270,10 +380,14 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
                 estimated_buy_slippage_bps=opp.estimated_buy_slippage_bps,
                 estimated_sell_slippage_bps=opp.estimated_sell_slippage_bps,
                 fillable_notional_within_slippage_cap=opp.fillable_notional_within_slippage_cap,
+                baseline_order_notional_brl=opp.baseline_order_notional_brl,
+                movement_regime=opp.movement_regime.value if opp.movement_regime else None,
                 movement_persistence_score=opp.movement_persistence_score,
             )
             session.add(record)
             recent_keys.add(key)  # evita duplicata dentro do mesmo lote
+            if opp.semantic_signal_key:
+                recent_semantic_keys.add(opp.semantic_signal_key)
             new_count += 1
 
         if new_count > 0:
@@ -282,7 +396,7 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
         skipped = len(opportunities) - new_count
         logger.info(
             f"Saved {new_count} opportunities "
-            f"({skipped} skipped — dedup window {_DEDUP_WINDOW_MINUTES}min)"
+            f"({skipped} skipped — semantic dedup {_SEMANTIC_DEDUP_WINDOW_MINUTES}min)"
         )
 
 
@@ -304,6 +418,7 @@ async def purge_history_older_than(*, retention_days: int, now: datetime | None 
             return 0
 
         await session.execute(delete(OpportunityRecord).where(OpportunityRecord.detected_at < cutoff))
+        await session.execute(delete(RawMarketObservationRecord).where(RawMarketObservationRecord.detected_at < cutoff))
         await session.commit()
 
     logger.info(
@@ -418,20 +533,34 @@ async def get_filtered_analytics(
     exchange_totals: dict[str, list[float]] = {}
     scores = [row["score"] for row in history_rows]
     movement_distribution: dict[str, int] = {}
+    movement_regime_distribution: dict[str, int] = {}
     hourly_distribution = {str(hour): 0 for hour in range(24)}
     arbitrage_count = 0
     gap_values: list[float] = []
+    executability_buckets = {"0-40": 0, "40-60": 0, "60-80": 0, "80-100": 0}
 
     for row in history_rows:
         pair_counts[row["pair"]] = pair_counts.get(row["pair"], 0) + 1
         exchange_totals.setdefault(row["exchange"], []).append(row["score"])
         movement_distribution[row["movement_type"]] = movement_distribution.get(row["movement_type"], 0) + 1
+        if row.get("movement_regime"):
+            movement_regime_distribution[row["movement_regime"]] = movement_regime_distribution.get(row["movement_regime"], 0) + 1
         detected_at = ensure_utc_datetime(datetime.fromisoformat(row["detected_at"]))
         hourly_distribution[str(detected_at.hour)] += 1
         if row["arbitrage_available"]:
             arbitrage_count += 1
         if row["cross_exchange_gap_pct"] is not None:
             gap_values.append(row["cross_exchange_gap_pct"])
+        if row.get("executability_score") is not None:
+            exec_score = float(row["executability_score"])
+            if exec_score < 40:
+                executability_buckets["0-40"] += 1
+            elif exec_score < 60:
+                executability_buckets["40-60"] += 1
+            elif exec_score < 80:
+                executability_buckets["60-80"] += 1
+            else:
+                executability_buckets["80-100"] += 1
 
     top_pairs = [
         {"pair": pair_name, "count": count}
@@ -462,39 +591,50 @@ async def get_filtered_analytics(
         "top_pairs": top_pairs,
         "avg_score_by_exchange": avg_by_exchange,
         "score_distribution": buckets,
+        "executability_distribution": executability_buckets,
         "movement_distribution": movement_distribution,
+        "movement_regime_distribution": movement_regime_distribution,
         "hourly_distribution": hourly_distribution,
         "arbitrage_count": arbitrage_count,
         "avg_cross_exchange_gap_pct": avg_cross_exchange_gap,
+        "profile_distribution": (
+            {workspace_config.trading_profile: total_count}
+            if workspace_config is not None
+            else {}
+        ),
     }
 
 
 async def get_historical_pair_calibration(hours: int = 168) -> dict[str, dict[str, float]]:
-    """Return recent pair-level calibration data to slightly adjust live scores."""
+    """Return recent pair-level calibration data using measured signal outcomes."""
     async with async_session() as session:
         since = utcnow() - timedelta(hours=hours)
-        query = (
-            select(
-                OpportunityRecord.pair,
-                func.count(OpportunityRecord.id).label("cnt"),
-                func.avg(OpportunityRecord.score).label("avg_score"),
-                func.avg(OpportunityRecord.cross_exchange_gap_pct).label("avg_gap"),
-            )
-            .where(OpportunityRecord.detected_at >= since)
-            .group_by(OpportunityRecord.pair)
-        )
+        query = select(SignalOutcomeRecord).where(SignalOutcomeRecord.signal_detected_at >= since)
         result = await session.execute(query)
         calibration: dict[str, dict[str, float]] = {}
-        for pair_name, count, avg_score, avg_gap in result.all():
-            score_component = min(max(((avg_score or 50) - 50) / 100, -0.08), 0.08)
-            count_component = min((count or 0) / 500, 0.05)
-            gap_component = min((avg_gap or 0) / 10, 0.04)
-            factor = round(1.0 + score_component + count_component + gap_component, 4)
+        grouped: dict[str, list[SignalOutcomeRecord]] = {}
+        for row in result.scalars().all():
+            grouped.setdefault(row.pair, []).append(row)
+
+        for pair_name, rows in grouped.items():
+            count = len(rows)
+            if count == 0:
+                continue
+            usable_outcomes = [
+                value
+                for row in rows
+                for value in (row.outcome_pct_15m, row.outcome_pct_1h)
+                if value is not None
+            ]
+            avg_outcome = sum(usable_outcomes) / len(usable_outcomes) if usable_outcomes else 0.0
+            success_count = sum(1 for row in rows if (row.outcome_pct_15m or 0) > 0 or (row.outcome_pct_1h or 0) > 0)
+            success_rate = success_count / count
+            factor = 1.0 + min(max(avg_outcome / 10.0, -0.06), 0.06) + min(max((success_rate - 0.5) * 0.12, -0.06), 0.06)
             calibration[pair_name] = {
-                "factor": min(max(factor, 0.9), 1.15),
-                "count": float(count or 0),
-                "avg_score": round(avg_score or 0, 2),
-                "avg_gap": round(avg_gap or 0, 4),
+                "factor": round(min(max(factor, 0.9), 1.15), 4),
+                "count": float(count),
+                "avg_outcome": round(avg_outcome, 4),
+                "success_rate": round(success_rate, 4),
             }
         return calibration
 

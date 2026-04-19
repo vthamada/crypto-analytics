@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.models.schemas import Kline, MovementType
+from app.models.schemas import Kline, MovementRegime, MovementType
 
 
 def classify_movement(klines: list[Kline]) -> MovementType:
@@ -78,3 +78,34 @@ def classify_movement(klines: list[Kline]) -> MovementType:
         return MovementType.STRONG_RANGE
 
     return MovementType.WEAK
+
+
+def classify_movement_regime(
+    klines: list[Kline],
+    *,
+    spread_pct: float,
+    quote_volume_24h: float,
+) -> MovementRegime:
+    movement_type = classify_movement(klines)
+    recent = klines[-5:] if len(klines) >= 5 else klines
+
+    if len(recent) < 2:
+        return MovementRegime.MEAN_REVERSION_CANDIDATE
+
+    closes = [candle.close for candle in recent]
+    change_pct = ((closes[-1] - closes[0]) / closes[0] * 100) if closes[0] else 0.0
+    last_candle = recent[-1]
+    last_body = abs(last_candle.close - last_candle.open)
+    recent_bodies = [abs(candle.close - candle.open) for candle in recent[:-1]] or [0.0]
+    avg_body = sum(recent_bodies) / len(recent_bodies)
+    exhaustion = last_body > avg_body * 2.5 and len(recent) >= 3 and recent[-1].close < recent[-2].close
+
+    if spread_pct >= 0.8 or quote_volume_24h < 25_000:
+        return MovementRegime.ILLIQUID_SPIKE
+    if movement_type == MovementType.SPIKE and exhaustion:
+        return MovementRegime.BREAKOUT_EXHAUSTION
+    if movement_type == MovementType.SPIKE:
+        return MovementRegime.BREAKOUT_CLEAN
+    if movement_type == MovementType.STRONG_RANGE and abs(change_pct) >= 2.0:
+        return MovementRegime.TREND_CONTINUATION
+    return MovementRegime.MEAN_REVERSION_CANDIDATE
