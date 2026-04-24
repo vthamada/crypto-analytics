@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     scanner_enabled: bool = True
 
     # Default filter thresholds
-    min_volatility_pct: float = 2.0
+    min_volatility_pct: float = 3.0
     min_volume_brl: float = 10000.0
     min_volume_brl_small: float = 3000.0
     min_liquidity_units: float = 1000.0

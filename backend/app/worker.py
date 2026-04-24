@@ -124,24 +124,26 @@ async def run_worker() -> None:
                             "projection_reason": "config_match",
                         })
 
-                high_score = [
-                    opp
-                    for opp in projected_opportunities
-                    if opp.score >= alert_threshold and opportunity_matches_alert_scope(opp, workspace_config)
-                ]
-                alert_types = getattr(workspace_config, "telegram_alert_types", ["high_score", "arbitrage"])
+                alert_types = set(getattr(workspace_config, "telegram_alert_types", ["operable", "high_score", "arbitrage"]))
                 eligible = []
-                for opp in high_score:
-                    if "high_score" in alert_types:
-                        eligible.append(opp)
-                    elif "arbitrage" in alert_types and opp.arbitrage_available:
-                        eligible.append(opp)
+                for opp in projected_opportunities:
+                    if not opportunity_matches_alert_scope(opp, workspace_config):
+                        continue
+                    matches_alert_type = (
+                        ("operable" in alert_types and bool(opp.operable_signal))
+                        or ("high_score" in alert_types and opp.score >= alert_threshold)
+                        or ("arbitrage" in alert_types and opp.arbitrage_available)
+                    )
+                    if not matches_alert_type:
+                        continue
+                    eligible.append(opp)
 
                 if eligible:
                     await send_telegram_alert(
                         eligible,
                         token=workspace_config.telegram_bot_token,
                         chat_id=workspace_config.telegram_chat_id,
+                        cooldown_seconds=workspace_config.telegram_alert_cooldown_seconds,
                     )
 
             if all_projections:

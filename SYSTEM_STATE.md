@@ -254,11 +254,11 @@ Em paralelo, a camada de executabilidade usa os dados do order book para respond
 Componentes atuais da executabilidade:
 
 - liquidez em notional nos dois lados do book
-- slippage estimado de compra para uma ordem baseline
-- slippage estimado de venda para uma ordem baseline
+- slippage estimado de compra para o tamanho de ordem do workspace
+- slippage estimado de venda para o tamanho de ordem do workspace
 - spread efetivo
-- volume em quote
-- notional preenchivel dentro do cap de slippage
+- volume em quote comparado ao minimo operacional do workspace
+- notional preenchivel dentro dos caps de slippage de entrada e saida
 
 Campos produzidos hoje no `Opportunity`:
 
@@ -281,7 +281,7 @@ Bandas atuais de executabilidade:
 Classificacoes operacionais derivadas:
 
 - `interesting_signal`: heuristica inicial baseada no score tecnico/base
-- `operable_signal`: heuristica inicial baseada em `executability_score`, cap de slippage de saida e spread efetivo
+- `operable_signal`: heuristica inicial baseada em `executability_score`, volume notional minimo, slippage de entrada/saida e spread efetivo
 
 ### Etapa G. Calibracao historica
 
@@ -509,6 +509,8 @@ A tela de configuracoes hoje concentra:
 - login e refresh de sessao
 - troca do workspace ativo
 - leitura e atualizacao de thresholds, pesos, exchanges, pares e Telegram
+- perfil operacional por workspace: tamanho de ordem, liquidez notional minima e slippage maximo de entrada/saida
+- politica de alertas operacionais: score minimo, cooldown, tipos de alerta e opcao de enviar apenas sinais operaveis
 - autosave da configuracao operacional
 - validacao de credenciais das exchanges
 - teste de Telegram
@@ -526,6 +528,7 @@ O sistema e hoje:
 - uma separacao operacional entre API e worker no fluxo padrao do repositorio
 - uma camada autenticada de isolamento de acesso por workspace
 - uma camada de configuracao operacional por workspace
+- uma camada inicial de executabilidade parametrizada por workspace
 - uma interface em tempo real por workspace
 - uma trilha basica de auditoria e operacao
 
@@ -535,7 +538,7 @@ O sistema ainda nao e:
 - uma arquitetura distribuida para escalar horizontalmente o scanner e o streaming
 - um sistema com persistencia historica nativamente segregada por workspace
 - um motor de score calibrado por feedback real de performance de sinais
-- um frontend que explique toda a camada de executabilidade com boa UX; isso ainda entra na Release D do plano operacional
+- um motor completo de duracao util do movimento, taxonomia v2 e reweighting automatico por outcome
 
 ## 8. Pontos de refinamento mais importantes
 

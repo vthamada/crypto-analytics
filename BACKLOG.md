@@ -341,11 +341,12 @@ Objetivo: evoluir o produto de `scanner heuristico de atencao` para `assistente 
 
 ### Progresso de execucao do plano operacional
 
-- [x] **Release A** â€” contratos aditivos, leitura dual, campos opcionais de executabilidade e versionamento explicito do motor.
-- [x] **Release B** â€” liquidez em notional, estimativa de slippage por tamanho de ordem e `fillable_notional_within_slippage_cap`.
-- [x] **Release C** â€” `executability_score`, `executability_band`, split entre `interesting_signal` e `operable_signal`, alem de ordenacao e filtro operacional na API.
-- [x] **Release D** â€” explicabilidade operacional, dual-read seguro e consumo visual da nova camada no frontend.
-- [ ] **Release E+** â€” perfil operacional por workspace, duracao util, taxonomia refinada, reweighting por outcome e evolucao estrutural do historico.
+- [x] **Release A** — contratos aditivos, leitura dual, campos opcionais de executabilidade e versionamento explicito do motor.
+- [x] **Release B** — liquidez em notional, estimativa de slippage por tamanho de ordem e `fillable_notional_within_slippage_cap`.
+- [x] **Release C** — `executability_score`, `executability_band`, split entre `interesting_signal` e `operable_signal`, alem de ordenacao e filtro operacional na API.
+- [x] **Release D** — explicabilidade operacional, dual-read seguro e consumo visual da nova camada no frontend.
+- [x] **Release E** — perfil operacional por workspace, thresholds de executabilidade, alertas operaveis e UI de configuracao correspondente.
+- [ ] **Release F+** — duracao util, taxonomia refinada, reweighting por outcome e evolucao estrutural do historico.
 
 ### Bloco 1 - Evolucao da logica de sinais
 

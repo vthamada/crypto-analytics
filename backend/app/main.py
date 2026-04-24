@@ -227,33 +227,35 @@ async def scan_loop() -> None:
 
                 alert_threshold = getattr(workspace_config, "telegram_alert_threshold", 60.0)
                 projected_opportunities = projected_opportunities_by_workspace.get(workspace_id, [])
-                high_score = [
-                    opp
-                    for opp in projected_opportunities
-                    if opp.score >= alert_threshold and opportunity_matches_alert_scope(opp, workspace_config)
-                ]
 
                 # Filter by alert types if configured
-                alert_types = getattr(workspace_config, "telegram_alert_types", ["high_score", "arbitrage"])
+                alert_types = set(getattr(workspace_config, "telegram_alert_types", ["operable", "high_score", "arbitrage"]))
                 eligible = []
-                for opp in high_score:
-                    if "high_score" in alert_types:
-                        eligible.append(opp)
-                    elif "arbitrage" in alert_types and opp.arbitrage_available:
-                        eligible.append(opp)
+                for opp in projected_opportunities:
+                    if not opportunity_matches_alert_scope(opp, workspace_config):
+                        continue
+                    matches_alert_type = (
+                        ("operable" in alert_types and bool(opp.operable_signal))
+                        or ("high_score" in alert_types and opp.score >= alert_threshold)
+                        or ("arbitrage" in alert_types and opp.arbitrage_available)
+                    )
+                    if not matches_alert_type:
+                        continue
+                    eligible.append(opp)
 
                 if eligible:
                     sent = await send_telegram_alert(
                         eligible,
                         token=workspace_config.telegram_bot_token,
                         chat_id=workspace_config.telegram_chat_id,
+                        cooldown_seconds=workspace_config.telegram_alert_cooldown_seconds,
                     )
                     if sent:
                         alerts_sent += len(eligible)
                     else:
                         alerts_suppressed += len(eligible)
                 else:
-                    alerts_suppressed += len(high_score)
+                    alerts_suppressed += len(projected_opportunities)
 
             duration_ms = (time.perf_counter() - cycle_started) * 1000
             logger.info(

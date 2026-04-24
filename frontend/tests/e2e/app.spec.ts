@@ -188,6 +188,11 @@ test("settings mantém labels acentuados e controles compactos na UI administrat
   await expect(page.getByRole("link", { name: "Configurações" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Histórico" })).toBeVisible();
   await expect(page.getByText("Usuários do workspace")).toBeVisible();
+  await expect(page.getByText("Perfil operacional")).toBeVisible();
+  await expect(page.getByText("Tamanho de ordem estimado (R$)")).toBeVisible();
+  await expect(page.getByText("Volume notional minimo (R$/24h)")).toBeVisible();
+  await expect(page.getByText("Score minimo para alerta")).toBeVisible();
+  await expect(page.getByText("Enviar apenas sinais operaveis")).toBeVisible();
   await expect(page.getByText("Volatilidade mínima (%)")).toBeVisible();
   await expect(page.getByText("Catálogo (2)")).toBeVisible();
 
@@ -202,6 +207,10 @@ test("settings mantém labels acentuados e controles compactos na UI administrat
   const volatilityControl = page.getByTestId("settings-threshold-volatility");
   await volatilityControl.scrollIntoViewIfNeeded();
   await expect(volatilityControl).toBeVisible();
+
+  const orderNotionalControl = page.getByTestId("settings-order-notional");
+  await orderNotionalControl.scrollIntoViewIfNeeded();
+  await expect(orderNotionalControl).toBeVisible();
 
   const weightControl = page.getByTestId("settings-weight-volatility");
   await weightControl.scrollIntoViewIfNeeded();
@@ -347,7 +356,7 @@ async function fulfillMockApi(route: Route, state: MockApiState) {
     return;
   }
 
-  if (method === "GET" && path === "/analytics") {
+  if (method === "GET" && (path === "/analytics" || path === "/analytics/operational")) {
     if (state.analyticsErrorMessage) {
       await error(route, 503, state.analyticsErrorMessage);
       return;
@@ -568,8 +577,17 @@ function buildConfig(overrides?: Record<string, unknown>) {
     },
     enabled_exchanges: ["novadax", "mercado_bitcoin", "binance"],
     enabled_pairs: ["BTC_BRL"],
+    trading_profile: "intraday_liquido",
+    order_notional_brl: 1000,
+    max_entry_slippage_bps: 500,
+    max_exit_slippage_bps: 500,
+    min_quote_volume_brl: 3000,
     scan_interval_seconds: 15,
     telegram_enabled: true,
+    telegram_alert_threshold: 60,
+    telegram_alert_cooldown_seconds: 900,
+    telegram_alert_types: ["operable", "high_score", "arbitrage"],
+    telegram_operable_only: true,
     telegram_bot_token: "bot-token",
     telegram_chat_id: "123456",
     novadax_api_key: "nova-key",
@@ -656,14 +674,14 @@ function mockSession() {
         id: "ws-alpha",
         slug: "alpha-desk",
         name: "Alpha Desk",
-        role: "admin",
+        role: "owner",
         is_active: true,
       },
       {
         id: "ws-beta",
         slug: "beta-desk",
         name: "Beta Desk",
-        role: "admin",
+        role: "owner",
         is_active: true,
       },
     ],

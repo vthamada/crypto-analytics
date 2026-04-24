@@ -15,10 +15,10 @@ class TradingProfileSettings:
 
 
 PROFILE_DEFAULTS: dict[str, TradingProfileSettings] = {
-    "conservador": TradingProfileSettings("conservador", 600.0, 12.0, 15.0, 120_000.0),
-    "intraday_liquido": TradingProfileSettings("intraday_liquido", 1_000.0, 20.0, 25.0, 30_000.0),
-    "agressivo": TradingProfileSettings("agressivo", 1_500.0, 35.0, 45.0, 35_000.0),
-    "scalp": TradingProfileSettings("scalp", 800.0, 10.0, 12.0, 150_000.0),
+    "conservador": TradingProfileSettings("conservador", 1_000.0, 300.0, 300.0, 10_000.0),
+    "intraday_liquido": TradingProfileSettings("intraday_liquido", 1_000.0, 500.0, 500.0, 3_000.0),
+    "agressivo": TradingProfileSettings("agressivo", 300.0, 800.0, 800.0, 3_000.0),
+    "scalp": TradingProfileSettings("scalp", 200.0, 300.0, 300.0, 5_000.0),
 }
 
 

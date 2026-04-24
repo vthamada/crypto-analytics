@@ -375,9 +375,10 @@ Status: concluida em 2026-04-18.
 
 - [x] Expor e salvar no endpoint de configuracao.
 
-- [ ] Verificacao:
-  - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_api_routes.py backend\tests\test_persistence.py -v`
+- [x] Verificacao:
+  - Run: `.\.venv\Scripts\python.exe -m pytest backend/tests/test_scanner.py backend/tests/test_contract_integration.py backend/tests/test_workspace_tenancy.py`
   - Run: `npm --prefix frontend run build`
+  - Run: `npm --prefix frontend run e2e`
 
 **Commit suggestion:** `feat: add workspace trading profiles`
 
@@ -398,8 +399,9 @@ Status: concluida em 2026-04-18.
   - operaveis por faixa de score
   - operaveis apenas de exchanges/pairs selecionados
 
-- [ ] Verificacao:
-  - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_scanner.py backend\tests\test_persistence.py -v`
+- [x] Verificacao:
+  - Run: `.\.venv\Scripts\python.exe -m pytest backend/tests/test_scanner.py backend/tests/test_contract_integration.py backend/tests/test_workspace_tenancy.py`
+  - Run: `npm --prefix frontend run e2e`
 
 **Commit suggestion:** `feat: apply workspace profile thresholds to signals and alerts`
 

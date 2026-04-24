@@ -153,7 +153,7 @@ Campos operacionais recentes relevantes em `Opportunity` e nas camadas persistid
 - o scanner continua global, nao isolado fisicamente por tenant
 - o WebSocket depende de memoria local da instancia da API
 - o `score` operacional do scanner ainda usa configuracao agregada com pesos do primeiro workspace carregado
-- o frontend ainda nao explora totalmente a camada de executabilidade; isso entra na Release D do plano operacional
+- a camada de executabilidade ja e parametrizada por workspace, mas ainda nao modela duracao util do movimento nem reweighting automatico por outcome
 - nao ha barramento pub/sub dedicado; em `api_only` a API observa o estado compartilhado e repropaga snapshots, mas isso ainda nao equivale a broadcast distribuido entre multiplas replicas
 
 ## Pontos de atencao

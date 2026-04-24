@@ -332,9 +332,15 @@ def test_health_mode_reflects_scanner_presence(monkeypatch):
 def test_config_contract_includes_telegram_policy_fields(monkeypatch):
     """Config response must include the new telegram_alert_* fields."""
     config = AppConfig(
+        trading_profile="intraday_liquido",
+        order_notional_brl=1000.0,
+        max_entry_slippage_bps=500.0,
+        max_exit_slippage_bps=500.0,
+        min_quote_volume_brl=3000.0,
         telegram_alert_threshold=75.0,
         telegram_alert_cooldown_seconds=600,
-        telegram_alert_types=["high_score"],
+        telegram_alert_types=["operable", "high_score"],
+        telegram_operable_only=True,
     )
     _session_and_workspace_patches(monkeypatch, config=config)
 
@@ -343,13 +349,19 @@ def test_config_contract_includes_telegram_policy_fields(monkeypatch):
 
     assert resp.status_code == 200
     body = resp.json()["config"]
+    assert body["trading_profile"] == "intraday_liquido"
+    assert body["order_notional_brl"] == 1000.0
+    assert body["max_entry_slippage_bps"] == 500.0
+    assert body["max_exit_slippage_bps"] == 500.0
+    assert body["min_quote_volume_brl"] == 3000.0
     assert body["telegram_alert_threshold"] == 75.0
     assert body["telegram_alert_cooldown_seconds"] == 600
-    assert body["telegram_alert_types"] == ["high_score"]
+    assert body["telegram_alert_types"] == ["operable", "high_score"]
+    assert body["telegram_operable_only"] is True
 
 
-def test_config_update_accepts_telegram_policy_fields(monkeypatch):
-    """PUT /api/config accepts the new telegram_alert_* fields."""
+def test_config_update_accepts_operational_policy_fields(monkeypatch):
+    """PUT /api/config accepts trading profile and telegram policy fields."""
     _session_and_workspace_patches(monkeypatch)
 
     saved = {}
@@ -368,16 +380,28 @@ def test_config_update_accepts_telegram_policy_fields(monkeypatch):
         "/api/config",
         headers={"X-Admin-Token": "tok"},
         json={
+            "trading_profile": "conservador",
+            "order_notional_brl": 1000.0,
+            "max_entry_slippage_bps": 300.0,
+            "max_exit_slippage_bps": 300.0,
+            "min_quote_volume_brl": 10000.0,
             "telegram_alert_threshold": 80.0,
             "telegram_alert_cooldown_seconds": 300,
-            "telegram_alert_types": ["arbitrage"],
+            "telegram_alert_types": ["operable", "arbitrage"],
+            "telegram_operable_only": True,
         },
     )
 
     assert resp.status_code == 200
+    assert saved["config"].trading_profile == "conservador"
+    assert saved["config"].order_notional_brl == 1000.0
+    assert saved["config"].max_entry_slippage_bps == 300.0
+    assert saved["config"].max_exit_slippage_bps == 300.0
+    assert saved["config"].min_quote_volume_brl == 10000.0
     assert saved["config"].telegram_alert_threshold == 80.0
     assert saved["config"].telegram_alert_cooldown_seconds == 300
-    assert saved["config"].telegram_alert_types == ["arbitrage"]
+    assert saved["config"].telegram_alert_types == ["operable", "arbitrage"]
+    assert saved["config"].telegram_operable_only is True
 
 
 # ---------------------------------------------------------------------------

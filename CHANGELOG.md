@@ -12,6 +12,18 @@ Convencao deste repositorio:
 
 - Nenhuma entrada em aberto.
 
+## [2026-04-24]
+
+### Added
+- Release E concluida: `AppConfig` agora inclui `trading_profile`, `order_notional_brl`, limites de slippage de entrada/saida, `min_quote_volume_brl` e `telegram_operable_only`.
+- Tela de configuracoes passou a expor perfil operacional, tamanho de ordem, volume notional minimo, slippage de entrada/saida e politica de alertas Telegram.
+- Testes E2E cobrem a renderizacao dos novos campos operacionais na UI administrativa.
+
+### Changed
+- Scanner passou a calcular slippage e `operable_signal` com thresholds do workspace em vez de constantes globais.
+- Alertas Telegram passaram a respeitar operabilidade, tipos configurados e cooldown por workspace, com mensagem focada em volume, liquidez, slippage e facilidade de saida.
+- `render.yaml` move o worker para `region: oregon` para reduzir risco de HTTP 451 de providers em regioes restritas.
+
 ## [2026-04-18]
 
 ### Added

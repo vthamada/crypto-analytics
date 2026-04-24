@@ -79,6 +79,7 @@ npm --prefix frontend run e2e
 - `technical_score` neutro com `score_version`
 - Camada aditiva de executabilidade com `executability_score`, `executability_band`, `interesting_signal` e `operable_signal`
 - Metricas de book em notional e estimativa de slippage (`bid_notional_top_n`, `ask_notional_top_n`, `estimated_*_slippage_bps`, `fillable_notional_within_slippage_cap`)
+- Perfil operacional por workspace com tamanho de ordem, liquidez notional minima e slippage maximo de entrada/saida
 - `technical_signals`, `workspace_signal_projections` e `signal_outcomes`
 - API capaz de operar sem scanner local via `opportunity_snapshots`
 - `/api/opportunities` com ordenacao por score tecnico ou executabilidade e filtro `operable_only`

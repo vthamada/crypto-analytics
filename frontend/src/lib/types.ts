@@ -98,14 +98,14 @@ export interface ScoreWeights {
 export interface AppConfig {
   thresholds: FilterThresholds;
   weights: ScoreWeights;
-  enabled_exchanges: Exchange[];
-  enabled_pairs: string[];
-  scan_interval_seconds: number;
   trading_profile: "conservador" | "intraday_liquido" | "agressivo" | "scalp";
   order_notional_brl?: number | null;
   max_entry_slippage_bps?: number | null;
   max_exit_slippage_bps?: number | null;
   min_quote_volume_brl?: number | null;
+  enabled_exchanges: Exchange[];
+  enabled_pairs: string[];
+  scan_interval_seconds: number;
   telegram_enabled: boolean;
   telegram_alert_threshold?: number;
   telegram_alert_cooldown_seconds?: number;

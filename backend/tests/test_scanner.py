@@ -64,6 +64,34 @@ def test_scan_all_returns_opportunities(monkeypatch, sample_ticker, sample_order
     assert opportunities[0].duration_minutes > 0
 
 
+def test_scan_all_uses_workspace_operability_thresholds(monkeypatch, sample_ticker, sample_order_book, sample_klines):
+    monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+
+    async def fake_scannable_pairs(self):
+        return {Exchange.BINANCE: ["BTC_BRL"]}
+
+    monkeypatch.setattr(Scanner, "_get_scannable_pairs_by_exchange", fake_scannable_pairs)
+    strict_config = AppConfig(
+        enabled_exchanges=[Exchange.BINANCE],
+        enabled_pairs=["BTC_BRL"],
+        min_quote_volume_brl=500000.0,
+        max_entry_slippage_bps=500.0,
+        max_exit_slippage_bps=500.0,
+    )
+    scanner = Scanner(strict_config)
+    scanner._providers = {
+        Exchange.BINANCE: FakeProvider(sample_ticker, sample_order_book, sample_klines)
+    }
+
+    import asyncio
+
+    opportunities = asyncio.run(scanner.scan_all())
+
+    assert len(opportunities) == 1
+    assert opportunities[0].interesting_signal is True
+    assert opportunities[0].operable_signal is False
+
+
 def test_scan_all_enriches_cross_exchange_context(monkeypatch, sample_order_book, sample_klines):
     monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
     async def fake_scannable_pairs(self):

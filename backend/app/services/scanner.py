@@ -44,10 +44,7 @@ from app.filters.scoring import calculate_score
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ORDER_NOTIONAL_BRL = 1_000.0
-DEFAULT_MAX_SLIPPAGE_BPS = 25.0
 DEFAULT_OPERABLE_EXECUTABILITY_SCORE = 60.0
-DEFAULT_OPERABLE_SPREAD_PCT = 0.6
 
 
 MOVEMENT_MODIFIERS = {
@@ -247,6 +244,7 @@ class Scanner:
             historical_confidence = self._historical_calibration.get(pair, {}).get("factor", 1.0)
             score = min(max(round(score * historical_confidence, 1), 0), 100)
             interesting_signal = score >= 40
+            spread_pct = round(calculate_spread(order_book), 4)
             operable_signal = (
                 executability_score >= DEFAULT_OPERABLE_EXECUTABILITY_SCORE
                 and ticker.quote_volume_24h >= trading_profile.min_quote_volume_brl
@@ -254,7 +252,7 @@ class Scanner:
                 and serialized_sell_slippage <= trading_profile.max_exit_slippage_bps
                 and serialized_buy_slippage is not None
                 and serialized_buy_slippage <= trading_profile.max_entry_slippage_bps
-                and round(calculate_spread(order_book), 4) <= min(self.config.thresholds.max_spread_pct, DEFAULT_OPERABLE_SPREAD_PCT)
+                and spread_pct <= self.config.thresholds.max_spread_pct
                 and movement_persistence_score >= 0.02
             )
 
@@ -291,7 +289,7 @@ class Scanner:
                 bid_notional_top_n=round(bid_notional_top_n, 2),
                 ask_notional_top_n=round(ask_notional_top_n, 2),
                 total_notional_top_n=round(total_notional_top_n, 2),
-                spread_pct=round(calculate_spread(order_book), 4),
+                spread_pct=spread_pct,
                 estimated_buy_slippage_bps=serialized_buy_slippage,
                 estimated_sell_slippage_bps=serialized_sell_slippage,
                 fillable_notional_within_slippage_cap=serialized_fillable_notional,

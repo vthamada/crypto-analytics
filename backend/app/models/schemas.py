@@ -126,7 +126,7 @@ class Opportunity(BaseModel):
 
 
 class FilterThresholds(BaseModel):
-    min_volatility_pct: float = 2.0
+    min_volatility_pct: float = 3.0
     min_volume_brl: float = 10000.0
     min_volume_brl_small: float = 3000.0
     min_liquidity_units: float = 1000.0
@@ -149,7 +149,7 @@ class AppConfig(BaseModel):
         Exchange.MERCADO_BITCOIN,
         Exchange.BINANCE,
     ]
-    enabled_pairs: list[str] = Field(default_factory=list)
+    enabled_pairs: list[str] = Field(default_factory=lambda: ["SOL_BRL", "WBTC_BRL", "USDT_BRL"])
     scan_interval_seconds: int = 30
     trading_profile: Literal["conservador", "intraday_liquido", "agressivo", "scalp"] = "intraday_liquido"
     order_notional_brl: float | None = None
@@ -159,8 +159,8 @@ class AppConfig(BaseModel):
     telegram_enabled: bool = True
     telegram_alert_threshold: float = 60.0
     telegram_alert_cooldown_seconds: int = 900
-    telegram_alert_types: list[str] = Field(default_factory=lambda: ["high_score", "arbitrage"])
-    telegram_operable_only: bool = False
+    telegram_alert_types: list[str] = Field(default_factory=lambda: ["operable", "high_score", "arbitrage"])
+    telegram_operable_only: bool = True
     telegram_min_executability_score: float | None = None
     telegram_alert_exchanges: list[Exchange] = Field(default_factory=list)
     telegram_alert_pairs: list[str] = Field(default_factory=list)

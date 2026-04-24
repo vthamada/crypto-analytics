@@ -10,13 +10,6 @@ import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -155,10 +148,64 @@ type PairCatalogEntry = AvailablePairRecord & {
   availableExchangeCount: number;
   enabledExchangeMatches: number;
 };
+type TradingProfile = AppConfig["trading_profile"];
 type AutoSaveStatus = "idle" | "saving" | "saved" | "error";
 type DisplayAuditLogEntry = AuditLogEntry & {
   aggregatedCount: number;
   groupedOldestCreatedAt?: string;
+};
+
+const TRADING_PROFILE_OPTIONS: { value: TradingProfile; label: string; description: string }[] = [
+  {
+    value: "intraday_liquido",
+    label: "Intraday liquido",
+    description: "Equilibra volatilidade, volume e saida para trades de horas.",
+  },
+  {
+    value: "conservador",
+    label: "Conservador",
+    description: "Prioriza liquidez e reduz tolerancia a slippage.",
+  },
+  {
+    value: "agressivo",
+    label: "Agressivo",
+    description: "Aceita mais slippage para capturar movimentos fortes.",
+  },
+  {
+    value: "scalp",
+    label: "Scalp",
+    description: "Exige spread menor e execucao mais rapida.",
+  },
+];
+
+const TRADING_PROFILE_PRESETS: Record<
+  TradingProfile,
+  Pick<AppConfig, "order_notional_brl" | "max_entry_slippage_bps" | "max_exit_slippage_bps" | "min_quote_volume_brl">
+> = {
+  intraday_liquido: {
+    order_notional_brl: 1000,
+    max_entry_slippage_bps: 500,
+    max_exit_slippage_bps: 500,
+    min_quote_volume_brl: 3000,
+  },
+  conservador: {
+    order_notional_brl: 1000,
+    max_entry_slippage_bps: 300,
+    max_exit_slippage_bps: 300,
+    min_quote_volume_brl: 10000,
+  },
+  agressivo: {
+    order_notional_brl: 300,
+    max_entry_slippage_bps: 800,
+    max_exit_slippage_bps: 800,
+    min_quote_volume_brl: 3000,
+  },
+  scalp: {
+    order_notional_brl: 200,
+    max_entry_slippage_bps: 300,
+    max_exit_slippage_bps: 300,
+    min_quote_volume_brl: 5000,
+  },
 };
 
 const OPERATIONAL_CONFIG_AUTOSAVE_DELAY_MS = 900;
@@ -166,19 +213,19 @@ const CONFIG_UPDATE_COLLAPSE_WINDOW_MS = 15 * 60 * 1000;
 const CONFIG_UPDATE_FIELD_LABELS: Record<string, string> = {
   thresholds: "thresholds",
   weights: "pesos",
+  trading_profile: "perfil operacional",
+  order_notional_brl: "tamanho de ordem",
+  max_entry_slippage_bps: "slippage de entrada",
+  max_exit_slippage_bps: "slippage de saida",
+  min_quote_volume_brl: "liquidez notional minima",
   enabled_exchanges: "exchanges",
   enabled_pairs: "pares",
   scan_interval_seconds: "intervalo do scanner",
-  trading_profile: "perfil operacional",
-  order_notional_brl: "notional por ordem",
-  max_entry_slippage_bps: "slippage max entrada",
-  max_exit_slippage_bps: "slippage max saída",
-  min_quote_volume_brl: "volume mínimo do perfil",
   telegram_enabled: "Telegram",
-  telegram_alert_threshold: "threshold Telegram",
-  telegram_alert_cooldown_seconds: "cooldown Telegram",
+  telegram_alert_threshold: "score minimo de alerta",
+  telegram_alert_cooldown_seconds: "cooldown de alerta",
   telegram_alert_types: "tipos de alerta",
-  telegram_operable_only: "somente operáveis no Telegram",
+  telegram_operable_only: "alertas operaveis",
   telegram_min_executability_score: "mínimo de operabilidade no Telegram",
   telegram_alert_exchanges: "exchanges do Telegram",
   telegram_alert_pairs: "pares do Telegram",
@@ -206,14 +253,14 @@ function buildOperationalConfigPayload(config: AppConfig): Partial<AppConfig> {
   return {
     thresholds: config.thresholds,
     weights: config.weights,
-    enabled_exchanges: config.enabled_exchanges,
-    enabled_pairs: config.enabled_pairs,
-    scan_interval_seconds: config.scan_interval_seconds,
     trading_profile: config.trading_profile,
     order_notional_brl: config.order_notional_brl,
     max_entry_slippage_bps: config.max_entry_slippage_bps,
     max_exit_slippage_bps: config.max_exit_slippage_bps,
     min_quote_volume_brl: config.min_quote_volume_brl,
+    enabled_exchanges: config.enabled_exchanges,
+    enabled_pairs: config.enabled_pairs,
+    scan_interval_seconds: config.scan_interval_seconds,
     telegram_enabled: config.telegram_enabled,
     telegram_alert_threshold: config.telegram_alert_threshold,
     telegram_alert_cooldown_seconds: config.telegram_alert_cooldown_seconds,
@@ -933,6 +980,7 @@ export default function SettingsPage() {
   const discoveredPairs = new Set(pairCatalog.map((item) => item.pair));
   const activePairSet = new Set(config?.enabled_pairs ?? []);
   const enabledExchangeSet = new Set(config?.enabled_exchanges ?? []);
+  const activeTradingPreset = config ? TRADING_PROFILE_PRESETS[config.trading_profile] : null;
   const normalizedPairSearch = deferredPairSearch.trim().toUpperCase();
   const pairCatalogEntries: PairCatalogEntry[] = [...pairCatalog]
     .map((item) => {
@@ -1507,6 +1555,116 @@ export default function SettingsPage() {
         <>
           <Card>
             <CardHeader>
+              <CardTitle className="text-base font-semibold">Perfil operacional</CardTitle>
+              <CardDescription>
+                Define quando um sinal deixa de ser apenas interessante e passa a ser operavel para o tamanho de ordem escolhido.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <SettingRow
+                label="Perfil de trading"
+                description={TRADING_PROFILE_OPTIONS.find((item) => item.value === config.trading_profile)?.description ?? "Perfil usado para calibrar o scanner."}
+              >
+                <select
+                  value={config.trading_profile}
+                  onChange={(event) => {
+                    const nextProfile = event.target.value as TradingProfile;
+                    setConfig({
+                      ...config,
+                      trading_profile: nextProfile,
+                      ...TRADING_PROFILE_PRESETS[nextProfile],
+                    });
+                  }}
+                  className="h-9 w-full max-w-56 rounded-lg border bg-background px-3 text-sm font-medium"
+                >
+                  {TRADING_PROFILE_OPTIONS.map((profile) => (
+                    <option key={profile.value} value={profile.value}>
+                      {profile.label}
+                    </option>
+                  ))}
+                </select>
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Tamanho de ordem estimado (R$)"
+                description="Valor usado para simular entrada e saida no livro de ordens"
+              >
+                <Input
+                  data-testid="settings-order-notional"
+                  type="number"
+                  min={25}
+                  step={25}
+                  value={config.order_notional_brl ?? activeTradingPreset?.order_notional_brl ?? 1000}
+                  onChange={(event) =>
+                    setConfig({ ...config, order_notional_brl: Number(event.target.value) })
+                  }
+                  className="h-9 w-36 font-medium"
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Volume notional minimo (R$/24h)"
+                description="Descarta ativo com pouco volume para reduzir risco de ficar preso"
+              >
+                <Input
+                  data-testid="settings-min-quote-volume"
+                  type="number"
+                  min={0}
+                  step={500}
+                  value={config.min_quote_volume_brl ?? activeTradingPreset?.min_quote_volume_brl ?? 3000}
+                  onChange={(event) =>
+                    setConfig({ ...config, min_quote_volume_brl: Number(event.target.value) })
+                  }
+                  className="h-9 w-36 font-medium"
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <SettingRow
+                  label="Slippage max. entrada (%)"
+                  description="Tolerancia para comprar sem o preco escapar demais"
+                >
+                  <SliderInputControl
+                    testId="settings-entry-slippage"
+                    value={(config.max_entry_slippage_bps ?? activeTradingPreset?.max_entry_slippage_bps ?? 500) / 100}
+                    min={0.1}
+                    max={10}
+                    step={0.1}
+                    suffix="%"
+                    onChange={(nextValue) =>
+                      setConfig({ ...config, max_entry_slippage_bps: Math.round(nextValue * 100) })
+                    }
+                  />
+                </SettingRow>
+
+                <SettingRow
+                  label="Slippage max. saida (%)"
+                  description="Tolerancia para vender sem perder executabilidade"
+                >
+                  <SliderInputControl
+                    testId="settings-exit-slippage"
+                    value={(config.max_exit_slippage_bps ?? activeTradingPreset?.max_exit_slippage_bps ?? 500) / 100}
+                    min={0.1}
+                    max={10}
+                    step={0.1}
+                    suffix="%"
+                    onChange={(nextValue) =>
+                      setConfig({ ...config, max_exit_slippage_bps: Math.round(nextValue * 100) })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle className="text-base font-semibold">Filtros e thresholds</CardTitle>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -1620,6 +1778,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
+          {/*
           <Card>
             <CardHeader>
               <CardTitle className="text-base font-semibold">Perfil operacional</CardTitle>
@@ -1750,6 +1909,7 @@ export default function SettingsPage() {
               </SettingRow>
             </CardContent>
           </Card>
+          */}
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr),22rem] xl:items-start">
             <Card>
@@ -2076,6 +2236,108 @@ export default function SettingsPage() {
                   checked={config.telegram_enabled}
                   onCheckedChange={(value) => setConfig({ ...config, telegram_enabled: value })}
                 />
+              </div>
+
+              <Separator />
+
+              <SettingRow
+                label="Score minimo para alerta"
+                description="Permite receber sinais medios e bons sem depender apenas do ranking visual"
+              >
+                <SliderInputControl
+                  testId="settings-telegram-threshold"
+                  value={config.telegram_alert_threshold ?? 60}
+                  min={20}
+                  max={100}
+                  step={5}
+                  onChange={(nextValue) =>
+                    setConfig({ ...config, telegram_alert_threshold: nextValue })
+                  }
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Cooldown por ativo (seg)"
+                description="Evita spam repetido do mesmo par/exchange"
+              >
+                <Input
+                  data-testid="settings-telegram-cooldown"
+                  type="number"
+                  min={0}
+                  step={60}
+                  value={config.telegram_alert_cooldown_seconds ?? 900}
+                  onChange={(event) =>
+                    setConfig({ ...config, telegram_alert_cooldown_seconds: Number(event.target.value) })
+                  }
+                  className="h-9 w-36 font-medium"
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
+                label="Score minimo de operabilidade"
+                description="Exige uma nota minima de executabilidade antes de disparar alertas"
+              >
+                <Input
+                  data-testid="settings-telegram-min-exec"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={config.telegram_min_executability_score ?? ""}
+                  onChange={(event) =>
+                    setConfig({
+                      ...config,
+                      telegram_min_executability_score: Number(event.target.value) || null,
+                    })
+                  }
+                  className="h-9 w-36 font-medium"
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <div className="space-y-3 rounded-xl border bg-muted/15 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold">Enviar apenas sinais operaveis</p>
+                    <p className="text-xs text-muted-foreground">
+                      Mantem alertas focados em volume, liquidez, slippage e facilidade de saida.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={!!config.telegram_operable_only}
+                    onCheckedChange={(value) => setConfig({ ...config, telegram_operable_only: value })}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: "operable", label: "Operaveis" },
+                    { value: "high_score", label: "Score alto" },
+                    { value: "arbitrage", label: "Arbitragem" },
+                  ].map((alertType) => {
+                    const active = (config.telegram_alert_types ?? []).includes(alertType.value);
+                    return (
+                      <Button
+                        key={alertType.value}
+                        type="button"
+                        size="sm"
+                        variant={active ? "secondary" : "outline"}
+                        onClick={() => {
+                          const nextTypes = active
+                            ? (config.telegram_alert_types ?? []).filter((item) => item !== alertType.value)
+                            : [...(config.telegram_alert_types ?? []), alertType.value];
+                          setConfig({ ...config, telegram_alert_types: nextTypes });
+                        }}
+                      >
+                        {alertType.label}
+                      </Button>
+                    );
+                  })}
+                </div>
               </div>
 
               <Separator />

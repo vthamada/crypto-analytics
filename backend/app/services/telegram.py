@@ -32,25 +32,27 @@ async def _send_message(*, token: str, chat_id: str, text: str) -> None:
         response.raise_for_status()
 
 
+def _format_slippage(value_bps: float | None) -> str:
+    if value_bps is None:
+        return "indisponivel"
+    return f"{value_bps / 100:.2f}%"
+
+
 def _format_opportunity(opp: Opportunity) -> str:
-    score_emoji = "🟢" if opp.score >= 70 else "🟡" if opp.score >= 40 else "🔴"
-    movement_emoji = {
-        "strong_range": "📈",
-        "spike": "⚡",
-        "weak": "😐",
-        "trap": "⚠️",
-    }.get(opp.movement_type.value, "❓")
+    score_label = "ALTA" if opp.score >= 70 else "MEDIA" if opp.score >= 40 else "BAIXA"
+    operable_label = "sim" if opp.operable_signal else "nao"
 
     return (
-        f"{score_emoji} *Score {opp.score}* | {opp.pair}\n"
+        f"*{score_label}* | Score {opp.score} | {opp.pair}\n"
         f"   Exchange: {opp.exchange.value}\n"
-        f"   {movement_emoji} Movimento: {opp.movement_type.value}\n"
-        f"   💰 Preço: R$ {opp.last_price:,.2f}\n"
-        f"   📊 Variação: {opp.change_pct:+.2f}%\n"
-        f"   📈 Volatilidade: {opp.volatility_pct:.2f}%\n"
-        f"   💵 Volume 24h: R$ {opp.quote_volume_24h:,.0f}\n"
-        f"   🏦 Liquidez: {opp.liquidity_units:,.0f} un.\n"
-        f"   📏 Spread: {opp.spread_pct:.4f}%"
+        f"   Movimento: {opp.movement_type.value}\n"
+        f"   Operavel: {operable_label} | Exec: {opp.executability_score or 0:.1f}\n"
+        f"   Preco: R$ {opp.last_price:,.2f}\n"
+        f"   Variacao: {opp.change_pct:+.2f}% | Volatilidade: {opp.volatility_pct:.2f}%\n"
+        f"   Volume 24h: R$ {opp.quote_volume_24h:,.0f}\n"
+        f"   Compra/Venda topo: R$ {opp.ask_notional_top_n or 0:,.0f} / R$ {opp.bid_notional_top_n or 0:,.0f}\n"
+        f"   Slippage entrada/saida: {_format_slippage(opp.estimated_buy_slippage_bps)} / {_format_slippage(opp.estimated_sell_slippage_bps)}\n"
+        f"   Spread: {opp.spread_pct:.4f}%"
     )
 
 
@@ -63,8 +65,13 @@ def _alert_key(opp: Opportunity, *, destination_key: str) -> str:
     return f"{destination_key}:{opp.exchange.value}:{opp.pair}"
 
 
-def _filter_by_cooldown(opportunities: list[Opportunity], *, destination_key: str) -> list[Opportunity]:
-    cooldown = max(settings.telegram_alert_cooldown_seconds, 0)
+def _filter_by_cooldown(
+    opportunities: list[Opportunity],
+    *,
+    destination_key: str,
+    cooldown_seconds: int | None = None,
+) -> list[Opportunity]:
+    cooldown = max(settings.telegram_alert_cooldown_seconds if cooldown_seconds is None else cooldown_seconds, 0)
     if cooldown == 0:
         return opportunities
 
@@ -86,6 +93,7 @@ async def send_telegram_alert(
     token: str = "",
     chat_id: str = "",
     top_n: int = 5,
+    cooldown_seconds: int | None = None,
 ) -> bool:
     """Send top opportunities to Telegram chat.
 
@@ -102,19 +110,23 @@ async def send_telegram_alert(
         return False
 
     destination_key = _destination_key(effective_token, effective_chat_id)
-    eligible = _filter_by_cooldown(opportunities, destination_key=destination_key)
+    eligible = _filter_by_cooldown(
+        opportunities,
+        destination_key=destination_key,
+        cooldown_seconds=cooldown_seconds,
+    )
     if not eligible:
         logger.info("Telegram cooldown suppressed all candidate alerts")
         return False
 
     top = sorted(eligible, key=lambda o: o.score, reverse=True)[:top_n]
 
-    lines = ["🔔 *Crypto Analytics - Novas Oportunidades*\n"]
+    lines = ["*Crypto Analytics - Novas Oportunidades*\n"]
     for opp in top:
         lines.append(_format_opportunity(opp))
         lines.append("")
 
-    lines.append(f"_Total de sinais: {len(opportunities)}_")
+    lines.append(f"_Total de sinais candidatos: {len(opportunities)}_")
     message = "\n".join(lines)
 
     try:
@@ -143,11 +155,11 @@ async def send_telegram_test_message(
     workspace_label = workspace_name or "Default Workspace"
     actor_label = actor_username or "sistema"
     message = (
-        "✅ *Crypto Analytics - Teste de Telegram*\n\n"
+        "*Crypto Analytics - Teste de Telegram*\n\n"
         f"Workspace: *{workspace_label}*\n"
         f"Executado por: *{actor_label}*\n"
-        f"Horário: `{timestamp}`\n\n"
-        "Se esta mensagem chegou, a configuração do bot e do chat está funcional."
+        f"Horario: `{timestamp}`\n\n"
+        "Se esta mensagem chegou, a configuracao do bot e do chat esta funcional."
     )
 
     await _send_message(token=effective_token, chat_id=effective_chat_id, text=message)
