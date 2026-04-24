@@ -182,6 +182,7 @@ Observacao:
 
 - assim como na API, o startup do worker tambem passa por `init_db()`, entao o `Pre-Deploy Command` nao e obrigatorio
 - se providers como Binance retornarem `HTTP 451`, mover o worker para fora dos EUA tende a ser a primeira acao. O `render.yaml` atual define `region: frankfurt` no worker.
+- para dados publicos/read-only da Binance, o backend usa `https://data-api.binance.vision/api/v3`; se `api.binance.com` retornar `HTTP 451`, confirme se o deploy esta no commit que contem esse fallback.
 
 Variaveis de ambiente minimas do worker:
 
@@ -339,6 +340,7 @@ Resultado esperado:
 
 - confirme a regiao do worker no Render
 - prefira `frankfurt` para reduzir risco de bloqueio regional de APIs como Binance, porque `oregon`, `ohio` e `virginia` continuam sendo regioes dos EUA
+- confirme se o provider Binance esta usando `data-api.binance.vision` para market data publico/read-only
 - depois de alterar a regiao, rode novo deploy do worker
 - se o servico ja existir em outra regiao, pode ser necessario recriar o worker ou aplicar a alteracao pelo painel/CLI do Render
 

@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 class BinanceProvider(ExchangeProvider):
     exchange = Exchange.BINANCE
-    base_url = "https://api.binance.com/api/v3"
+    # Use Binance's market-data endpoint for public read-only calls. Some Render
+    # regions return HTTP 451 on api.binance.com, while data-api is intended for
+    # public market data such as exchangeInfo, tickers, depth, trades, and klines.
+    base_url = "https://data-api.binance.vision/api/v3"
 
     def normalize_pair(self, pair: str) -> str:
         # Internal: BTC_BRL -> Binance: BTCBRL (no separator)
