@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  BookOpen,
   History,
   LayoutDashboard,
   Settings,
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/history", label: "Histórico", icon: History },
   { href: "/settings", label: "Configurações", icon: Settings },
+  { href: "/help", label: "Ajuda", icon: BookOpen },
 ];
 
 export function Header() {
@@ -121,7 +123,7 @@ export function Header() {
                       "flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
                       isActive
                         ? "bg-primary/12 text-primary"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                     aria-label={item.label}
                   >

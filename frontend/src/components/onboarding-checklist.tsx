@@ -12,9 +12,10 @@ import {
   getWorkspaceStatus,
 } from "@/lib/api";
 import type { AdminSessionInfo, WorkspaceStatus } from "@/lib/types";
-import { Check, Loader2, Sparkles } from "lucide-react";
+import { Check, Loader2, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const ONBOARDING_DISMISSED_STORAGE_KEY = "crypto-analytics-onboarding-dismissed";
 
 export function OnboardingChecklist() {
   const [session, setSession] = useState<AdminSessionInfo | null>(null);
@@ -22,9 +23,11 @@ export function OnboardingChecklist() {
   const [loading, setLoading] = useState(true);
   const [finishing, setFinishing] = useState(false);
   const [understoodScores, setUnderstoodScores] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
     const token = getStoredAuthToken();
+    setDismissed(window.localStorage.getItem(ONBOARDING_DISMISSED_STORAGE_KEY) === "1");
     if (!token) {
       setLoading(false);
       return;
@@ -53,6 +56,32 @@ export function OnboardingChecklist() {
     return null;
   }
 
+  if (dismissed) {
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-emerald-500/15 bg-emerald-500/[0.03] p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-muted-foreground">
+          Primeiros passos ocultos. Você pode consultar o guia completo em Ajuda.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/help" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+            Abrir ajuda
+          </Link>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              window.localStorage.removeItem(ONBOARDING_DISMISSED_STORAGE_KEY);
+              setDismissed(false);
+            }}
+          >
+            Mostrar novamente
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   const isAdmin = session.role === "admin";
   const telegramReady = workspaceStatus.telegram_configured;
   const pairsReady = workspaceStatus.configured_pairs_count > 0;
@@ -76,7 +105,7 @@ export function OnboardingChecklist() {
   return (
     <Card className="border-emerald-500/20 bg-emerald-500/[0.04]">
       <CardHeader>
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2 text-base font-semibold">
               <Sparkles className="h-4 w-4" />
@@ -88,7 +117,22 @@ export function OnboardingChecklist() {
                 : "Finalize os itens abaixo para deixar o workspace pronto para uso."}
             </CardDescription>
           </div>
-          <Badge variant="outline">{isAdmin ? "admin" : "membro"}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline">{isAdmin ? "admin" : "membro"}</Badge>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0"
+              aria-label="Ocultar primeiros passos"
+              onClick={() => {
+                window.localStorage.setItem(ONBOARDING_DISMISSED_STORAGE_KEY, "1");
+                setDismissed(true);
+              }}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -126,9 +170,12 @@ export function OnboardingChecklist() {
           <p className="text-xs text-muted-foreground">
             Ajustes operacionais ficam em Configurações. Depois disso, o dashboard passa a refletir o workspace ativo.
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Link href="/settings" className={cn(buttonVariants({ variant: "outline" }))}>
               Abrir configurações
+            </Link>
+            <Link href="/help" className={cn(buttonVariants({ variant: "outline" }))}>
+              Entender o sistema
             </Link>
             <Button type="button" onClick={handleComplete} disabled={!canFinish || finishing} className="gap-2">
               {finishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}

@@ -2343,43 +2343,63 @@ export default function SettingsPage() {
               <Separator />
 
               <div className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant={
-                        isSecretConfigured(configuredSecrets, "telegram_bot_token", "telegram_chat_id")
-                          ? "default"
-                          : "outline"
-                      }
-                    >
-                      {isSecretConfigured(configuredSecrets, "telegram_bot_token", "telegram_chat_id")
-                        ? "Telegram configurado"
-                        : "Telegram pendente"}
-                    </Badge>
-                    {config.telegram_bot_token || config.telegram_chat_id ? (
-                      <Badge variant="secondary">edicao em andamento</Badge>
-                    ) : null}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() =>
-                      setEditingSecrets((current) => {
-                        const nextEditing = !(current.telegram_bot_token || current.telegram_chat_id);
-                        return {
-                          ...current,
-                          telegram_bot_token: nextEditing,
-                          telegram_chat_id: nextEditing,
-                        };
-                      })
-                    }
-                  >
-                    {editingSecrets.telegram_bot_token || editingSecrets.telegram_chat_id
-                      ? "Cancelar edicao"
-                      : "Editar credenciais"}
-                  </Button>
-                </div>
+                {(() => {
+                  const telegramConfigured = isSecretConfigured(
+                    configuredSecrets,
+                    "telegram_bot_token",
+                    "telegram_chat_id",
+                  );
+                  const telegramDraft = hasSecretDraft(config, "telegram_bot_token", "telegram_chat_id");
+                  return (
+                    <div className="rounded-xl border bg-muted/20 p-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={telegramConfigured ? "default" : "outline"}>
+                              {telegramConfigured ? "Telegram configurado" : "Telegram pendente"}
+                            </Badge>
+                            {telegramDraft ? <Badge variant="secondary">edicao em andamento</Badge> : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {credentialStatusText(telegramConfigured, telegramDraft, "Credenciais do Telegram")}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleSave}
+                            disabled={saving || !telegramDraft}
+                            className="gap-2"
+                          >
+                            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            Salvar credenciais
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setEditingSecrets((current) => {
+                                const nextEditing = !(current.telegram_bot_token || current.telegram_chat_id);
+                                return {
+                                  ...current,
+                                  telegram_bot_token: nextEditing,
+                                  telegram_chat_id: nextEditing,
+                                };
+                              })
+                            }
+                          >
+                            {editingSecrets.telegram_bot_token || editingSecrets.telegram_chat_id
+                              ? "Cancelar edicao"
+                              : "Editar credenciais"}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <CredentialField
                   label="Bot token"
                   placeholder={
@@ -2452,41 +2472,56 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {EXCHANGE_CRED_FIELDS.map(({ exchange, label, keyField, secretField }) => (
+              {EXCHANGE_CRED_FIELDS.map(({ exchange, label, keyField, secretField }) => {
+                const exchangeConfigured = isSecretConfigured(configuredSecrets, keyField, secretField);
+                const exchangeDraft = hasSecretDraft(config, keyField, secretField);
+                return (
                 <div key={exchange} className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-muted-foreground">{label}</p>
-                      <Badge
-                        variant={
-                          isSecretConfigured(configuredSecrets, keyField, secretField) ? "default" : "outline"
-                        }
-                      >
-                        {isSecretConfigured(configuredSecrets, keyField, secretField)
-                          ? "credenciais salvas"
-                          : "sem credenciais"}
-                      </Badge>
-                      {config[keyField] || config[secretField] ? (
-                        <Badge variant="secondary">edicao em andamento</Badge>
-                      ) : null}
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-muted-foreground">{label}</p>
+                          <Badge variant={exchangeConfigured ? "default" : "outline"}>
+                            {exchangeConfigured ? "credenciais salvas" : "sem credenciais"}
+                          </Badge>
+                          {exchangeDraft ? <Badge variant="secondary">edicao em andamento</Badge> : null}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {credentialStatusText(exchangeConfigured, exchangeDraft, `Credenciais da ${label}`)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleSave}
+                          disabled={saving || !exchangeDraft}
+                          className="gap-2"
+                        >
+                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                          Salvar chaves
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setEditingSecrets((current) => {
+                              const nextEditing = !(current[keyField] || current[secretField]);
+                              return {
+                                ...current,
+                                [keyField]: nextEditing,
+                                [secretField]: nextEditing,
+                              };
+                            })
+                          }
+                        >
+                          {editingSecrets[keyField] || editingSecrets[secretField] ? "Cancelar edicao" : "Editar"}
+                        </Button>
+                      </div>
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        setEditingSecrets((current) => {
-                          const nextEditing = !(current[keyField] || current[secretField]);
-                          return {
-                            ...current,
-                            [keyField]: nextEditing,
-                            [secretField]: nextEditing,
-                          };
-                        })
-                      }
-                    >
-                      {editingSecrets[keyField] || editingSecrets[secretField] ? "Cancelar edicao" : "Editar"}
-                    </Button>
                   </div>
                   <CredentialField
                     label="API key"
@@ -2520,7 +2555,8 @@ export default function SettingsPage() {
                   />
                   {exchange !== "binance" ? <Separator /> : null}
                 </div>
-              ))}
+                );
+              })}
 
               <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -2727,6 +2763,20 @@ function isSecretConfigured(
   ...fields: SensitiveField[]
 ): boolean {
   return fields.some((field) => configuredSecrets[field]);
+}
+
+function hasSecretDraft(config: AppConfig, ...fields: SensitiveField[]): boolean {
+  return fields.some((field) => Boolean(config[field]));
+}
+
+function credentialStatusText(configured: boolean, hasDraft: boolean, configuredLabel: string): string {
+  if (hasDraft) {
+    return "Alterações pendentes. Clique em salvar para gravar no workspace.";
+  }
+  if (configured) {
+    return `${configuredLabel} salvas no workspace.`;
+  }
+  return "Nenhuma credencial salva ainda.";
 }
 
 function formatValidationStatus(status: ExchangeCredentialValidationResult["state"]) {
