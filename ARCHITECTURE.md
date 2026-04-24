@@ -158,6 +158,15 @@ Campos operacionais recentes relevantes em `Opportunity` e nas camadas persistid
 
 ## Pontos de atencao
 
+### Historico e automacao futura
+
+- muitas paginas de registros no historico sao esperadas para um scanner continuo, mas nao devem crescer indefinidamente sem governanca
+- o historico tem valor para paper trading e trading automatizado somente se preservar rastreabilidade entre observacao, sinal, projecao, decisao, execucao e outcome
+- `opportunities` deve continuar como feed/historico operacional de compatibilidade, nao como unica fonte de verdade para automacao
+- `raw_market_observations`, `technical_signals`, `workspace_signal_projections` e `signal_outcomes` formam a base correta para evoluir analytics e calibracao
+- antes de qualquer execucao automatica, ainda sera necessario introduzir entidades explicitas de decisao e execucao, alem de politica real de retencao/compactacao por camada
+- a funcao de retencao existe no backend, mas a execucao periodica precisa ser validada no fluxo real do worker/API para evitar acumulo silencioso
+
 ### Escalabilidade
 
 - mais de um scanner ativo pode duplicar scan e alertas

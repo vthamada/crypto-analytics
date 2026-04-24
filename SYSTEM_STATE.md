@@ -544,6 +544,37 @@ O sistema ainda nao e:
 
 Os pontos abaixo sao os que mais importam se o objetivo for evoluir o produto com menos ambiguidade operacional.
 
+### Refinamento 0. Governanca do historico para automacao futura
+
+O historico ja e util para evoluir o sistema, mas precisa ser tratado como ativo operacional, nao como deposito infinito de registros.
+
+Leitura atual:
+
+- a tela de historico pagina registros de `opportunities` em blocos de 100 linhas
+- muitas paginas de registros sao esperadas em um scanner continuo
+- dezenas de milhares de linhas ainda nao representam, por si so, problema para Postgres/Supabase
+- o risco maior nao e volume bruto imediato, e sim historico sem politica clara de retencao, compactacao e separacao semantica
+
+Implicacao para trading automatizado:
+
+- esses registros podem servir como base para calibracao, paper trading, validacao de regras e medicao de edge
+- para isso, precisam estar separados por responsabilidade: observacao bruta, sinal tecnico, projecao por workspace, decisao, execucao e outcome
+- se tudo crescer como historico operacional plano, o sistema pode misturar ruido com evidencia e gerar conclusoes ruins
+
+Estado atual importante:
+
+- ja existem camadas como `raw_market_observations`, `technical_signals`, `workspace_signal_projections` e `signal_outcomes`
+- `opportunities` ainda funciona como historico global resumido e feed operacional legado
+- existe funcao de retencao configuravel em `persistence.py`, mas a chamada periodica deve ser verificada no fluxo real do worker/API antes de considerar a politica efetivamente ativa
+
+Diretriz recomendada:
+
+- manter historico bruto e feed operacional por janela curta ou media
+- manter sinais e outcomes relevantes por prazo maior
+- manter agregados analiticos por longo prazo
+- registrar futuramente uma camada explicita de `decision` antes de paper trading e uma camada de `execution` antes de ordens reais
+- nao usar o historico como base de automacao sem versionamento do motor, rastreabilidade e qualidade minima dos dados
+
 ### Refinamento 1. Isolamento real por workspace
 
 Hoje o isolamento e forte na autorizacao e na entrega, mas nao no pipeline bruto.

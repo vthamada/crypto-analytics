@@ -125,7 +125,7 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 
 ## P2 — Qualidade, confiabilidade e robustez do motor
 
-- [x] **Politica de retencao do historico** — scanner e worker agora executam limpeza periodica configuravel (`HISTORY_RETENTION_DAYS`, `HISTORY_RETENTION_CHECK_MINUTES`) para remover registros antigos sem depender de manutencao manual.
+- [~] **Politica de retencao do historico** — existe configuracao e funcao de limpeza (`HISTORY_RETENTION_DAYS`, `HISTORY_RETENTION_CHECK_MINUTES`), mas a execucao periodica precisa ser validada no fluxo real do worker/API e expandida para todas as camadas historicas antes de ser considerada concluida.
 
 - [x] **Testes E2E do frontend** — Playwright cobre login administrativo, troca de workspace com configuracao isolada, dashboard em tempo real e falha de historico com feedback visual.
 
@@ -251,6 +251,16 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 
 > Implementar apos o produto de monitoramento estar validado com usuarios reais e receita recorrente estabelecida. Cada fase valida a anterior antes de arriscar capital real.
 
+- [ ] **Governanca de historico para trading**
+  Definir e implementar politica por camada antes de usar historico para decisoes automatizadas:
+  - `raw_market_observations`: retencao curta/media, usada para auditoria tecnica e debug
+  - `opportunities`: feed operacional legado com retencao controlada
+  - `technical_signals`: sinais versionados mantidos por mais tempo para calibracao
+  - `workspace_signal_projections`: trilha de como cada workspace viu o sinal
+  - `signal_outcomes`: base de aprendizado e avaliacao de edge
+  - futuros `decisions` e `executions`: obrigatorios antes de paper trading avancado, manual confirmado ou automatico
+  Criterio de aceite: rotina ativa de pruning/compactacao por camada, queries do historico rapidas e agregados de calibracao preservados.
+
 - [ ] **Metadados de trading por par (Binance)**
   Enriquecer cache de pares com: tamanho minimo de ordem, precisao de preco (step size), status de trading.
   Pre-requisito para qualquer execucao sem erros da exchange.
@@ -263,12 +273,14 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
   Simula entradas e saidas com base nos sinais detectados, sem dinheiro real.
   Entidade `SimulatedTrade`: par, exchange, preco de entrada, preco de saida, resultado %.
   Dashboard de performance: win rate, retorno medio, drawdown maximo.
+  Deve consumir sinais/outcomes versionados e registrar uma decisao simulada antes de criar a posicao simulada.
   Validacao obrigatoria antes de colocar capital real. Disponivel no plano Trading.
 
 - [ ] **Execucao manual confirmada — Fase 2 do trading**
   Sinal detectado → alerta Telegram com botao "Executar".
   Usuario confirma → ordem executada via API privada da Binance.
   Log imutavel de todas as ordens.
+  Exige entidade de decisao e entidade de execucao separadas do historico de sinais.
   Disponivel no plano Trading.
 
 - [ ] **Gestao de posicoes**
@@ -285,6 +297,7 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 - [ ] **Motor de execucao automatica — Fase 3 do trading**
   Pipeline: sinal → verificacao de risco → calculo de tamanho → ordem → monitoramento → saida.
   Circuit breaker: parar se perda acumulada > limite configurado.
+  Nunca deve operar diretamente a partir de `opportunities`; deve consumir sinal versionado, perfil do workspace, decisao auditada, regras de risco e estado de posicao.
   Disponivel no plano Enterprise.
 
 - [ ] **Portfolio e P&L**

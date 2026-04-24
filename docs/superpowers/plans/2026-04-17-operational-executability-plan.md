@@ -511,7 +511,7 @@ Status: concluida em 2026-04-18.
 
 ## Release H - Migracao Estrutural Do Historico
 
-Status: concluida em 2026-04-18.
+Status: parcialmente concluida em 2026-04-18. A escrita dual foi implementada, mas a governanca completa de historico para trading ainda exige validacao de retencao ativa, compactacao por camada e futuras entidades de decisao/execucao.
 
 ### Task 16: Preparar escrita dual para camadas separadas
 
@@ -554,11 +554,58 @@ Status: concluida em 2026-04-18.
 
 - [x] Migrar a tela de historico para a nova leitura quando os dados estiverem estaveis.
 
+- [ ] Validar se a rotina de retencao esta sendo chamada no fluxo real do worker/API em producao.
+
+- [ ] Expandir a retencao para todas as camadas historicas relevantes, nao apenas feed operacional.
+
+- [ ] Definir compactacao/agregacao de longo prazo para analytics sem manter todos os eventos brutos indefinidamente.
+
 - [ ] Verificacao:
   - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_persistence.py -v`
   - Run: `npm --prefix frontend run build`
 
 **Commit suggestion:** `feat: update history retention and semantic deduplication`
+
+### Task 18: Preparar historico para paper trading e automacao futura
+
+**Files:**
+- Modify: `backend/app/models/database.py`
+- Modify: `backend/app/services/shared_state.py`
+- Modify: `backend/app/services/persistence.py`
+- Modify: `backend/app/api/routes.py`
+- Test: `backend/tests/test_persistence.py`
+- Test: `backend/tests/test_signal_outcomes.py`
+
+- [ ] Documentar e implementar politica por camada:
+  - `raw_market_observations`: retencao curta/media
+  - `opportunities`: feed operacional legado com retencao controlada
+  - `technical_signals`: sinais versionados para calibracao
+  - `workspace_signal_projections`: auditoria da visao por workspace
+  - `signal_outcomes`: base de aprendizado e avaliacao de edge
+
+- [ ] Criar conceito de `decision` antes de paper trading:
+  - sinal ignorado
+  - sinal alertado
+  - sinal simulado
+  - sinal aprovado manualmente
+  - sinal bloqueado por risco
+
+- [ ] Criar conceito de `execution` antes de ordens reais:
+  - exchange
+  - par
+  - lado
+  - quantidade
+  - preco esperado
+  - preco executado
+  - slippage real
+  - status da ordem
+
+- [ ] Garantir que nenhum fluxo de trading automatico consuma diretamente `opportunities` como fonte unica de verdade.
+
+- [ ] Verificacao:
+  - Run: `.\.venv\Scripts\python.exe -m pytest backend\tests\test_persistence.py backend\tests\test_signal_outcomes.py -v`
+
+**Commit suggestion:** `docs: define history governance for trading automation`
 
 ---
 
