@@ -480,8 +480,11 @@ export function acceptInvite(payload: {
   });
 }
 
-export function getAvailablePairs(): Promise<AvailablePairsResponse> {
-  return fetchJSON("/pairs/available", { skipAuthRefresh: true });
+export function getAvailablePairs(params?: { force_refresh?: boolean }): Promise<AvailablePairsResponse> {
+  const query = new URLSearchParams();
+  if (params?.force_refresh) query.set("force_refresh", "true");
+  const qs = query.toString();
+  return fetchJSON(`/pairs/available${qs ? `?${qs}` : ""}`, { skipAuthRefresh: true });
 }
 
 export function getConfig(adminToken?: string): Promise<ConfigResponse> {

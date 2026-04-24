@@ -385,6 +385,8 @@ export default function SettingsPage() {
   const [newUserRole, setNewUserRole] = useState("member");
   const [credentialNotice, setCredentialNotice] = useState<CredentialNotice | null>(null);
   const [pairSearch, setPairSearch] = useState("");
+  const [manualPairInput, setManualPairInput] = useState("");
+  const [manualPairFeedback, setManualPairFeedback] = useState<string | null>(null);
   const [pairCatalogLoading, setPairCatalogLoading] = useState(false);
   const [pairCatalogError, setPairCatalogError] = useState<string | null>(null);
   const [pairCatalogView, setPairCatalogView] = useState<PairCatalogView>("active");
@@ -509,10 +511,10 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadAvailablePairsCatalog() {
+  async function loadAvailablePairsCatalog(forceRefresh = false) {
     setPairCatalogLoading(true);
     try {
-      const catalog = await getAvailablePairs();
+      const catalog = await getAvailablePairs({ force_refresh: forceRefresh });
       setAvailablePairsCatalog(catalog);
       setPairCatalogError(null);
     } catch (error) {
@@ -570,6 +572,8 @@ export default function SettingsPage() {
     setConfirmPassword("");
     setCredentialNotice(null);
     setPairSearch("");
+    setManualPairInput("");
+    setManualPairFeedback(null);
     setPairCatalogView("active");
     setPairAvailabilityFilter("active_exchanges");
     setPairResultsLimit(40);
@@ -929,6 +933,42 @@ export default function SettingsPage() {
       ? config.enabled_pairs.filter((item) => item !== pair)
       : [...config.enabled_pairs, pair];
     setConfig({ ...config, enabled_pairs: pairs });
+  }
+
+  function normalizeManualPair(value: string): string {
+    return value
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  function addManualPair() {
+    if (!config) return;
+
+    const pair = normalizeManualPair(manualPairInput);
+    if (!/^[A-Z0-9]{2,15}_[A-Z0-9]{2,10}$/.test(pair)) {
+      setManualPairFeedback("Use o formato BASE_COTACAO, por exemplo SOL_BRL, WBTC_BRL ou BTC_USDT.");
+      return;
+    }
+
+    if (config.enabled_pairs.includes(pair)) {
+      setManualPairFeedback(`${pair.replace("_", "/")} ja esta ativo neste workspace.`);
+      return;
+    }
+
+    const catalogEntry = pairCatalog.find((item) => item.pair === pair);
+    const hasEnabledExchange = catalogEntry
+      ? config.enabled_exchanges.some((exchange) => catalogEntry.availability[exchange])
+      : true;
+
+    setConfig({ ...config, enabled_pairs: [...config.enabled_pairs, pair] });
+    setManualPairInput("");
+    setManualPairFeedback(
+      catalogEntry && !hasEnabledExchange
+        ? `${pair.replace("_", "/")} foi adicionado, mas nao aparece disponivel nas exchanges ativas. Ative a exchange correta antes do scan.`
+        : `${pair.replace("_", "/")} adicionado. Se o par nao existir na exchange ativa, o scanner vai ignorar/falhar sem bloquear os demais.`,
+    );
   }
 
   function toggleShow(field: string) {
@@ -2006,6 +2046,17 @@ export default function SettingsPage() {
                     ? `Atualizado em ${new Date(availablePairsCatalog.generated_at).toLocaleString("pt-BR")}`
                     : "Usando fallback local"}
                 </Badge>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void loadAvailablePairsCatalog(true)}
+                  disabled={pairCatalogLoading}
+                  className="gap-2"
+                >
+                  {pairCatalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+                  Atualizar catálogo
+                </Button>
               </div>
 
               {pairCatalogError ? (
@@ -2013,6 +2064,37 @@ export default function SettingsPage() {
                   {pairCatalogError}
                 </div>
               ) : null}
+
+              <div className="rounded-xl border bg-muted/20 p-4">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr),auto] lg:items-end">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">Adicionar par manualmente</p>
+                    <p className="text-xs text-muted-foreground">
+                      Use quando o ativo existe na exchange, mas ainda nao apareceu no catalogo cacheado. O scanner so conseguira coletar se a exchange ativa suportar o par.
+                    </p>
+                    <Input
+                      value={manualPairInput}
+                      onChange={(event) => {
+                        setManualPairInput(event.target.value);
+                        setManualPairFeedback(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          addManualPair();
+                        }
+                      }}
+                      placeholder="Ex: SOL_BRL, WBTC_BRL, BTC_USDT"
+                    />
+                  </div>
+                  <Button type="button" variant="outline" onClick={addManualPair} disabled={!manualPairInput.trim()}>
+                    Adicionar par
+                  </Button>
+                </div>
+                {manualPairFeedback ? (
+                  <p className="mt-3 text-xs text-muted-foreground">{manualPairFeedback}</p>
+                ) : null}
+              </div>
 
               {configuredLegacyPairs.length > 0 ? (
                 <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">

@@ -457,7 +457,7 @@ def test_users_endpoint_requires_workspace_owner_role(monkeypatch):
 
 
 def test_available_pairs_endpoint_returns_aggregated_catalog(monkeypatch):
-    async def fake_catalog():
+    async def fake_catalog(force_refresh: bool = False):
         return {
             "generated_at": "2026-04-15T12:00:00+00:00",
             "expires_at": "2026-04-15T13:00:00+00:00",
