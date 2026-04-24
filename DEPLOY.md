@@ -175,13 +175,13 @@ Configuracao recomendada:
 | Root Directory | `backend` |
 | Build Command | `pip install .` |
 | Plan | `Starter` |
-| Region | `Oregon` (`oregon`) |
+| Region | `Frankfurt` (`frankfurt`) |
 | Start Command | `python -m app.worker` |
 
 Observacao:
 
 - assim como na API, o startup do worker tambem passa por `init_db()`, entao o `Pre-Deploy Command` nao e obrigatorio
-- se providers como Binance retornarem `HTTP 451`, mover o worker para uma regiao menos restrita tende a ser a primeira acao. O `render.yaml` atual define `region: oregon` no worker.
+- se providers como Binance retornarem `HTTP 451`, mover o worker para fora dos EUA tende a ser a primeira acao. O `render.yaml` atual define `region: frankfurt` no worker.
 
 Variaveis de ambiente minimas do worker:
 
@@ -338,7 +338,7 @@ Resultado esperado:
 ### Provider retorna `HTTP 451`
 
 - confirme a regiao do worker no Render
-- prefira `oregon` para reduzir risco de bloqueio regional de APIs como Binance
+- prefira `frankfurt` para reduzir risco de bloqueio regional de APIs como Binance, porque `oregon`, `ohio` e `virginia` continuam sendo regioes dos EUA
 - depois de alterar a regiao, rode novo deploy do worker
 - se o servico ja existir em outra regiao, pode ser necessario recriar o worker ou aplicar a alteracao pelo painel/CLI do Render
 

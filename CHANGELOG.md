@@ -22,7 +22,7 @@ Convencao deste repositorio:
 ### Changed
 - Scanner passou a calcular slippage e `operable_signal` com thresholds do workspace em vez de constantes globais.
 - Alertas Telegram passaram a respeitar operabilidade, tipos configurados e cooldown por workspace, com mensagem focada em volume, liquidez, slippage e facilidade de saida.
-- `render.yaml` move o worker para `region: oregon` para reduzir risco de HTTP 451 de providers em regioes restritas.
+- `render.yaml` move o worker para `region: frankfurt` para reduzir risco de HTTP 451 de providers em regioes restritas dos EUA.
 
 ## [2026-04-18]
 

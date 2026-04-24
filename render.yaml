@@ -36,7 +36,7 @@ services:
   - type: worker
     name: crypto-analytics-worker
     runtime: python
-    region: oregon
+    region: frankfurt
     plan: starter
     rootDir: backend
     buildCommand: pip install .
