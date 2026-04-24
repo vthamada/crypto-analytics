@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
@@ -15,6 +16,15 @@ TELEGRAM_API = "https://api.telegram.org"
 _last_alert_sent_at: dict[str, datetime] = {}
 
 
+def resolve_telegram_destination(*, token: str = "", chat_id: str = "") -> tuple[str, str]:
+    return token or settings.telegram_bot_token, chat_id or settings.telegram_chat_id
+
+
+def telegram_destination_configured(*, token: str = "", chat_id: str = "") -> bool:
+    effective_token, effective_chat_id = resolve_telegram_destination(token=token, chat_id=chat_id)
+    return bool(effective_token and effective_chat_id)
+
+
 async def _send_message(*, token: str, chat_id: str, text: str) -> None:
     if not token or not chat_id:
         raise ValueError("Telegram bot token and chat id must be configured")
@@ -23,7 +33,7 @@ async def _send_message(*, token: str, chat_id: str, text: str) -> None:
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
 
@@ -38,21 +48,25 @@ def _format_slippage(value_bps: float | None) -> str:
     return f"{value_bps / 100:.2f}%"
 
 
+def _escape_html(value: object) -> str:
+    return html.escape(str(value), quote=False)
+
+
 def _format_opportunity(opp: Opportunity) -> str:
     score_label = "ALTA" if opp.score >= 70 else "MEDIA" if opp.score >= 40 else "BAIXA"
     operable_label = "sim" if opp.operable_signal else "nao"
 
     return (
-        f"*{score_label}* | Score {opp.score} | {opp.pair}\n"
-        f"   Exchange: {opp.exchange.value}\n"
-        f"   Movimento: {opp.movement_type.value}\n"
-        f"   Operavel: {operable_label} | Exec: {opp.executability_score or 0:.1f}\n"
-        f"   Preco: R$ {opp.last_price:,.2f}\n"
-        f"   Variacao: {opp.change_pct:+.2f}% | Volatilidade: {opp.volatility_pct:.2f}%\n"
-        f"   Volume 24h: R$ {opp.quote_volume_24h:,.0f}\n"
-        f"   Compra/Venda topo: R$ {opp.ask_notional_top_n or 0:,.0f} / R$ {opp.bid_notional_top_n or 0:,.0f}\n"
-        f"   Slippage entrada/saida: {_format_slippage(opp.estimated_buy_slippage_bps)} / {_format_slippage(opp.estimated_sell_slippage_bps)}\n"
-        f"   Spread: {opp.spread_pct:.4f}%"
+        f"<b>{_escape_html(score_label)}</b> | Score {_escape_html(opp.score)} | {_escape_html(opp.pair)}\n"
+        f"   Exchange: {_escape_html(opp.exchange.value)}\n"
+        f"   Movimento: {_escape_html(opp.movement_type.value)}\n"
+        f"   Operavel: {_escape_html(operable_label)} | Exec: {_escape_html(f'{opp.executability_score or 0:.1f}')}\n"
+        f"   Preco: R$ {_escape_html(f'{opp.last_price:,.2f}')}\n"
+        f"   Variacao: {_escape_html(f'{opp.change_pct:+.2f}%')} | Volatilidade: {_escape_html(f'{opp.volatility_pct:.2f}%')}\n"
+        f"   Volume 24h: R$ {_escape_html(f'{opp.quote_volume_24h:,.0f}')}\n"
+        f"   Compra/Venda topo: R$ {_escape_html(f'{opp.ask_notional_top_n or 0:,.0f}')} / R$ {_escape_html(f'{opp.bid_notional_top_n or 0:,.0f}')}\n"
+        f"   Slippage entrada/saida: {_escape_html(_format_slippage(opp.estimated_buy_slippage_bps))} / {_escape_html(_format_slippage(opp.estimated_sell_slippage_bps))}\n"
+        f"   Spread: {_escape_html(f'{opp.spread_pct:.4f}%')}"
     )
 
 
@@ -99,8 +113,7 @@ async def send_telegram_alert(
 
     Uses *token* / *chat_id* when provided; falls back to env-var settings.
     """
-    effective_token = token or settings.telegram_bot_token
-    effective_chat_id = chat_id or settings.telegram_chat_id
+    effective_token, effective_chat_id = resolve_telegram_destination(token=token, chat_id=chat_id)
 
     if not effective_token or not effective_chat_id:
         logger.warning("Telegram not configured, skipping alert")
@@ -121,12 +134,12 @@ async def send_telegram_alert(
 
     top = sorted(eligible, key=lambda o: o.score, reverse=True)[:top_n]
 
-    lines = ["*Crypto Analytics - Novas Oportunidades*\n"]
+    lines = ["<b>Crypto Analytics - Novas Oportunidades</b>\n"]
     for opp in top:
         lines.append(_format_opportunity(opp))
         lines.append("")
 
-    lines.append(f"_Total de sinais candidatos: {len(opportunities)}_")
+    lines.append(f"<i>Total de sinais candidatos: {_escape_html(len(opportunities))}</i>")
     message = "\n".join(lines)
 
     try:
@@ -148,17 +161,16 @@ async def send_telegram_test_message(
     workspace_name: str = "",
     actor_username: str = "",
 ) -> bool:
-    effective_token = token or settings.telegram_bot_token
-    effective_chat_id = chat_id or settings.telegram_chat_id
+    effective_token, effective_chat_id = resolve_telegram_destination(token=token, chat_id=chat_id)
 
     timestamp = datetime.now(timezone.utc).astimezone().strftime("%d/%m/%Y %H:%M:%S %Z")
     workspace_label = workspace_name or "Default Workspace"
     actor_label = actor_username or "sistema"
     message = (
-        "*Crypto Analytics - Teste de Telegram*\n\n"
-        f"Workspace: *{workspace_label}*\n"
-        f"Executado por: *{actor_label}*\n"
-        f"Horario: `{timestamp}`\n\n"
+        "<b>Crypto Analytics - Teste de Telegram</b>\n\n"
+        f"Workspace: <b>{_escape_html(workspace_label)}</b>\n"
+        f"Executado por: <b>{_escape_html(actor_label)}</b>\n"
+        f"Horario: <code>{_escape_html(timestamp)}</code>\n\n"
         "Se esta mensagem chegou, a configuracao do bot e do chat esta funcional."
     )
 

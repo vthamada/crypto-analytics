@@ -29,7 +29,7 @@ from app.services.shared_state import (
 )
 from app.services.scan_runtime import wait_for_refresh_or_timeout
 from app.services.scanner import Scanner
-from app.services.telegram import send_telegram_alert
+from app.services.telegram import send_telegram_alert, telegram_destination_configured
 from app.services.outcome_evaluator import evaluate_pending_outcomes
 from app.services.workspace_profiles import opportunity_matches_alert_scope
 
@@ -93,8 +93,10 @@ async def run_worker() -> None:
             for workspace_id, workspace_config in workspace_configs.items():
                 if not (
                     workspace_config.telegram_enabled
-                    and workspace_config.telegram_bot_token
-                    and workspace_config.telegram_chat_id
+                    and telegram_destination_configured(
+                        token=workspace_config.telegram_bot_token,
+                        chat_id=workspace_config.telegram_chat_id,
+                    )
                 ):
                     continue
 
