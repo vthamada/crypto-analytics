@@ -206,6 +206,47 @@ class DashboardResponse(BaseModel):
     opportunities: list[Opportunity]
 
 
+class OpportunitySummary(BaseModel):
+    id: str
+    exchange: Exchange
+    pair: str
+    score: float
+    technical_score: float | None = None
+    executability_score: float | None = None
+    trade_margin_score: float | None = None
+    estimated_net_trade_edge_pct: float | None = None
+    executability_band: str | None = None
+    opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
+    interesting_signal: bool | None = None
+    operable_signal: bool | None = None
+    volatility_pct: float
+    volume_24h: float
+    quote_volume_24h: float
+    liquidity_units: float
+    bid_notional_top_n: float | None = None
+    ask_notional_top_n: float | None = None
+    total_notional_top_n: float | None = None
+    spread_pct: float
+    estimated_buy_slippage_bps: float | None = None
+    estimated_sell_slippage_bps: float | None = None
+    fillable_notional_within_slippage_cap: float | None = None
+    last_price: float
+    change_pct: float
+    movement_type: MovementType
+    movement_regime: MovementRegime | None = None
+    detected_at: datetime
+    cross_exchange_gap_pct: float = 0.0
+    cross_exchange_reference_exchange: Exchange | None = None
+    cross_exchange_reference_price: float | None = None
+    arbitrage_available: bool = False
+    historical_confidence: float = 1.0
+
+
+class DashboardSummaryResponse(BaseModel):
+    stats: DashboardStats
+    shortlist: list[OpportunitySummary]
+
+
 class HistoryRecord(BaseModel):
     id: str
     exchange: Exchange
@@ -331,12 +372,32 @@ class AvailablePairRecord(BaseModel):
     pair: str
     display_name: str
     availability: dict[str, bool]
+    normalized_symbol: str | None = None
+    base_asset: str | None = None
+    quote_asset: str | None = None
+    is_brl_pair: bool = False
+    raw_symbols: dict[str, str | None] = Field(default_factory=dict)
+    is_active: dict[str, bool] = Field(default_factory=dict)
+    is_tradable: dict[str, bool] = Field(default_factory=dict)
+    status: dict[str, str] = Field(default_factory=dict)
+    error_message: dict[str, str | None] = Field(default_factory=dict)
+
+
+class AvailablePairProviderStatus(BaseModel):
+    exchange: Exchange
+    returned_pairs: int
+    brl_pairs: int
+    status: Literal["ok", "empty", "error"]
+    checked_at: datetime
+    error_message: str | None = None
+    examples: list[str] = Field(default_factory=list)
 
 
 class AvailablePairsResponse(BaseModel):
     generated_at: datetime
     expires_at: datetime
     pairs: list[AvailablePairRecord]
+    provider_status: list[AvailablePairProviderStatus] = Field(default_factory=list)
 
 
 class InviteRecordResponse(BaseModel):

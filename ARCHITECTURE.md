@@ -62,7 +62,9 @@ O worker:
 
 - carrega configuracao agregada dos workspaces
 - instancia providers por exchange
-- coleta `ticker`, `order_book` e `klines`
+- faz triagem leve por `ticker`/volume/movimento antes de chamadas caras
+- usa temperatura em memoria e cooldown por provider/par para reduzir chamadas repetidas em pares frios ou problemáticos
+- coleta `order_book` e `klines` somente para candidatos promovidos ao estagio profundo
 - aplica filtros, calcula score tecnico e camada de executabilidade
 - enriquece arbitragem cross-exchange
 - classifica o sinal como `interesting_signal` e `operable_signal`
@@ -103,6 +105,7 @@ Com a camada de executabilidade atual:
 No frontend atual:
 
 - a leitura continua funcionando com payload legado, sem exigir os novos campos
+- o dashboard usa payload resumido por padrao e busca detalhe completo sob demanda ao abrir o modal
 - quando `executability_score` existe, o dashboard passa a explicar o sinal com badges, ranking por operabilidade e detalhe operacional
 
 ## Modelo de dados principal
@@ -143,6 +146,11 @@ Campos operacionais recentes relevantes em `Opportunity` e nas camadas persistid
 
 - separacao entre API e worker no fluxo padrao do repositorio
 - `technical_score` neutro e versionado por `score_version`
+- scanner em dois estagios para monitorar mercado BRL amplo sem consultar book/candles de todos os pares
+- temperatura/cooldown em memoria como primeira etapa incremental antes de persistir scheduler por par
+- telemetria agregada de triagem em `/api/health`, sem persistir descartes detalhados de todos os pares
+- endpoints leves (`/api/dashboard/summary`, `/api/opportunities/active`, `/api/opportunities/shortlist`) para reduzir payload em telas operacionais
+- catalogo de pares observavel com status por provider em `/api/pairs/available`
 - fallback da API para snapshots compartilhados
 - WebSocket isolado por workspace
 - backend assincrono para IO externo

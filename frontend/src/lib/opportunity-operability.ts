@@ -1,4 +1,4 @@
-import type { Opportunity } from "./types";
+import type { Opportunity, OpportunitySummary } from "./types";
 
 export type OpportunitySortMode =
   | "score"
@@ -17,21 +17,23 @@ export interface OpportunityReason {
   tone: ReasonTone;
 }
 
+export type OpportunityListItem = Opportunity | OpportunitySummary;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-export function getTechnicalScore(opportunity: Opportunity): number {
+export function getTechnicalScore(opportunity: OpportunityListItem): number {
   return opportunity.technical_score ?? opportunity.score;
 }
 
-export function getExecutabilityScore(opportunity: Opportunity): number | null {
+export function getExecutabilityScore(opportunity: OpportunityListItem): number | null {
   return typeof opportunity.executability_score === "number"
     ? opportunity.executability_score
     : null;
 }
 
-export function hasExecutability(opportunity: Opportunity): boolean {
+export function hasExecutability(opportunity: OpportunityListItem): boolean {
   return (
     getExecutabilityScore(opportunity) !== null ||
     opportunity.total_notional_top_n != null ||
@@ -41,7 +43,7 @@ export function hasExecutability(opportunity: Opportunity): boolean {
   );
 }
 
-export function getExecutabilityBand(opportunity: Opportunity): string | null {
+export function getExecutabilityBand(opportunity: OpportunityListItem): string | null {
   if (opportunity.executability_band) {
     return opportunity.executability_band;
   }
@@ -55,7 +57,7 @@ export function getExecutabilityBand(opportunity: Opportunity): string | null {
   return "poor";
 }
 
-export function getExecutabilityBandLabel(opportunity: Opportunity): string {
+export function getExecutabilityBandLabel(opportunity: OpportunityListItem): string {
   const band = getExecutabilityBand(opportunity);
   switch (band) {
     case "strong":
@@ -71,15 +73,15 @@ export function getExecutabilityBandLabel(opportunity: Opportunity): string {
   }
 }
 
-export function isInterestingSignal(opportunity: Opportunity): boolean {
+export function isInterestingSignal(opportunity: OpportunityListItem): boolean {
   return opportunity.interesting_signal ?? true;
 }
 
-export function isOperableSignal(opportunity: Opportunity): boolean {
+export function isOperableSignal(opportunity: OpportunityListItem): boolean {
   return opportunity.operable_signal ?? false;
 }
 
-export function getSortValue(opportunity: Opportunity, sortBy: OpportunitySortMode): number {
+export function getSortValue(opportunity: OpportunityListItem, sortBy: OpportunitySortMode): number {
   switch (sortBy) {
     case "executability":
       return getExecutabilityScore(opportunity) ?? -1;
@@ -131,14 +133,14 @@ export function formatBps(value: number | null | undefined): string {
   return `${value.toFixed(digits)} bps`;
 }
 
-export function formatNotionalOrFallback(opportunity: Opportunity): string {
+export function formatNotionalOrFallback(opportunity: OpportunityListItem): string {
   if (opportunity.total_notional_top_n != null) {
     return formatCurrencyCompact(opportunity.total_notional_top_n);
   }
   return `${opportunity.liquidity_units.toLocaleString("pt-BR")} un.`;
 }
 
-export function getOperabilityReasons(opportunity: Opportunity): OpportunityReason[] {
+export function getOperabilityReasons(opportunity: OpportunityListItem): OpportunityReason[] {
   const reasons: OpportunityReason[] = [];
 
   if (isOperableSignal(opportunity)) {
@@ -224,7 +226,7 @@ export function getReasonToneClasses(tone: ReasonTone): string {
   }
 }
 
-export function getExecutabilityHighlight(opportunity: Opportunity): string {
+export function getExecutabilityHighlight(opportunity: OpportunityListItem): string {
   const score = getExecutabilityScore(opportunity);
   if (score === null) {
     return "border-border bg-muted/30 text-muted-foreground";
@@ -235,7 +237,7 @@ export function getExecutabilityHighlight(opportunity: Opportunity): string {
   return "border-red-500/20 bg-red-500/10 text-red-500";
 }
 
-export function getOperabilityFillRatio(opportunity: Opportunity, baselineOrderNotional = 1000): number | null {
+export function getOperabilityFillRatio(opportunity: OpportunityListItem, baselineOrderNotional = 1000): number | null {
   if (opportunity.fillable_notional_within_slippage_cap == null) {
     return null;
   }

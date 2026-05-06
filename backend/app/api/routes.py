@@ -13,6 +13,7 @@ from app.models.schemas import (
     AppConfig,
     ConfigResponse,
     DashboardResponse,
+    DashboardSummaryResponse,
     DashboardStats,
     ExchangeCredentialValidationResponse,
     Exchange,
@@ -21,6 +22,7 @@ from app.models.schemas import (
     InvitePreviewResponse,
     InviteRecordResponse,
     Opportunity,
+    OpportunitySummary,
     ScoreWeights,
     UserCreateResponse,
     UserRecordResponse,
@@ -700,6 +702,67 @@ async def _effective_opportunities() -> list[Opportunity]:
     return result
 
 
+def _opportunity_sort_value(opportunity: Opportunity, sort_by: str) -> float:
+    sort_keys = {
+        "score": lambda item: item.score,
+        "executability": lambda item: item.executability_score if item.executability_score is not None else -1,
+        "trade_margin": lambda item: item.trade_margin_score if item.trade_margin_score is not None else -1,
+        "net_edge": lambda item: item.estimated_net_trade_edge_pct if item.estimated_net_trade_edge_pct is not None else -999,
+        "gap": lambda item: item.cross_exchange_gap_pct,
+        "volatility": lambda item: item.volatility_pct,
+        "volume": lambda item: item.quote_volume_24h,
+        "spread": lambda item: item.spread_pct,
+        "price": lambda item: item.last_price,
+    }
+    return sort_keys.get(sort_by, sort_keys["score"])(opportunity)
+
+
+def _sort_opportunities(opportunities: list[Opportunity], sort_by: str = "score") -> list[Opportunity]:
+    return sorted(
+        opportunities,
+        key=lambda opportunity: _opportunity_sort_value(opportunity, sort_by),
+        reverse=(sort_by != "spread"),
+    )
+
+
+def _summarize_opportunity(opportunity: Opportunity) -> OpportunitySummary:
+    return OpportunitySummary(
+        id=opportunity.id,
+        exchange=opportunity.exchange,
+        pair=opportunity.pair,
+        score=opportunity.score,
+        technical_score=opportunity.technical_score,
+        executability_score=opportunity.executability_score,
+        executability_band=opportunity.executability_band,
+        trade_margin_score=opportunity.trade_margin_score,
+        estimated_net_trade_edge_pct=opportunity.estimated_net_trade_edge_pct,
+        opportunity_type=opportunity.opportunity_type,
+        interesting_signal=opportunity.interesting_signal,
+        operable_signal=opportunity.operable_signal,
+        volatility_pct=opportunity.volatility_pct,
+        volume_24h=opportunity.volume_24h,
+        quote_volume_24h=opportunity.quote_volume_24h,
+        liquidity_units=opportunity.liquidity_units,
+        bid_notional_top_n=opportunity.bid_notional_top_n,
+        ask_notional_top_n=opportunity.ask_notional_top_n,
+        total_notional_top_n=opportunity.total_notional_top_n,
+        spread_pct=opportunity.spread_pct,
+        estimated_buy_slippage_bps=opportunity.estimated_buy_slippage_bps,
+        estimated_sell_slippage_bps=opportunity.estimated_sell_slippage_bps,
+        fillable_notional_within_slippage_cap=opportunity.fillable_notional_within_slippage_cap,
+        last_price=opportunity.last_price,
+        change_pct=opportunity.change_pct,
+        movement_type=opportunity.movement_type,
+        movement_regime=opportunity.movement_regime,
+        detected_at=opportunity.detected_at,
+        cross_exchange_gap_pct=opportunity.cross_exchange_gap_pct,
+        cross_exchange_reference_exchange=opportunity.cross_exchange_reference_exchange,
+        cross_exchange_reference_price=opportunity.cross_exchange_reference_price,
+        arbitrage_available=opportunity.arbitrage_available,
+        historical_confidence=opportunity.historical_confidence,
+    )
+
+
 @router.get("/dashboard/stats", response_model=DashboardStats)
 async def dashboard_stats(
     x_workspace_id: str | None = Header(default=None),
@@ -727,19 +790,7 @@ async def dashboard(
     base_opportunities = await _effective_opportunities()
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
     visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
-    sort_keys = {
-        "score": lambda opportunity: opportunity.score,
-        "executability": lambda opportunity: opportunity.executability_score if opportunity.executability_score is not None else -1,
-        "trade_margin": lambda opportunity: opportunity.trade_margin_score if opportunity.trade_margin_score is not None else -1,
-        "net_edge": lambda opportunity: opportunity.estimated_net_trade_edge_pct if opportunity.estimated_net_trade_edge_pct is not None else -999,
-        "gap": lambda opportunity: opportunity.cross_exchange_gap_pct,
-        "volatility": lambda opportunity: opportunity.volatility_pct,
-        "volume": lambda opportunity: opportunity.quote_volume_24h,
-        "spread": lambda opportunity: opportunity.spread_pct,
-        "price": lambda opportunity: opportunity.last_price,
-    }
-    key_fn = sort_keys.get(sort_by, sort_keys["score"])
-    visible_opportunities.sort(key=key_fn, reverse=(sort_by != "spread"))
+    visible_opportunities = _sort_opportunities(visible_opportunities, sort_by)
     return DashboardResponse(
         stats=build_dashboard_stats(
             opportunities=visible_opportunities,
@@ -747,6 +798,37 @@ async def dashboard(
             last_scan=_last_scan,
         ),
         opportunities=visible_opportunities[:limit],
+    )
+
+
+@router.get("/dashboard/summary", response_model=DashboardSummaryResponse)
+async def dashboard_summary(
+    limit: int = Query(default=12, le=50),
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    _, config = await resolve_workspace_context(session_info, x_workspace_id)
+    base_opportunities = await _effective_opportunities()
+    opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
+    visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
+    shortlist = _sort_opportunities(
+        [
+            opportunity
+            for opportunity in visible_opportunities
+            if opportunity.opportunity_type in {"trade", "hold"} or opportunity.operable_signal
+        ],
+        "executability",
+    )
+    if not shortlist:
+        shortlist = _sort_opportunities(visible_opportunities, "score")
+
+    return DashboardSummaryResponse(
+        stats=build_dashboard_stats(
+            opportunities=visible_opportunities,
+            monitored_pairs=len(config.enabled_pairs),
+            last_scan=_last_scan,
+        ),
+        shortlist=[_summarize_opportunity(opportunity) for opportunity in shortlist[:limit]],
     )
 
 
@@ -782,20 +864,41 @@ async def list_opportunities(
     if operable_only:
         visible_opportunities = [opportunity for opportunity in visible_opportunities if opportunity.operable_signal]
 
-    sort_keys = {
-        "score": lambda opportunity: opportunity.score,
-        "executability": lambda opportunity: opportunity.executability_score if opportunity.executability_score is not None else -1,
-        "trade_margin": lambda opportunity: opportunity.trade_margin_score if opportunity.trade_margin_score is not None else -1,
-        "net_edge": lambda opportunity: opportunity.estimated_net_trade_edge_pct if opportunity.estimated_net_trade_edge_pct is not None else -999,
-        "gap": lambda opportunity: opportunity.cross_exchange_gap_pct,
-        "volatility": lambda opportunity: opportunity.volatility_pct,
-        "volume": lambda opportunity: opportunity.quote_volume_24h,
-        "spread": lambda opportunity: opportunity.spread_pct,
-        "price": lambda opportunity: opportunity.last_price,
-    }
-    key_fn = sort_keys.get(sort_by, sort_keys["score"])
-    visible_opportunities.sort(key=key_fn, reverse=(sort_by != "spread"))
+    visible_opportunities = _sort_opportunities(visible_opportunities, sort_by)
     return visible_opportunities[:limit]
+
+
+@router.get("/opportunities/active", response_model=list[OpportunitySummary])
+async def active_opportunities(
+    limit: int = Query(default=20, le=100),
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    _, config = await resolve_workspace_context(session_info, x_workspace_id)
+    base_opportunities = await _effective_opportunities()
+    opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
+    visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
+    visible_opportunities = _sort_opportunities(visible_opportunities, "score")
+    return [_summarize_opportunity(opportunity) for opportunity in visible_opportunities[:limit]]
+
+
+@router.get("/opportunities/shortlist", response_model=list[OpportunitySummary])
+async def opportunities_shortlist(
+    limit: int = Query(default=10, le=50),
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    _, config = await resolve_workspace_context(session_info, x_workspace_id)
+    base_opportunities = await _effective_opportunities()
+    opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
+    visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
+    shortlisted = [
+        opportunity
+        for opportunity in visible_opportunities
+        if opportunity.opportunity_type in {"trade", "hold"} or opportunity.operable_signal
+    ]
+    shortlisted = _sort_opportunities(shortlisted, "executability")
+    return [_summarize_opportunity(opportunity) for opportunity in shortlisted[:limit]]
 
 
 @router.get("/opportunities/{opp_id}", response_model=Opportunity | None)

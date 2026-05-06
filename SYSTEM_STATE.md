@@ -155,6 +155,8 @@ Esse catalogo:
 - normaliza os pares em formato interno
 - guarda cache por 1 hora
 - expoe esse estado em `/api/pairs/available`
+- informa status por provider, quantidade de pares retornados, pares BRL detectados, exemplos e erro quando houver falha
+- preserva metadados por par (`base_asset`, `quote_asset`, `normalized_symbol`, disponibilidade, tradabilidade e status por exchange)
 
 Esse passo evita tentar escanear um par em uma exchange que nao o suporta.
 
@@ -162,17 +164,61 @@ Se o catalogo falha, o sistema degrada para um comportamento mais permissivo:
 
 - usa todos os pares habilitados para todas as exchanges ativas
 
-### Etapa C. Execucao do scan por exchange e par
+### Etapa C. Execucao do scan em dois estagios
 
 O `Scanner` instancia um provider para cada exchange habilitada.
 
-Para cada combinacao valida de `exchange + pair`, ele executa em paralelo:
+Para cada combinacao valida de `exchange + pair`, ele primeiro executa um scan leve usando somente:
 
-- `get_ticker(pair)`
+- `get_light_ticker(pair)` / `get_ticker(pair)`
+- volume 24h
+- variacao/range 24h
+- preco atual
+
+Pares sem preco valido, sem volume minimo ou sem movimento preliminar suficiente sao descartados antes de chamadas caras.
+
+Cada par tambem recebe uma temperatura em memoria:
+
+- `hot`: reavaliado em todo ciclo
+- `warm`: reavaliado em janela intermediaria
+- `cold`: reavaliado com menor frequencia
+
+Falhas de provider/par geram cooldown exponencial em memoria para evitar repetir chamadas que tendem a falhar no ciclo seguinte.
+
+Depois da triagem, o scanner ordena os candidatos por score preliminar e limita a analise profunda por exchange. Somente esses candidatos executam:
+
 - `get_order_book(pair)`
 - `get_klines(pair, interval="5m", limit=50)`
 
-Se qualquer uma dessas chamadas falha para aquele par, o sinal e descartado naquele ciclo.
+Se qualquer chamada profunda falha para aquele par, o sinal e descartado naquele ciclo.
+
+### Etapa C.1. Entrega operacional resumida
+
+Para reduzir payload e egress, a tela principal do dashboard consome por padrao `/api/dashboard/summary`.
+
+Esse endpoint entrega:
+
+- estatisticas consolidadas
+- shortlist operacional com campos leves suficientes para ranking e cards
+
+O detalhe completo da oportunidade e carregado sob demanda por `/api/opportunities/{id}` apenas quando o usuario abre o modal de um sinal.
+
+### Etapa C.2. Telemetria de custo do scan
+
+O scanner gera uma telemetria agregada do ciclo atual sem persistir detalhes de pares descartados.
+
+Essa telemetria inclui:
+
+- total de pares considerados
+- quantidade de chamadas leves executadas
+- pares pulados por temperatura ou cooldown
+- descartes leves por motivo
+- candidatos promovidos para analise profunda
+- descartes profundos por motivo
+- oportunidades finais geradas
+- distribuicao atual de temperatura (`hot`, `warm`, `cold`)
+
+A API expoe esse resumo em `/api/health` dentro de `scanner.last_scan_diagnostics`.
 
 ### Etapa D. Filtros obrigatorios
 

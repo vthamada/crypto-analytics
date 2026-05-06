@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { Opportunity } from "@/lib/types";
 import {
   formatBps,
   formatCurrency,
@@ -38,14 +37,15 @@ import {
   hasExecutability,
   isInterestingSignal,
   isOperableSignal,
+  type OpportunityListItem,
   type OpportunitySortMode,
 } from "@/lib/opportunity-operability";
 import { cn } from "@/lib/utils";
 
 interface OpportunitiesTableProps {
-  opportunities: Opportunity[];
+  opportunities: OpportunityListItem[];
   loading?: boolean;
-  onSelect?: (opportunity: Opportunity) => void;
+  onSelect?: (opportunity: OpportunityListItem) => void;
 }
 
 function scoreColor(score: number): string {

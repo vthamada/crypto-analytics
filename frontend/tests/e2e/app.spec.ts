@@ -96,7 +96,7 @@ test("dashboard aplica atualizacao em tempo real via websocket mockado", async (
   });
 
   await expect(page.locator('[data-testid="opportunity-opp-live"]:visible')).toBeVisible();
-  await expect(page.getByTestId("kpi-value-opportunities")).toHaveText("3");
+  await expect(page.getByTestId("kpi-value-opportunities")).toHaveText("1");
 });
 
 test("dashboard continua funcional com payload legado sem executabilidade", async ({ page }) => {
@@ -325,8 +325,22 @@ async function fulfillMockApi(route: Route, state: MockApiState) {
     return;
   }
 
+  if (method === "GET" && path === "/dashboard/summary") {
+    await json(route, {
+      stats: state.stats,
+      shortlist: state.opportunities,
+    });
+    return;
+  }
+
   if (method === "GET" && path === "/opportunities") {
     await json(route, state.opportunities);
+    return;
+  }
+
+  if (method === "GET" && path.startsWith("/opportunities/")) {
+    const opportunityId = path.split("/").at(-1);
+    await json(route, state.opportunities.find((opportunity) => opportunity.id === opportunityId) ?? null);
     return;
   }
 
@@ -347,7 +361,7 @@ async function fulfillMockApi(route: Route, state: MockApiState) {
     return;
   }
 
-  if (method === "GET" && path === "/history") {
+  if (method === "GET" && (path === "/history" || path === "/history/summary")) {
     if (state.historyErrorMessage) {
       await error(route, 503, state.historyErrorMessage);
       return;

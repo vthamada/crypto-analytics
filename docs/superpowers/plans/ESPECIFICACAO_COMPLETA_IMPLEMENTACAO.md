@@ -892,3 +892,563 @@ A correção será considerada adequada quando:
 - o sistema reduzir substancialmente o consumo de egress
 - o uso do Supabase se torne sustentável para testes e evolução do produto
 
+---
+
+## 34. Estratégia de monitoramento amplo com menor custo possível
+
+### 34.1 Objetivo
+
+O sistema deve conseguir monitorar o mercado BRL de forma ampla sem explodir custo de:
+
+- chamadas às exchanges
+- CPU/memória no backend
+- persistência no banco
+- egress do Supabase
+- payload entregue ao frontend
+- alertas desnecessários
+
+A regra central de custo deve ser:
+
+> **Escanear amplo, processar barato, persistir pouco e entregar apenas shortlist qualificada.**
+
+Isso significa que o backend pode observar muitos pares BRL, mas o banco, o frontend e o Telegram só devem receber dados ricos quando houver sinal qualificado.
+
+---
+
+## 35. Scanner em dois estágios
+
+### 35.1 Estágio 1 — Scan leve de mercado
+
+O Estágio 1 deve ser barato e aplicado ao universo amplo de pares BRL.
+
+Para todos os pares BRL relevantes, o sistema deve buscar apenas os dados mínimos necessários para triagem inicial, preferencialmente:
+
+- preço atual
+- ticker
+- volume 24h
+- variação 24h
+- melhor compra/venda, se disponível de forma barata
+- spread simples, se disponível
+
+O objetivo é eliminar rapidamente a maioria dos pares que não têm potencial operacional.
+
+### 35.2 Dados que não devem ser buscados para todos os pares no Estágio 1
+
+No Estágio 1, o sistema **não deve** consultar de forma pesada para todos os pares:
+
+- order book completo
+- candles longos
+- histórico extenso
+- trades recentes em alta profundidade
+- slippage detalhado
+- análise de margem operacional detalhada
+
+Esses dados devem ser reservados para candidatos que passaram pela triagem leve.
+
+### 35.3 Filtros baratos de descarte
+
+O Estágio 1 deve descartar rapidamente pares com:
+
+- volume diário abaixo do mínimo
+- variação irrelevante
+- spread simples muito alto
+- ausência de dados confiáveis
+- par inativo
+- baixa liquidez aparente
+- erro recorrente de provider
+
+### 35.4 Resultado do Estágio 1
+
+O Estágio 1 deve produzir uma lista reduzida de candidatos.
+
+Essa lista deve ser pequena o suficiente para permitir análise completa no Estágio 2 sem custo excessivo.
+
+---
+
+## 36. Estágio 2 — Análise completa apenas dos candidatos
+
+### 36.1 Objetivo
+
+O Estágio 2 deve rodar somente para os pares que passaram pela triagem leve.
+
+Para esses candidatos, o sistema deve buscar e calcular:
+
+- order book
+- candles/klines
+- trades recentes, quando necessário
+- slippage estimado
+- margem operacional
+- repetição
+- continuidade
+- classificação trade/hold/observe/avoid
+- score de força
+- score de executabilidade
+- score de margem
+- score operacional final
+
+### 36.2 Regra de custo
+
+A análise cara deve ser feita apenas para:
+
+- pares com volume suficiente
+- pares com movimento relevante
+- pares com liquidez mínima
+- pares com chance real de virarem oportunidade
+
+### 36.3 Critério de promoção
+
+Um par deve ser promovido do Estágio 1 para o Estágio 2 quando passar em critérios mínimos como:
+
+- volume 24h acima do mínimo configurado
+- variação/volatilidade acima do limiar leve
+- spread aceitável
+- presença de dados válidos
+- não estar em blacklist
+- não ter falhas recentes recorrentes no provider
+
+---
+
+## 37. Frequência dinâmica de scan
+
+### 37.1 Objetivo
+
+O sistema não deve escanear todos os pares na mesma frequência.
+
+A frequência deve variar conforme o estado operacional do par.
+
+### 37.2 Categorias sugeridas
+
+#### Pares frios
+
+Pares com pouco volume, pouca variação ou baixa atividade.
+
+Frequência sugerida:
+
+- a cada 5 a 10 minutos
+
+#### Pares mornos
+
+Pares com algum volume, alguma variação ou sinais leves de atividade.
+
+Frequência sugerida:
+
+- a cada 1 a 2 minutos
+
+#### Pares quentes
+
+Pares que passaram nos filtros e podem virar oportunidade operacional.
+
+Frequência sugerida:
+
+- a cada 15 a 30 segundos
+
+### 37.3 Requisito
+
+O agente deve implementar ou propor uma estratégia incremental de frequência dinâmica, evitando que todos os pares BRL sejam analisados profundamente em todo ciclo.
+
+---
+
+## 38. Persistência seletiva
+
+### 38.1 Regra principal
+
+O sistema não deve persistir dados detalhados de todos os pares em todos os ciclos.
+
+### 38.2 Não persistir por padrão
+
+Evitar persistir:
+
+- ticker de todos os pares a cada ciclo
+- order book completo de todos os pares
+- candles completos de todos os pares
+- snapshots brutos de todo o mercado
+- pares descartados com detalhe excessivo
+
+### 38.3 Persistir apenas quando houver valor
+
+Persistir preferencialmente:
+
+- oportunidades qualificadas
+- top candidatos do ciclo
+- sinais classificados como trade/hold/observe
+- outcomes de sinais relevantes
+- agregados por janela
+- estatísticas resumidas de descarte
+
+### 38.4 Dados de pares descartados
+
+Para pares descartados, se necessário, armazenar apenas:
+
+- contadores agregados
+- motivo de descarte
+- último estado resumido
+- amostras ocasionais para debug
+- métricas agregadas por exchange
+
+### 38.5 Camadas de persistência recomendadas
+
+#### Nível A — Memória/cache
+
+Para dados temporários de todos os pares.
+
+Retenção:
+
+- segundos a minutos
+
+Exemplos:
+
+- ticker atual
+- volume atual
+- score preliminar
+- motivo de descarte
+
+#### Nível B — Banco resumido
+
+Para candidatos bons.
+
+Retenção:
+
+- dias a semanas
+
+Exemplos:
+
+- par
+- exchange
+- scores
+- volume
+- liquidez
+- margem
+- tipo de oportunidade
+
+#### Nível C — Banco detalhado
+
+Somente para sinais realmente relevantes.
+
+Retenção:
+
+- maior
+
+Exemplos:
+
+- book snapshot resumido
+- cálculo de slippage
+- outcome posterior
+- histórico de performance
+
+---
+
+## 39. Entrega seletiva para frontend e Telegram
+
+### 39.1 Regra
+
+O sistema deve ser amplo no backend e seletivo na entrega.
+
+O frontend e o Telegram não devem receber dataset bruto do mercado inteiro.
+
+### 39.2 Frontend
+
+O frontend deve receber:
+
+- shortlist operacional
+- top oportunidades
+- resumo do mercado BRL
+- sinais ativos qualificados
+- detalhes apenas sob demanda
+
+Evitar:
+
+- listas completas sem necessidade
+- histórico completo
+- order book bruto de todos os pares
+- analytics automáticos pesados
+- payloads grandes em polling
+
+### 39.3 Telegram
+
+O Telegram deve receber apenas:
+
+- oportunidades de alta utilidade
+- sinais classificados como trade ou hold relevantes
+- no máximo alertas realmente úteis
+- resumos compactos quando fizer sentido
+
+O sistema deve evitar alertas de todo sinal `observe`.
+
+### 39.4 Regra operacional
+
+> **Monitorar amplo, entregar seletivo.**
+
+---
+
+## 40. Cache obrigatório
+
+### 40.1 Objetivo
+
+Reduzir chamadas repetidas, CPU, tempo de ciclo, consultas ao banco e egress.
+
+### 40.2 Itens que devem ser cacheados
+
+- catálogo de pares por exchange
+- status de disponibilidade de pares
+- ticker recente
+- métricas preliminares por par
+- dashboard summary
+- analytics agregados
+- resultados de filtros leves
+- erros recentes de provider
+
+### 40.3 TTL sugerido
+
+- catálogo de pares: 1h a 6h
+- pares frios: 5min
+- pares mornos: 1min
+- pares quentes: 15s a 30s
+- analytics: 5min a 15min
+- erros de provider/par: cooldown curto para evitar repetir falhas
+
+---
+
+## 41. Endpoints recomendados para baixo egress
+
+### 41.1 O frontend deve consumir endpoints resumidos
+
+Exemplos:
+
+- `/dashboard/summary`
+- `/market/brl/top`
+- `/market/brl/summary`
+- `/opportunities/active`
+- `/opportunities/shortlist`
+- `/history/summary`
+- `/opportunities/{id}`
+
+### 41.2 Regra
+
+Cada endpoint deve retornar apenas os dados necessários para a tela.
+
+### 41.3 Detalhes sob demanda
+
+Dados pesados, como book detalhado, analytics longos e histórico profundo, devem ser carregados somente quando o usuário pedir explicitamente.
+
+---
+
+## 42. Regras técnicas de menor custo para o agente
+
+O agente deve seguir estas regras:
+
+1. Não consultar order book e klines de todos os pares em todo ciclo.
+2. Fazer triagem barata antes de análise completa.
+3. Calcular margem operacional e slippage somente para candidatos.
+4. Não persistir pares descartados em detalhe.
+5. Entregar shortlist ao frontend, não dataset bruto.
+6. Manter histórico sempre paginado.
+7. Carregar analytics sob demanda.
+8. Enviar alertas seletivos.
+9. Cachear catálogo de pares e resultados repetidos.
+10. Implementar frequência dinâmica ou propor plano incremental para isso.
+11. Reduzir consultas diretas ao Supabase pelo frontend.
+12. Evitar Realtime com payload grande.
+
+---
+
+## 43. Investigação obrigatória: NovaDAX não retornando moedas
+
+### 43.1 Problema observado
+
+Foi observado que a NovaDAX pode não estar retornando corretamente as moedas/pares esperados no sistema.
+
+O agente deve investigar esse problema como prioridade, pois ele pode comprometer a descoberta ampla do mercado BRL.
+
+### 43.2 Objetivo da investigação
+
+Determinar se o problema está em:
+
+- endpoint incorreto
+- parsing incorreto da resposta
+- diferença de nomenclatura de símbolos
+- cache desatualizado
+- filtro interno removendo pares válidos
+- erro silencioso no provider
+- falha de autenticação, rate limit ou bloqueio
+- inconsistência entre catálogo da exchange e pares usados pelo scanner
+- falha de normalização entre formatos como `SOL_BRL`, `SOLBRL`, `SOL/BRL`
+
+### 43.3 Verificações obrigatórias
+
+O agente deve verificar:
+
+- qual endpoint da NovaDAX está sendo usado para listar símbolos/pares
+- se a resposta bruta da NovaDAX contém os pares esperados
+- se o parser está extraindo corretamente base/quote
+- se pares BRL estão sendo filtrados por engano
+- se há cache persistindo uma lista vazia ou incompleta
+- se existe diferença entre pares ativos, pausados, listados e negociáveis
+- se o scanner está tentando consultar símbolos no formato aceito pelo provider
+- se há logs claros quando o catálogo volta vazio
+- se há fallback quando a listagem dinâmica falha
+
+### 43.4 Logs obrigatórios
+
+Adicionar logs estruturados para:
+
+- quantidade de pares retornados pela NovaDAX
+- quantidade de pares BRL filtrados
+- exemplos dos primeiros pares retornados
+- pares descartados e motivo
+- erros de parsing
+- erros HTTP
+- status do cache do catálogo
+
+### 43.5 Critério de aceitação
+
+A correção será considerada adequada quando:
+
+- a NovaDAX retornar lista válida de pares
+- pares BRL existentes aparecerem no catálogo interno
+- o scanner conseguir avaliar pares BRL da NovaDAX
+- falhas de catálogo forem visíveis em logs
+- o sistema não falhar silenciosamente quando a NovaDAX não retornar dados
+
+---
+
+## 44. Investigação obrigatória: pares existentes não encontrados nas exchanges
+
+### 44.1 Problema observado
+
+Foi observado que algumas moedas/pares parecem existir nas exchanges, mas o sistema não os encontra ou não os disponibiliza para monitoramento.
+
+### 44.2 Objetivo da investigação
+
+O agente deve investigar por que pares existentes não aparecem no sistema.
+
+Possíveis causas:
+
+- símbolo está em formato diferente do esperado
+- par existe visualmente na interface da exchange, mas não está disponível na API pública usada
+- par está listado, mas sem negociação ativa
+- par usa outro quote além de BRL
+- par está com status pausado, suspenso ou somente para conversão
+- provider não implementa endpoint de catálogo completo
+- catálogo está hardcoded ou incompleto
+- cache está desatualizado
+- filtro BRL está rígido demais
+- normalização está descartando pares válidos
+- o par existe em uma exchange, mas não em outra
+- a exchange usa nomes comerciais diferentes do símbolo de API
+
+### 44.3 Requisitos de normalização de símbolos
+
+O sistema deve normalizar símbolos entre formatos diferentes.
+
+Exemplos:
+
+- `SOL_BRL`
+- `SOLBRL`
+- `SOL/BRL`
+- `sol-brl`
+- `WBTC_BRL`
+- `WBTCBRL`
+
+A normalização deve preservar:
+
+- símbolo original da exchange
+- símbolo normalizado interno
+- base asset
+- quote asset
+- exchange
+
+### 44.4 Modelo recomendado para catálogo de pares
+
+Criar ou revisar estrutura de catálogo com campos como:
+
+- `exchange`
+- `raw_symbol`
+- `normalized_symbol`
+- `base_asset`
+- `quote_asset`
+- `is_brl_pair`
+- `is_active`
+- `is_tradable`
+- `source`
+- `last_seen_at`
+- `last_checked_at`
+- `status`
+- `error_message`
+
+### 44.5 Requisitos de UI
+
+O frontend deve ajudar a diagnosticar problemas de pares.
+
+Deve ser possível ver:
+
+- pares disponíveis por exchange
+- pares BRL detectados
+- pares ativos/inativos
+- data da última atualização do catálogo
+- botão para refresh forçado
+- mensagem quando um par buscado não for encontrado
+- motivo provável para ausência do par
+
+### 44.6 Fallbacks
+
+Se a listagem dinâmica falhar, o sistema deve ter fallback seguro:
+
+- usar último catálogo válido em cache
+- permitir adição manual de par
+- marcar par manual como pendente de validação
+- testar endpoint do par individualmente
+- exibir erro claro se o par não for consultável
+
+### 44.7 Critério de aceitação
+
+A correção será considerada adequada quando:
+
+- pares existentes nas exchanges forem encontrados ou houver motivo claro para não aparecerem
+- símbolos forem normalizados corretamente
+- o usuário conseguir forçar atualização do catálogo
+- o sistema mostrar se o par existe, está ativo e é negociável
+- não houver falha silenciosa de catálogo
+
+---
+
+## 45. Critérios de aceitação adicionais de custo e catálogo
+
+O sistema estará adequado quando:
+
+- monitorar mercado BRL amplo sem analisar tudo profundamente em todo ciclo
+- usar scan leve antes de análise completa
+- persistir apenas sinais qualificados e dados agregados
+- reduzir egress do Supabase
+- entregar apenas shortlist ao frontend e Telegram
+- permitir diagnóstico claro de pares por exchange
+- corrigir ou explicar por que a NovaDAX não retorna certos pares
+- encontrar pares existentes ou mostrar motivo técnico para ausência
+- manter custo operacional controlado mesmo com universo BRL amplo
+
+---
+
+## 46. Status de implementacao - Release I parcial
+
+Implementado em 2026-05-06:
+
+- scan leve por `ticker` antes de buscar `order_book` e `klines`
+- promocao de candidatos por exchange antes da analise profunda
+- descarte barato por preco invalido, volume abaixo do minimo e movimento preliminar insuficiente
+- temperatura de scan em memoria entre pares `hot`, `warm` e `cold`
+- cooldown exponencial em memoria para falhas recorrentes de provider/par
+- telemetria agregada de triagem em `/api/health`, sem persistir descartes detalhados de todos os pares
+- endpoint `GET /api/dashboard/summary` com stats e shortlist operacional em payload reduzido
+- endpoints `GET /api/opportunities/active` e `GET /api/opportunities/shortlist`
+- cliente frontend tipado para consumir endpoints resumidos
+- dashboard principal consumindo payload resumido por padrao
+- detalhe completo do sinal carregado sob demanda por `GET /api/opportunities/{id}`
+- catalogo de pares com metadados de normalizacao e diagnostico por provider
+- UI de configuracoes exibindo status do catalogo por exchange e status tecnico por par
+
+Ainda pendente para completar a Release I:
+
+- cooldown persistente de erros por provider/par
+- persistencia opcional da frequencia dinamica entre pares frios, mornos e quentes
+- persistencia seletiva de descartes apenas como agregados
+- migracao opcional para catalogo persistido em banco caso o cache em memoria nao seja suficiente
+- expandir o uso dos endpoints resumidos em outras telas, quando aplicavel

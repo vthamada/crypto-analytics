@@ -2065,6 +2065,51 @@ export default function SettingsPage() {
                 </div>
               ) : null}
 
+              {availablePairsCatalog?.provider_status?.length ? (
+                <div className="grid gap-2 md:grid-cols-3">
+                  {availablePairsCatalog.provider_status.map((providerStatus) => {
+                    const exchangeLabel =
+                      ALL_EXCHANGES.find((exchange) => exchange.id === providerStatus.exchange)?.label ??
+                      providerStatus.exchange;
+                    const statusLabel =
+                      providerStatus.status === "ok"
+                        ? "Catálogo OK"
+                        : providerStatus.status === "empty"
+                          ? "Sem pares retornados"
+                          : "Falha no catálogo";
+
+                    return (
+                      <div
+                        key={providerStatus.exchange}
+                        className={cn(
+                          "rounded-xl border p-3 text-xs",
+                          providerStatus.status === "ok"
+                            ? "bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
+                            : "bg-amber-500/5 text-amber-700 dark:text-amber-300",
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold">{exchangeLabel}</p>
+                          <Badge variant={providerStatus.status === "ok" ? "default" : "outline"}>
+                            {statusLabel}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-muted-foreground">
+                          {providerStatus.returned_pairs} pares, {providerStatus.brl_pairs} BRL detectados.
+                        </p>
+                        {providerStatus.error_message ? (
+                          <p className="mt-1 break-words text-muted-foreground">{providerStatus.error_message}</p>
+                        ) : providerStatus.examples.length ? (
+                          <p className="mt-1 truncate text-muted-foreground">
+                            Exemplos: {providerStatus.examples.slice(0, 3).join(", ")}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
               <div className="rounded-xl border bg-muted/20 p-4">
                 <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr),auto] lg:items-end">
                   <div className="space-y-1">
@@ -2240,9 +2285,27 @@ export default function SettingsPage() {
                                 </TableCell>
                                 {catalogExchangeColumns.map(({ id }) => (
                                   <TableCell key={id}>
-                                    <Badge variant={pairRecord.availability[id] ? "default" : "outline"}>
-                                      {pairRecord.availability[id] ? "Disponivel" : "-"}
-                                    </Badge>
+                                    <div className="space-y-1">
+                                      <Badge variant={pairRecord.availability[id] ? "default" : "outline"}>
+                                        {pairRecord.availability[id] ? "Disponivel" : "-"}
+                                      </Badge>
+                                      {pairRecord.status?.[id] && pairRecord.status[id] !== "not_listed" ? (
+                                        <p className="text-[11px] text-muted-foreground">
+                                          {pairRecord.status[id] === "tradable"
+                                            ? "Negociavel"
+                                            : pairRecord.status[id] === "empty"
+                                              ? "Catálogo vazio"
+                                              : pairRecord.status[id] === "error"
+                                                ? "Erro no provider"
+                                                : pairRecord.status[id]}
+                                        </p>
+                                      ) : null}
+                                      {pairRecord.error_message?.[id] ? (
+                                        <p className="max-w-36 truncate text-[11px] text-amber-600 dark:text-amber-300">
+                                          {pairRecord.error_message[id]}
+                                        </p>
+                                      ) : null}
+                                    </div>
                                   </TableCell>
                                 ))}
                                 <TableCell className="text-right">

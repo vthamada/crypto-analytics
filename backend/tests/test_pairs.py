@@ -28,9 +28,20 @@ def test_available_pairs_catalog_uses_cache(monkeypatch):
 
         assert calls == 1
         assert [item["pair"] for item in first["pairs"]] == ["BTC_BRL", "POL_BRL"]
+        assert first["pairs"][0]["base_asset"] == "BTC"
+        assert first["pairs"][0]["quote_asset"] == "BRL"
+        assert first["pairs"][0]["is_brl_pair"] is True
+        assert first["pairs"][0]["status"]["novadax"] == "tradable"
+        assert first["provider_status"][0]["exchange"] == Exchange.NOVADAX
         assert first == second
 
     asyncio.run(run_test())
+
+
+def test_normalize_pair_symbol_accepts_exchange_formats():
+    assert pairs.normalize_pair_symbol("SOLBRL") == "SOL_BRL"
+    assert pairs.normalize_pair_symbol("wbtc/brl") == "WBTC_BRL"
+    assert pairs.normalize_pair_symbol("btc-usdt") == "BTC_USDT"
 
 
 def test_select_default_enabled_pairs_prefers_pairs_with_more_exchanges():

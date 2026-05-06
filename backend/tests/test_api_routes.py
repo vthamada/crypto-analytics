@@ -112,6 +112,99 @@ def test_dashboard_endpoint_returns_opportunities_and_stats_in_one_payload(monke
     assert body["opportunities"][0]["opportunity_type"] == "trade"
 
 
+def test_dashboard_summary_returns_lightweight_shortlist(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(role="owner"), AppConfig(enabled_pairs=["BTC_BRL", "DOGE_BRL"])
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    routes.update_state(
+        [
+            make_opportunity(id="trade-1", pair="BTC_BRL", opportunity_type="trade", operable_signal=True),
+            make_opportunity(
+                id="avoid-1",
+                pair="DOGE_BRL",
+                opportunity_type="avoid",
+                operable_signal=False,
+                executability_score=20.0,
+                score=95.0,
+            ),
+        ],
+        None,
+    )
+
+    client = create_test_client()
+    response = client.get("/api/dashboard/summary", headers={"X-Admin-Token": "secret-token"})
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["stats"]["total_opportunities"] == 2
+    assert body["shortlist"][0]["id"] == "trade-1"
+    assert "klines" not in body["shortlist"][0]
+
+
+def test_opportunities_shortlist_excludes_avoid_signals(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(role="owner"), AppConfig(enabled_pairs=["BTC_BRL", "DOGE_BRL"])
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    routes.update_state(
+        [
+            make_opportunity(id="trade-1", pair="BTC_BRL", opportunity_type="trade", operable_signal=True),
+            make_opportunity(
+                id="avoid-1",
+                pair="DOGE_BRL",
+                opportunity_type="avoid",
+                operable_signal=False,
+                interesting_signal=False,
+                score=10.0,
+                executability_score=10.0,
+                trade_margin_score=0.0,
+                estimated_net_trade_edge_pct=-5.0,
+                quote_volume_24h=10.0,
+                bid_notional_top_n=0.0,
+                ask_notional_top_n=0.0,
+                total_notional_top_n=0.0,
+                fillable_notional_within_slippage_cap=0.0,
+                estimated_buy_slippage_bps=None,
+                estimated_sell_slippage_bps=None,
+                movement_regime="illiquid_spike",
+            ),
+        ],
+        None,
+    )
+
+    client = create_test_client()
+    response = client.get("/api/opportunities/shortlist", headers={"X-Admin-Token": "secret-token"})
+
+    body = response.json()
+    assert response.status_code == 200
+    assert [item["id"] for item in body] == ["trade-1"]
+
+
 def test_history_requires_authenticated_session(monkeypatch):
     monkeypatch.setattr(routes.settings, "auth_secret_key", "signing-key")
 
@@ -270,6 +363,7 @@ def test_health_includes_runtime_snapshot(monkeypatch):
     body = response.json()
     assert response.status_code == 200
     assert "scanner" in body
+    assert "last_scan_diagnostics" in body["scanner"]
     assert "scanner_state" in body
     assert "mode" in body
     assert "websocket_connections" in body
