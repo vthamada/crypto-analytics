@@ -1,7 +1,7 @@
 """Persist scanner runtime diagnostics.
 
 Revision ID: 0009_scanner_runtime_diagnostics
-Revises: 0008_operational_margin_classification
+Revises: 0008_operational_margin
 Create Date: 2026-05-06
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy import inspect
 
 
 revision = "0009_scanner_runtime_diagnostics"
-down_revision = "0008_operational_margin_classification"
+down_revision = "0008_operational_margin"
 branch_labels = None
 depends_on = None
 
