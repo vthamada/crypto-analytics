@@ -283,6 +283,7 @@ async def scan_loop() -> None:
                 success_at=utcnow(),
                 duration_ms=duration_ms,
                 opportunities_count=len(opportunities),
+                scan_diagnostics=scanner.scan_diagnostics,
             )
 
         except Exception as e:

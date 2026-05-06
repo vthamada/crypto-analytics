@@ -8,6 +8,7 @@ persistent repetition counts.
 from __future__ import annotations
 
 import logging
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -76,6 +77,7 @@ async def update_scanner_runtime_state(
     error: str | None = None,
     success_at: datetime | None = None,
     opportunities_count: int | None = None,
+    scan_diagnostics: dict | None = None,
 ) -> None:
     async with async_session() as session:
         record = await session.get(ScannerRuntimeStateRecord, "singleton")
@@ -97,6 +99,8 @@ async def update_scanner_runtime_state(
             record.last_success_at = normalize_db_datetime(success_at)
         if opportunities_count is not None:
             record.opportunities_count = opportunities_count
+        if scan_diagnostics is not None:
+            record.last_scan_diagnostics = json.dumps(scan_diagnostics)
         record.score_version = SCORE_VERSION
         record.executability_version = EXECUTABILITY_VERSION
         record.movement_version = MOVEMENT_VERSION
@@ -111,6 +115,12 @@ async def get_scanner_runtime_state() -> dict | None:
         record = await session.get(ScannerRuntimeStateRecord, "singleton")
         if record is None:
             return None
+        diagnostics = {}
+        if getattr(record, "last_scan_diagnostics", None):
+            try:
+                diagnostics = json.loads(record.last_scan_diagnostics or "{}")
+            except json.JSONDecodeError:
+                diagnostics = {}
         return {
             "last_cycle_started_at": record.last_cycle_started_at.isoformat() if record.last_cycle_started_at else None,
             "last_cycle_completed_at": record.last_cycle_completed_at.isoformat() if record.last_cycle_completed_at else None,
@@ -118,6 +128,7 @@ async def get_scanner_runtime_state() -> dict | None:
             "last_cycle_error": record.last_cycle_error,
             "last_success_at": record.last_success_at.isoformat() if record.last_success_at else None,
             "opportunities_count": record.opportunities_count,
+            "last_scan_diagnostics": diagnostics,
             "score_version": record.score_version,
             "executability_version": getattr(record, "executability_version", EXECUTABILITY_VERSION),
             "movement_version": getattr(record, "movement_version", MOVEMENT_VERSION),

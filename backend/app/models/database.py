@@ -217,6 +217,7 @@ class ScannerRuntimeStateRecord(Base):
     executability_version = Column(String, nullable=False, default="v1")
     movement_version = Column(String, nullable=False, default="v1")
     profile_version = Column(String, nullable=False, default="v1")
+    last_scan_diagnostics = Column(Text, nullable=True)
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
@@ -479,6 +480,7 @@ async def ensure_schema_compatibility() -> None:
         "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "reweighting_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "last_scan_diagnostics": "TEXT",
     }
 
     snapshot_columns = {

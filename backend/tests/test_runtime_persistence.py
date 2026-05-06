@@ -83,7 +83,13 @@ def test_runtime_persistence_normalizes_aware_detected_at(monkeypatch):
             technical_signal_id=opportunity.technical_signal_id,
             workspace_score=opportunity.score,
         )
-        await shared_state.update_scanner_runtime_state(opportunities_count=1)
+        await shared_state.update_scanner_runtime_state(
+            opportunities_count=1,
+            scan_diagnostics={"total_pairs": 3, "deep_candidates": 1, "opportunities": 1},
+        )
+        runtime_state = await shared_state.get_scanner_runtime_state()
+        assert runtime_state is not None
+        assert runtime_state["last_scan_diagnostics"]["total_pairs"] == 3
         await shared_state.create_pending_outcomes(
             [
                 {
