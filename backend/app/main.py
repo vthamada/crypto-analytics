@@ -122,6 +122,7 @@ async def scan_loop() -> None:
 
             scanner.set_historical_calibration(await get_historical_pair_calibration())
             opportunities = await scanner.scan_all()
+            scan_monitor.record_scan_diagnostics(scanner.scan_diagnostics)
             now = utcnow()
             update_state(opportunities, now)
 

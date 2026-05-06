@@ -12,6 +12,24 @@ Convencao deste repositorio:
 
 - Nenhuma entrada em aberto.
 
+## [2026-05-06]
+
+### Added
+- Scanner em dois estagios: triagem leve por ticker/volume/movimento antes de buscar order book e candles.
+- Temperatura de scan em memoria (`hot`, `warm`, `cold`) para reduzir rechecagem de pares frios.
+- Cooldown exponencial por provider/par apos falhas de ticker, order book, klines ou excecoes de scan.
+- Telemetria agregada do scan leve em `/api/health`, com total de pares, pulos por temperatura/cooldown, descartes por motivo, candidatos profundos e oportunidades geradas.
+- Endpoint leve `GET /api/dashboard/summary` com stats e shortlist operacional em payload reduzido.
+- Endpoints leves `GET /api/opportunities/active` e `GET /api/opportunities/shortlist` com `OpportunitySummary`.
+- Diagnostico de catalogo em `GET /api/pairs/available`, incluindo status por provider, quantidade de pares retornados, pares BRL detectados, exemplos e mensagens de erro.
+- Cliente frontend tipado para os endpoints leves de dashboard e oportunidades.
+
+### Changed
+- O scanner agora limita analise profunda aos melhores candidatos por exchange, reduzindo chamadas caras para pares sem volume ou sem movimento preliminar.
+- Dashboard principal passou a carregar `/api/dashboard/summary` por padrao e buscar `/api/opportunities/{id}` apenas ao abrir o detalhe do sinal.
+- A tela de configuracoes passou a mostrar o estado do catalogo por exchange e o status tecnico de cada par/provedor.
+- O catalogo de pares agora preserva metadados de normalizacao (`base_asset`, `quote_asset`, `normalized_symbol`, disponibilidade, tradabilidade e status por exchange).
+
 ## [2026-05-05]
 
 ### Added

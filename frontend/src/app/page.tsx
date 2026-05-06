@@ -9,11 +9,22 @@ import { SessionRequiredState } from "@/components/session-required-state";
 import { SignalDetailModal } from "@/components/signal-detail-modal";
 import { useHasAuthenticatedWorkspace } from "@/hooks/use-has-authenticated-workspace";
 import { useOpportunities } from "@/hooks/use-opportunities";
+import { getOpportunity } from "@/lib/api";
 import type { Opportunity } from "@/lib/types";
+import type { OpportunityListItem } from "@/lib/opportunity-operability";
 
 function DashboardContent() {
   const { opportunities, stats, loading, error, refetch } = useOpportunities();
   const [selected, setSelected] = useState<Opportunity | null>(null);
+
+  async function openOpportunityDetail(opportunity: OpportunityListItem) {
+    try {
+      const fullOpportunity = await getOpportunity(opportunity.id);
+      setSelected(fullOpportunity ?? null);
+    } catch {
+      setSelected(null);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 pt-6">
@@ -33,7 +44,7 @@ function DashboardContent() {
       <OpportunitiesTable
         opportunities={opportunities}
         loading={loading}
-        onSelect={setSelected}
+        onSelect={(opportunity) => void openOpportunityDetail(opportunity)}
       />
 
       <SignalDetailModal

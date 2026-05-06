@@ -95,6 +95,48 @@ export interface DashboardPayload {
   opportunities: Opportunity[];
 }
 
+export type OpportunitySummary = Pick<
+  Opportunity,
+  | "id"
+  | "exchange"
+  | "pair"
+  | "score"
+  | "technical_score"
+  | "executability_score"
+  | "executability_band"
+  | "trade_margin_score"
+  | "estimated_net_trade_edge_pct"
+  | "opportunity_type"
+  | "interesting_signal"
+  | "operable_signal"
+  | "volatility_pct"
+  | "volume_24h"
+  | "quote_volume_24h"
+  | "liquidity_units"
+  | "bid_notional_top_n"
+  | "ask_notional_top_n"
+  | "total_notional_top_n"
+  | "spread_pct"
+  | "estimated_buy_slippage_bps"
+  | "estimated_sell_slippage_bps"
+  | "fillable_notional_within_slippage_cap"
+  | "last_price"
+  | "change_pct"
+  | "movement_type"
+  | "movement_regime"
+  | "detected_at"
+  | "cross_exchange_gap_pct"
+  | "cross_exchange_reference_exchange"
+  | "cross_exchange_reference_price"
+  | "arbitrage_available"
+  | "historical_confidence"
+>;
+
+export interface DashboardSummaryPayload {
+  stats: DashboardStats;
+  shortlist: OpportunitySummary[];
+}
+
 export interface FilterThresholds {
   min_volatility_pct: number;
   min_volume_brl: number;
@@ -295,12 +337,32 @@ export interface AvailablePairRecord {
   pair: string;
   display_name: string;
   availability: Record<Exchange, boolean>;
+  normalized_symbol?: string | null;
+  base_asset?: string | null;
+  quote_asset?: string | null;
+  is_brl_pair?: boolean;
+  raw_symbols?: Partial<Record<Exchange, string | null>>;
+  is_active?: Partial<Record<Exchange, boolean>>;
+  is_tradable?: Partial<Record<Exchange, boolean>>;
+  status?: Partial<Record<Exchange, string>>;
+  error_message?: Partial<Record<Exchange, string | null>>;
+}
+
+export interface AvailablePairProviderStatus {
+  exchange: Exchange;
+  returned_pairs: number;
+  brl_pairs: number;
+  status: "ok" | "empty" | "error";
+  checked_at: string;
+  error_message?: string | null;
+  examples: string[];
 }
 
 export interface AvailablePairsResponse {
   generated_at: string;
   expires_at: string;
   pairs: AvailablePairRecord[];
+  provider_status: AvailablePairProviderStatus[];
 }
 
 export interface AuditLogEntry {

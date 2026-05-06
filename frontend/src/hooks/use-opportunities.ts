@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DashboardStats, Opportunity } from "@/lib/types";
-import { getDashboard, getOpportunities, getStats } from "@/lib/api";
-import type { OpportunitySortMode } from "@/lib/opportunity-operability";
+import type { DashboardStats } from "@/lib/types";
+import { getDashboardSummary, getOpportunities, getStats } from "@/lib/api";
+import type { OpportunityListItem, OpportunitySortMode } from "@/lib/opportunity-operability";
 import { wsClient } from "@/lib/websocket";
 
 export function useOpportunities(filters?: {
@@ -15,14 +15,14 @@ export function useOpportunities(filters?: {
   operable_only?: boolean;
   sort_by?: OpportunitySortMode;
 }) {
-  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [opportunities, setOpportunities] = useState<OpportunityListItem[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
-  const deriveStats = useCallback((items: Opportunity[], previous: DashboardStats | null): DashboardStats => {
+  const deriveStats = useCallback((items: OpportunityListItem[], previous: DashboardStats | null): DashboardStats => {
     const active = items.filter((opportunity) => opportunity.score >= 40);
     return {
       total_opportunities: items.length,
@@ -44,8 +44,8 @@ export function useOpportunities(filters?: {
   const fetchData = useCallback(async () => {
     try {
       if (!filtersRef.current) {
-        const dashboard = await getDashboard();
-        setOpportunities(dashboard.opportunities);
+        const dashboard = await getDashboardSummary({ limit: 50 });
+        setOpportunities(dashboard.shortlist);
         setStats(dashboard.stats);
       } else {
         const [opps, dashStats] = await Promise.all([

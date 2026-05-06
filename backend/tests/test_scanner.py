@@ -15,6 +15,9 @@ class FakeProvider:
     async def get_ticker(self, pair: str):
         return self._ticker
 
+    async def get_light_ticker(self, pair: str):
+        return await self.get_ticker(pair)
+
     async def get_order_book(self, pair: str):
         return self._order_book
 
@@ -185,6 +188,171 @@ def test_scan_all_skips_pairs_unavailable_for_provider(monkeypatch, sample_ticke
 
     assert len(opportunities) == 1
     assert calls == ["BTC_BRL"]
+
+
+def test_scan_all_uses_light_triage_before_expensive_requests(monkeypatch, sample_order_book, sample_klines):
+    monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+
+    async def fake_scannable_pairs(self):
+        return {Exchange.BINANCE: ["BTC_BRL", "DEAD_BRL"]}
+
+    monkeypatch.setattr(Scanner, "_get_scannable_pairs_by_exchange", fake_scannable_pairs)
+
+    class TriageProvider:
+        exchange = Exchange.BINANCE
+
+        def __init__(self):
+            self.deep_calls: list[str] = []
+
+        async def get_light_ticker(self, pair: str):
+            if pair == "DEAD_BRL":
+                return Ticker(
+                    exchange=Exchange.BINANCE,
+                    pair=pair,
+                    last_price=1.0,
+                    high_24h=1.01,
+                    low_24h=0.99,
+                    volume_24h=10.0,
+                    quote_volume_24h=20.0,
+                    change_pct_24h=0.1,
+                )
+            return Ticker(
+                exchange=Exchange.BINANCE,
+                pair=pair,
+                last_price=120.0,
+                high_24h=125.0,
+                low_24h=98.0,
+                volume_24h=1500.0,
+                quote_volume_24h=250000.0,
+                change_pct_24h=4.2,
+            )
+
+        async def get_order_book(self, pair: str):
+            self.deep_calls.append(pair)
+            return sample_order_book
+
+        async def get_klines(self, pair: str, interval: str = "5m", limit: int = 100):
+            self.deep_calls.append(pair)
+            return sample_klines
+
+        async def close(self):
+            return None
+
+    provider = TriageProvider()
+    scanner = Scanner(AppConfig(enabled_exchanges=[Exchange.BINANCE], enabled_pairs=["BTC_BRL", "DEAD_BRL"]))
+    scanner._providers = {Exchange.BINANCE: provider}
+
+    import asyncio
+
+    opportunities = asyncio.run(scanner.scan_all())
+
+    assert [opportunity.pair for opportunity in opportunities] == ["BTC_BRL"]
+    assert provider.deep_calls == ["BTC_BRL", "BTC_BRL"]
+    assert scanner.scan_diagnostics["total_pairs"] == 2
+    assert scanner.scan_diagnostics["light_requests"] == 2
+    assert scanner.scan_diagnostics["light_candidates"] == 1
+    assert scanner.scan_diagnostics["light_discards"] == 1
+    assert scanner.scan_diagnostics["light_discard_reasons"]["volume_below_threshold"] == 1
+    assert scanner.scan_diagnostics["deep_candidates"] == 1
+    assert scanner.scan_diagnostics["opportunities"] == 1
+
+
+def test_scan_all_skips_cold_pair_until_temperature_interval(monkeypatch, sample_order_book, sample_klines):
+    monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+
+    async def fake_scannable_pairs(self):
+        return {Exchange.BINANCE: ["DEAD_BRL"]}
+
+    monkeypatch.setattr(Scanner, "_get_scannable_pairs_by_exchange", fake_scannable_pairs)
+
+    class ColdProvider:
+        exchange = Exchange.BINANCE
+
+        def __init__(self):
+            self.light_calls = 0
+
+        async def get_light_ticker(self, pair: str):
+            self.light_calls += 1
+            return Ticker(
+                exchange=Exchange.BINANCE,
+                pair=pair,
+                last_price=1.0,
+                high_24h=1.01,
+                low_24h=0.99,
+                volume_24h=10.0,
+                quote_volume_24h=20.0,
+                change_pct_24h=0.1,
+            )
+
+        async def get_order_book(self, pair: str):
+            return sample_order_book
+
+        async def get_klines(self, pair: str, interval: str = "5m", limit: int = 100):
+            return sample_klines
+
+        async def close(self):
+            return None
+
+    provider = ColdProvider()
+    scanner = Scanner(AppConfig(enabled_exchanges=[Exchange.BINANCE], enabled_pairs=["DEAD_BRL"]))
+    scanner._providers = {Exchange.BINANCE: provider}
+
+    import asyncio
+
+    assert asyncio.run(scanner.scan_all()) == []
+    assert asyncio.run(scanner.scan_all()) == []
+
+    assert provider.light_calls == 1
+    assert scanner.scan_diagnostics["skipped_pairs"] == 1
+    assert scanner.scan_diagnostics["skip_reasons"]["temperature_cold"] == 1
+    state = scanner._pair_scan_state["binance:DEAD_BRL"]
+    assert state.temperature == "cold"
+    assert state.last_discard_reason == "volume_below_threshold"
+
+
+def test_scan_all_applies_cooldown_after_ticker_failure(monkeypatch):
+    monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+
+    async def fake_scannable_pairs(self):
+        return {Exchange.BINANCE: ["FAIL_BRL"]}
+
+    monkeypatch.setattr(Scanner, "_get_scannable_pairs_by_exchange", fake_scannable_pairs)
+
+    class FailingProvider:
+        exchange = Exchange.BINANCE
+
+        def __init__(self):
+            self.light_calls = 0
+
+        async def get_light_ticker(self, pair: str):
+            self.light_calls += 1
+            raise RuntimeError("provider unavailable")
+
+        async def get_order_book(self, pair: str):
+            raise AssertionError("deep scan should not run")
+
+        async def get_klines(self, pair: str, interval: str = "5m", limit: int = 100):
+            raise AssertionError("deep scan should not run")
+
+        async def close(self):
+            return None
+
+    provider = FailingProvider()
+    scanner = Scanner(AppConfig(enabled_exchanges=[Exchange.BINANCE], enabled_pairs=["FAIL_BRL"]))
+    scanner._providers = {Exchange.BINANCE: provider}
+
+    import asyncio
+
+    assert asyncio.run(scanner.scan_all()) == []
+    assert asyncio.run(scanner.scan_all()) == []
+
+    assert provider.light_calls == 1
+    assert scanner.scan_diagnostics["skipped_pairs"] == 1
+    assert scanner.scan_diagnostics["skip_reasons"]["cooldown"] == 1
+    state = scanner._pair_scan_state["binance:FAIL_BRL"]
+    assert state.failure_count == 1
+    assert state.cooldown_until is not None
+    assert state.last_discard_reason == "ticker_failed"
 
 
 def test_scan_all_captures_lower_slippage_for_deeper_book(monkeypatch, sample_ticker, sample_klines):

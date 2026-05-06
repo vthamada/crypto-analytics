@@ -8,12 +8,14 @@ import type {
   AuditLogEntry,
   DashboardStats,
   DashboardPayload,
+  DashboardSummaryPayload,
   ExchangeCredentialValidationResponse,
   HistoryRecord,
   HistorySummaryRecord,
   InvitePreview,
   InviteRecord,
   Opportunity,
+  OpportunitySummary,
   UserCreateResult,
   UserRecord,
   WorkspaceStatus,
@@ -293,6 +295,17 @@ export function getDashboard(params?: {
   return fetchJSON(`/dashboard${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
 }
 
+export function getDashboardSummary(params?: { limit?: number }): Promise<DashboardSummaryPayload> {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return fetchJSON(`/dashboard/summary${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
+}
+
 // Opportunities
 export function getOpportunities(params?: {
   exchange?: string;
@@ -312,6 +325,28 @@ export function getOpportunities(params?: {
   }
   const qs = query.toString();
   return fetchJSON(`/opportunities${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
+}
+
+export function getActiveOpportunities(params?: { limit?: number }): Promise<OpportunitySummary[]> {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return fetchJSON(`/opportunities/active${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
+}
+
+export function getOpportunitiesShortlist(params?: { limit?: number }): Promise<OpportunitySummary[]> {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return fetchJSON(`/opportunities/shortlist${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
 }
 
 export function getOpportunity(id: string): Promise<Opportunity | null> {

@@ -31,6 +31,7 @@ class ScanStats:
     last_duration_ms: float | None = None
     last_opportunities_count: int = 0
     running: bool = False
+    last_scan_diagnostics: dict = field(default_factory=dict)
     providers: dict[str, ProviderStats] = field(default_factory=dict)
 
     def begin_cycle(self) -> None:
@@ -86,6 +87,9 @@ class ScanStats:
         if rate_limited:
             provider.rate_limits_total += 1
 
+    def record_scan_diagnostics(self, diagnostics: dict) -> None:
+        self.last_scan_diagnostics = diagnostics
+
     def snapshot(self) -> dict:
         return {
             "cycles_total": self.cycles_total,
@@ -97,6 +101,7 @@ class ScanStats:
             "last_duration_ms": self.last_duration_ms,
             "last_opportunities_count": self.last_opportunities_count,
             "running": self.running,
+            "last_scan_diagnostics": self.last_scan_diagnostics,
             "providers": {
                 exchange: {
                     "requests_total": stats.requests_total,

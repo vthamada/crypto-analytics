@@ -101,6 +101,15 @@ class ExchangeProvider(abc.ABC):
     @abc.abstractmethod
     async def get_ticker(self, pair: str) -> Ticker: ...
 
+    async def get_light_ticker(self, pair: str) -> Ticker:
+        """Return the cheapest available ticker payload for first-stage triage.
+
+        Providers can override this when an exchange exposes a lighter endpoint.
+        The default keeps backward compatibility by reusing the existing ticker
+        call, which is still cheaper than fetching book depth and candles.
+        """
+        return await self.get_ticker(pair)
+
     @abc.abstractmethod
     async def get_order_book(self, pair: str) -> OrderBook: ...
 
