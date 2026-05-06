@@ -7,6 +7,7 @@ export type MovementRegime =
   | "breakout_exhaustion"
   | "mean_reversion_candidate"
   | "illiquid_spike";
+export type OpportunityType = "trade" | "hold" | "observe" | "avoid";
 
 export interface Kline {
   open_time: string;
@@ -35,6 +36,11 @@ export interface Opportunity {
   executability_band?: string | null;
   interesting_signal?: boolean | null;
   operable_signal?: boolean | null;
+  estimated_trade_margin_pct?: number | null;
+  operational_friction_pct?: number | null;
+  estimated_net_trade_edge_pct?: number | null;
+  trade_margin_score?: number | null;
+  opportunity_type?: OpportunityType | null;
   volatility_pct: number;
   volume_24h: number;
   quote_volume_24h: number;
@@ -76,7 +82,17 @@ export interface DashboardStats {
   best_score: number;
   exchanges_online: number;
   arbitrage_opportunities: number;
+  operable_opportunities?: number;
+  trade_opportunities?: number;
+  hold_opportunities?: number;
+  observe_opportunities?: number;
+  avoid_opportunities?: number;
   last_scan: string | null;
+}
+
+export interface DashboardPayload {
+  stats: DashboardStats;
+  opportunities: Opportunity[];
 }
 
 export interface FilterThresholds {
@@ -146,6 +162,11 @@ export interface HistoryRecord {
   executability_band?: string | null;
   interesting_signal?: boolean | null;
   operable_signal?: boolean | null;
+  estimated_trade_margin_pct?: number | null;
+  operational_friction_pct?: number | null;
+  estimated_net_trade_edge_pct?: number | null;
+  trade_margin_score?: number | null;
+  opportunity_type?: OpportunityType | null;
   volatility_pct: number;
   volume_24h: number;
   quote_volume_24h: number;
@@ -178,6 +199,22 @@ export interface HistoryRecord {
   movement_multiplier?: number;
 }
 
+export interface HistorySummaryRecord {
+  id: string;
+  exchange: Exchange;
+  pair: string;
+  score: number;
+  executability_score?: number | null;
+  trade_margin_score?: number | null;
+  estimated_net_trade_edge_pct?: number | null;
+  opportunity_type?: OpportunityType | null;
+  spread_pct: number;
+  last_price: number;
+  change_pct: number;
+  movement_type: MovementType;
+  detected_at: string;
+}
+
 export interface Analytics {
   total_records: number;
   top_pairs: { pair: string; count: number }[];
@@ -186,6 +223,8 @@ export interface Analytics {
   executability_distribution?: Record<string, number>;
   movement_distribution: Record<string, number>;
   movement_regime_distribution?: Record<string, number>;
+  opportunity_type_distribution?: Record<OpportunityType, number>;
+  avg_net_trade_edge_by_type?: Partial<Record<OpportunityType, number>>;
   hourly_distribution: Record<string, number>;
   arbitrage_count: number;
   avg_cross_exchange_gap_pct: number;

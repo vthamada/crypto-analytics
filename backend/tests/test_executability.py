@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from app.filters.executability import (
     calculate_executability_score,
+    calculate_trade_margin_metrics,
     classify_executability_band,
+    classify_opportunity_type,
     estimate_fillable_notional,
     estimate_slippage_bps,
 )
@@ -133,3 +135,66 @@ def test_classify_executability_band_maps_score_ranges():
     assert classify_executability_band(45) == "fair"
     assert classify_executability_band(65) == "good"
     assert classify_executability_band(85) == "strong"
+
+
+def test_calculate_trade_margin_metrics_subtracts_operational_friction():
+    strong = calculate_trade_margin_metrics(
+        volatility_pct=4.0,
+        recent_change_pct=2.2,
+        spread_pct=0.08,
+        estimated_buy_slippage_bps=5.0,
+        estimated_sell_slippage_bps=7.0,
+        movement_type="strong_range",
+        movement_regime="trend_continuation",
+        movement_persistence_score=0.7,
+    )
+    weak = calculate_trade_margin_metrics(
+        volatility_pct=2.5,
+        recent_change_pct=0.6,
+        spread_pct=0.65,
+        estimated_buy_slippage_bps=25.0,
+        estimated_sell_slippage_bps=35.0,
+        movement_type="trap",
+        movement_regime="illiquid_spike",
+        movement_persistence_score=0.1,
+    )
+
+    assert strong["estimated_trade_margin_pct"] > strong["operational_friction_pct"]
+    assert strong["estimated_net_trade_edge_pct"] > 0
+    assert strong["trade_margin_score"] > weak["trade_margin_score"]
+    assert weak["estimated_net_trade_edge_pct"] < 0
+
+
+def test_classify_opportunity_type_prioritizes_trade_hold_observe_avoid():
+    assert classify_opportunity_type(
+        operable_signal=True,
+        interesting_signal=True,
+        executability_score=78,
+        trade_margin_score=62,
+        estimated_net_trade_edge_pct=0.8,
+        movement_regime="trend_continuation",
+    ) == "trade"
+    assert classify_opportunity_type(
+        operable_signal=False,
+        interesting_signal=True,
+        executability_score=72,
+        trade_margin_score=55,
+        estimated_net_trade_edge_pct=0.7,
+        movement_regime="trend_continuation",
+    ) == "hold"
+    assert classify_opportunity_type(
+        operable_signal=False,
+        interesting_signal=True,
+        executability_score=45,
+        trade_margin_score=18,
+        estimated_net_trade_edge_pct=0.1,
+        movement_regime="breakout_clean",
+    ) == "observe"
+    assert classify_opportunity_type(
+        operable_signal=True,
+        interesting_signal=True,
+        executability_score=82,
+        trade_margin_score=8,
+        estimated_net_trade_edge_pct=-0.4,
+        movement_regime="illiquid_spike",
+    ) == "avoid"

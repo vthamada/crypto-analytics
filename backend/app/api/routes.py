@@ -12,10 +12,12 @@ from app.models.schemas import (
     AvailablePairsResponse,
     AppConfig,
     ConfigResponse,
+    DashboardResponse,
     DashboardStats,
     ExchangeCredentialValidationResponse,
     Exchange,
     FilterThresholds,
+    HistorySummaryRecord,
     InvitePreviewResponse,
     InviteRecordResponse,
     Opportunity,
@@ -26,6 +28,7 @@ from app.models.schemas import (
     WorkspaceStatusResponse,
     WorkspaceSummary,
 )
+from app.filters.executability import classify_opportunity_type
 from app.services.auth import (
     UserSession,
     accept_invite,
@@ -62,6 +65,7 @@ from app.services.persistence import (
     get_filtered_analytics,
     get_workspace_operability_fields,
     get_history,
+    get_history_summary,
     get_workspace_score,
     load_config,
     load_workspace_config,
@@ -231,7 +235,44 @@ def project_workspace_opportunity(opportunity: Opportunity, config: AppConfig) -
         config=config,
     )
     data.update(operability)
+    if data.get("trade_margin_score") is not None and data.get("estimated_net_trade_edge_pct") is not None:
+        data["opportunity_type"] = classify_opportunity_type(
+            operable_signal=data.get("operable_signal"),
+            interesting_signal=data.get("interesting_signal"),
+            executability_score=data.get("executability_score"),
+            trade_margin_score=data.get("trade_margin_score"),
+            estimated_net_trade_edge_pct=data.get("estimated_net_trade_edge_pct"),
+            movement_regime=(
+                data.get("movement_regime").value
+                if hasattr(data.get("movement_regime"), "value")
+                else data.get("movement_regime")
+            ),
+        )
     return Opportunity(**data)
+
+
+def build_dashboard_stats(
+    *,
+    opportunities: list[Opportunity],
+    monitored_pairs: int,
+    last_scan: datetime | None,
+) -> DashboardStats:
+    exchanges_online = len({opportunity.exchange for opportunity in opportunities})
+    return DashboardStats(
+        total_opportunities=len(opportunities),
+        active_opportunities=len([opportunity for opportunity in opportunities if opportunity.score >= 40]),
+        monitored_pairs=monitored_pairs,
+        total_volume_24h=sum(opportunity.quote_volume_24h for opportunity in opportunities),
+        best_score=max((opportunity.score for opportunity in opportunities), default=0),
+        exchanges_online=exchanges_online,
+        arbitrage_opportunities=len([opportunity for opportunity in opportunities if opportunity.arbitrage_available]),
+        operable_opportunities=len([opportunity for opportunity in opportunities if opportunity.operable_signal]),
+        trade_opportunities=len([opportunity for opportunity in opportunities if opportunity.opportunity_type == "trade"]),
+        hold_opportunities=len([opportunity for opportunity in opportunities if opportunity.opportunity_type == "hold"]),
+        observe_opportunities=len([opportunity for opportunity in opportunities if opportunity.opportunity_type == "observe"]),
+        avoid_opportunities=len([opportunity for opportunity in opportunities if opportunity.opportunity_type == "avoid"]),
+        last_scan=last_scan,
+    )
 
 
 class AuthLoginRequest(BaseModel):
@@ -668,16 +709,44 @@ async def dashboard_stats(
     base_opportunities = await _effective_opportunities()
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
     filtered_opportunities = [opportunity for opportunity in opps if opportunity is not None]
-    exchanges_online = len({opportunity.exchange for opportunity in filtered_opportunities})
-    return DashboardStats(
-        total_opportunities=len(filtered_opportunities),
-        active_opportunities=len([opportunity for opportunity in filtered_opportunities if opportunity.score >= 40]),
+    return build_dashboard_stats(
+        opportunities=filtered_opportunities,
         monitored_pairs=len(config.enabled_pairs),
-        total_volume_24h=sum(opportunity.quote_volume_24h for opportunity in filtered_opportunities),
-        best_score=max((opportunity.score for opportunity in filtered_opportunities), default=0),
-        exchanges_online=exchanges_online,
-        arbitrage_opportunities=len([opportunity for opportunity in filtered_opportunities if opportunity.arbitrage_available]),
         last_scan=_last_scan,
+    )
+
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def dashboard(
+    limit: int = Query(default=50, le=200),
+    sort_by: str = "score",
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    _, config = await resolve_workspace_context(session_info, x_workspace_id)
+    base_opportunities = await _effective_opportunities()
+    opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
+    visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
+    sort_keys = {
+        "score": lambda opportunity: opportunity.score,
+        "executability": lambda opportunity: opportunity.executability_score if opportunity.executability_score is not None else -1,
+        "trade_margin": lambda opportunity: opportunity.trade_margin_score if opportunity.trade_margin_score is not None else -1,
+        "net_edge": lambda opportunity: opportunity.estimated_net_trade_edge_pct if opportunity.estimated_net_trade_edge_pct is not None else -999,
+        "gap": lambda opportunity: opportunity.cross_exchange_gap_pct,
+        "volatility": lambda opportunity: opportunity.volatility_pct,
+        "volume": lambda opportunity: opportunity.quote_volume_24h,
+        "spread": lambda opportunity: opportunity.spread_pct,
+        "price": lambda opportunity: opportunity.last_price,
+    }
+    key_fn = sort_keys.get(sort_by, sort_keys["score"])
+    visible_opportunities.sort(key=key_fn, reverse=(sort_by != "spread"))
+    return DashboardResponse(
+        stats=build_dashboard_stats(
+            opportunities=visible_opportunities,
+            monitored_pairs=len(config.enabled_pairs),
+            last_scan=_last_scan,
+        ),
+        opportunities=visible_opportunities[:limit],
     )
 
 
@@ -716,6 +785,8 @@ async def list_opportunities(
     sort_keys = {
         "score": lambda opportunity: opportunity.score,
         "executability": lambda opportunity: opportunity.executability_score if opportunity.executability_score is not None else -1,
+        "trade_margin": lambda opportunity: opportunity.trade_margin_score if opportunity.trade_margin_score is not None else -1,
+        "net_edge": lambda opportunity: opportunity.estimated_net_trade_edge_pct if opportunity.estimated_net_trade_edge_pct is not None else -999,
         "gap": lambda opportunity: opportunity.cross_exchange_gap_pct,
         "volatility": lambda opportunity: opportunity.volatility_pct,
         "volume": lambda opportunity: opportunity.quote_volume_24h,
@@ -754,6 +825,29 @@ async def history(
 ):
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     return await get_history(
+        limit=limit,
+        offset=offset,
+        exchange=exchange,
+        pair=pair,
+        min_score=min_score,
+        hours=hours,
+        workspace_config=config,
+    )
+
+
+@router.get("/history/summary", response_model=list[HistorySummaryRecord])
+async def history_summary(
+    limit: int = Query(default=100, le=500),
+    offset: int = 0,
+    exchange: str | None = None,
+    pair: str | None = None,
+    min_score: float | None = None,
+    hours: int | None = None,
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    _, config = await resolve_workspace_context(session_info, x_workspace_id)
+    return await get_history_summary(
         limit=limit,
         offset=offset,
         exchange=exchange,

@@ -13,12 +13,14 @@ from app.models.database import (
     ConfigRecord,
     RawMarketObservationRecord,
     SignalOutcomeRecord,
+    TechnicalSignalRecord,
+    WorkspaceSignalProjectionRecord,
     WorkspaceConfigRecord,
     async_session,
     normalize_db_datetime,
 )
 from app.models.schemas import AppConfig, HistoryRecord, MovementType, Opportunity, ScoreWeights
-from app.filters.executability import calculate_executability_score, classify_executability_band, rescale_slippage_bps
+from app.filters.executability import calculate_executability_score, classify_executability_band, classify_opportunity_type, rescale_slippage_bps
 from app.services.workspace_profiles import highest_order_notional, resolve_trading_profile, widest_slippage_cap
 
 logger = logging.getLogger(__name__)
@@ -151,6 +153,28 @@ def get_workspace_operability_fields(
     }
 
 
+def get_projected_opportunity_type(
+    *,
+    stored_type: str | None,
+    operable_signal: bool | None,
+    interesting_signal: bool | None,
+    executability_score: float | None,
+    trade_margin_score: float | None,
+    estimated_net_trade_edge_pct: float | None,
+    movement_regime: str | None,
+) -> str | None:
+    if trade_margin_score is None or estimated_net_trade_edge_pct is None:
+        return stored_type
+    return classify_opportunity_type(
+        operable_signal=operable_signal,
+        interesting_signal=interesting_signal,
+        executability_score=executability_score,
+        trade_margin_score=trade_margin_score,
+        estimated_net_trade_edge_pct=estimated_net_trade_edge_pct,
+        movement_regime=movement_regime,
+    )
+
+
 def serialize_history_record(record: OpportunityRecord, config: AppConfig | None = None) -> dict:
     detected_at = ensure_utc_datetime(record.detected_at)
     workspace_score = record.score
@@ -180,6 +204,19 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
     else:
         workspace_operability = {}
 
+    executability_score = workspace_operability.get("executability_score", getattr(record, "executability_score", None))
+    operable_signal = workspace_operability.get("operable_signal", getattr(record, "operable_signal", None))
+    movement_regime = getattr(record, "movement_regime", None)
+    opportunity_type = get_projected_opportunity_type(
+        stored_type=getattr(record, "opportunity_type", None),
+        operable_signal=operable_signal,
+        interesting_signal=getattr(record, "interesting_signal", None),
+        executability_score=executability_score,
+        trade_margin_score=getattr(record, "trade_margin_score", None),
+        estimated_net_trade_edge_pct=getattr(record, "estimated_net_trade_edge_pct", None),
+        movement_regime=movement_regime,
+    )
+
     return {
         "id": record.id,
         "exchange": record.exchange,
@@ -193,10 +230,15 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "reweighting_version": getattr(record, "reweighting_version", "v1"),
         "technical_signal_id": getattr(record, "technical_signal_id", None),
         "semantic_signal_key": getattr(record, "semantic_signal_key", None),
-        "executability_score": workspace_operability.get("executability_score", getattr(record, "executability_score", None)),
+        "executability_score": executability_score,
         "executability_band": workspace_operability.get("executability_band", getattr(record, "executability_band", None)),
         "interesting_signal": getattr(record, "interesting_signal", None),
-        "operable_signal": workspace_operability.get("operable_signal", getattr(record, "operable_signal", None)),
+        "operable_signal": operable_signal,
+        "estimated_trade_margin_pct": getattr(record, "estimated_trade_margin_pct", None),
+        "operational_friction_pct": getattr(record, "operational_friction_pct", None),
+        "estimated_net_trade_edge_pct": getattr(record, "estimated_net_trade_edge_pct", None),
+        "trade_margin_score": getattr(record, "trade_margin_score", None),
+        "opportunity_type": opportunity_type,
         "volatility_pct": record.volatility_pct,
         "volume_24h": record.volume_24h,
         "quote_volume_24h": record.quote_volume_24h,
@@ -210,7 +252,7 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "fillable_notional_within_slippage_cap": getattr(record, "fillable_notional_within_slippage_cap", None),
         "baseline_order_notional_brl": workspace_operability.get("baseline_order_notional_brl", getattr(record, "baseline_order_notional_brl", None)),
         "movement_type": record.movement_type,
-        "movement_regime": getattr(record, "movement_regime", None),
+        "movement_regime": movement_regime,
         "movement_persistence_score": getattr(record, "movement_persistence_score", None),
         "last_price": record.last_price,
         "change_pct": record.change_pct,
@@ -374,6 +416,11 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
                 executability_band=opp.executability_band,
                 interesting_signal=opp.interesting_signal,
                 operable_signal=opp.operable_signal,
+                estimated_trade_margin_pct=opp.estimated_trade_margin_pct,
+                operational_friction_pct=opp.operational_friction_pct,
+                estimated_net_trade_edge_pct=opp.estimated_net_trade_edge_pct,
+                trade_margin_score=opp.trade_margin_score,
+                opportunity_type=opp.opportunity_type,
                 bid_notional_top_n=opp.bid_notional_top_n,
                 ask_notional_top_n=opp.ask_notional_top_n,
                 total_notional_top_n=opp.total_notional_top_n,
@@ -414,11 +461,11 @@ async def purge_history_older_than(*, retention_days: int, now: datetime | None 
             .where(OpportunityRecord.detected_at < cutoff)
         )
         removable_count = int((await session.scalar(count_query)) or 0)
-        if removable_count == 0:
-            return 0
-
         await session.execute(delete(OpportunityRecord).where(OpportunityRecord.detected_at < cutoff))
         await session.execute(delete(RawMarketObservationRecord).where(RawMarketObservationRecord.detected_at < cutoff))
+        await session.execute(delete(TechnicalSignalRecord).where(TechnicalSignalRecord.detected_at < cutoff))
+        await session.execute(delete(WorkspaceSignalProjectionRecord).where(WorkspaceSignalProjectionRecord.created_at < cutoff))
+        await session.execute(delete(SignalOutcomeRecord).where(SignalOutcomeRecord.signal_detected_at < cutoff))
         await session.commit()
 
     logger.info(
@@ -510,6 +557,109 @@ def _apply_history_filters(
     return query
 
 
+def _apply_workspace_history_filters(query, workspace_config: AppConfig | None):
+    if workspace_config is None:
+        return query
+
+    enabled_exchanges = [
+        exchange.value if hasattr(exchange, "value") else exchange
+        for exchange in workspace_config.enabled_exchanges
+    ]
+    profile = resolve_trading_profile(workspace_config)
+    query = query.where(OpportunityRecord.exchange.in_(enabled_exchanges))
+    if workspace_config.enabled_pairs:
+        query = query.where(OpportunityRecord.pair.in_(workspace_config.enabled_pairs))
+    query = query.where(OpportunityRecord.volatility_pct >= workspace_config.thresholds.min_volatility_pct)
+    query = query.where(OpportunityRecord.liquidity_units >= workspace_config.thresholds.min_liquidity_units)
+    query = query.where(OpportunityRecord.spread_pct <= workspace_config.thresholds.max_spread_pct)
+    query = query.where(
+        OpportunityRecord.quote_volume_24h
+        >= max(workspace_config.thresholds.min_volume_brl_small, profile.min_quote_volume_brl)
+    )
+    return query
+
+
+def _workspace_adjusted_score(row: dict, workspace_config: AppConfig | None) -> float:
+    if workspace_config is None:
+        return row["score"]
+    return get_workspace_score(
+        volatility_score=row.get("volatility_score") or 0,
+        volume_score=row.get("volume_score") or 0,
+        liquidity_score=row.get("liquidity_score") or 0,
+        spread_score=row.get("spread_score") or 0,
+        repetition_score=row.get("repetition_score") or 0,
+        movement_type=row.get("movement_type") or "",
+        historical_confidence=row.get("historical_confidence") or 1.0,
+        weights=workspace_config.weights,
+    )
+
+
+async def get_history_summary(
+    limit: int = 100,
+    offset: int = 0,
+    exchange: str | None = None,
+    pair: str | None = None,
+    min_score: float | None = None,
+    hours: int | None = None,
+    workspace_config: AppConfig | None = None,
+) -> list[dict]:
+    """Retrieve a reduced history payload for list views."""
+    async with async_session() as session:
+        query = select(
+            OpportunityRecord.id,
+            OpportunityRecord.exchange,
+            OpportunityRecord.pair,
+            OpportunityRecord.score,
+            OpportunityRecord.executability_score,
+            OpportunityRecord.trade_margin_score,
+            OpportunityRecord.estimated_net_trade_edge_pct,
+            OpportunityRecord.opportunity_type,
+            OpportunityRecord.spread_pct,
+            OpportunityRecord.last_price,
+            OpportunityRecord.change_pct,
+            OpportunityRecord.movement_type,
+            OpportunityRecord.detected_at,
+            OpportunityRecord.volatility_score,
+            OpportunityRecord.volume_score,
+            OpportunityRecord.liquidity_score,
+            OpportunityRecord.spread_score,
+            OpportunityRecord.repetition_score,
+            OpportunityRecord.historical_confidence,
+        ).order_by(desc(OpportunityRecord.detected_at))
+
+        query = _apply_history_filters(query, exchange=exchange, pair=pair, min_score=None if workspace_config else min_score, hours=hours)
+        query = _apply_workspace_history_filters(query, workspace_config)
+        query = query.offset(offset).limit(limit)
+
+        result = await session.execute(query)
+        rows = [dict(row) for row in result.mappings().all()]
+
+    summaries = []
+    for row in rows:
+        score = _workspace_adjusted_score(row, workspace_config)
+        if min_score is not None and score < min_score:
+            continue
+        detected_at = ensure_utc_datetime(row["detected_at"])
+        summaries.append(
+            {
+                "id": row["id"],
+                "exchange": row["exchange"],
+                "pair": row["pair"],
+                "score": score,
+                "executability_score": row["executability_score"],
+                "trade_margin_score": row["trade_margin_score"],
+                "estimated_net_trade_edge_pct": row["estimated_net_trade_edge_pct"],
+                "opportunity_type": row["opportunity_type"],
+                "spread_pct": row["spread_pct"],
+                "last_price": row["last_price"],
+                "change_pct": row["change_pct"],
+                "movement_type": row["movement_type"],
+                "detected_at": detected_at.isoformat(),
+            }
+        )
+    return summaries
+
+
 async def get_filtered_analytics(
     exchange: str | None = None,
     pair: str | None = None,
@@ -518,15 +668,41 @@ async def get_filtered_analytics(
     workspace_config: AppConfig | None = None,
 ) -> dict:
     """Get aggregated analytics from history with the same filters used by /history."""
-    history_rows = await get_history(
-        limit=1000,
-        offset=0,
-        exchange=exchange,
-        pair=pair,
-        min_score=min_score,
-        hours=hours,
-        workspace_config=workspace_config,
-    )
+    async with async_session() as session:
+        query = select(
+            OpportunityRecord.pair,
+            OpportunityRecord.exchange,
+            OpportunityRecord.score,
+            OpportunityRecord.movement_type,
+            OpportunityRecord.movement_regime,
+            OpportunityRecord.detected_at,
+            OpportunityRecord.arbitrage_available,
+            OpportunityRecord.cross_exchange_gap_pct,
+            OpportunityRecord.executability_score,
+            OpportunityRecord.profile_version,
+            OpportunityRecord.opportunity_type,
+            OpportunityRecord.estimated_net_trade_edge_pct,
+            OpportunityRecord.volatility_score,
+            OpportunityRecord.volume_score,
+            OpportunityRecord.liquidity_score,
+            OpportunityRecord.spread_score,
+            OpportunityRecord.repetition_score,
+            OpportunityRecord.historical_confidence,
+        ).order_by(desc(OpportunityRecord.detected_at)).limit(5000)
+        query = _apply_history_filters(query, exchange=exchange, pair=pair, min_score=None if workspace_config else min_score, hours=hours)
+        query = _apply_workspace_history_filters(query, workspace_config)
+        result = await session.execute(query)
+        history_rows = [dict(row) for row in result.mappings().all()]
+
+    if workspace_config is not None or min_score is not None:
+        adjusted_rows = []
+        for row in history_rows:
+            row["score"] = _workspace_adjusted_score(row, workspace_config)
+            if min_score is not None and row["score"] < min_score:
+                continue
+            adjusted_rows.append(row)
+        history_rows = adjusted_rows
+
     total_count = len(history_rows)
 
     pair_counts: dict[str, int] = {}
@@ -538,6 +714,8 @@ async def get_filtered_analytics(
     arbitrage_count = 0
     gap_values: list[float] = []
     executability_buckets = {"0-40": 0, "40-60": 0, "60-80": 0, "80-100": 0}
+    opportunity_type_distribution = {"trade": 0, "hold": 0, "observe": 0, "avoid": 0}
+    net_edge_by_type: dict[str, list[float]] = {}
 
     for row in history_rows:
         pair_counts[row["pair"]] = pair_counts.get(row["pair"], 0) + 1
@@ -545,7 +723,12 @@ async def get_filtered_analytics(
         movement_distribution[row["movement_type"]] = movement_distribution.get(row["movement_type"], 0) + 1
         if row.get("movement_regime"):
             movement_regime_distribution[row["movement_regime"]] = movement_regime_distribution.get(row["movement_regime"], 0) + 1
-        detected_at = ensure_utc_datetime(datetime.fromisoformat(row["detected_at"]))
+        detected_at_value = row["detected_at"]
+        detected_at = ensure_utc_datetime(
+            datetime.fromisoformat(detected_at_value)
+            if isinstance(detected_at_value, str)
+            else detected_at_value
+        )
         hourly_distribution[str(detected_at.hour)] += 1
         if row["arbitrage_available"]:
             arbitrage_count += 1
@@ -561,6 +744,11 @@ async def get_filtered_analytics(
                 executability_buckets["60-80"] += 1
             else:
                 executability_buckets["80-100"] += 1
+        opportunity_type = row.get("opportunity_type")
+        if opportunity_type in opportunity_type_distribution:
+            opportunity_type_distribution[opportunity_type] += 1
+            if row.get("estimated_net_trade_edge_pct") is not None:
+                net_edge_by_type.setdefault(opportunity_type, []).append(float(row["estimated_net_trade_edge_pct"]))
 
     top_pairs = [
         {"pair": pair_name, "count": count}
@@ -594,6 +782,12 @@ async def get_filtered_analytics(
         "executability_distribution": executability_buckets,
         "movement_distribution": movement_distribution,
         "movement_regime_distribution": movement_regime_distribution,
+        "opportunity_type_distribution": opportunity_type_distribution,
+        "avg_net_trade_edge_by_type": {
+            opportunity_type: round(sum(values) / len(values), 4)
+            for opportunity_type, values in net_edge_by_type.items()
+            if values
+        },
         "hourly_distribution": hourly_distribution,
         "arbitrage_count": arbitrage_count,
         "avg_cross_exchange_gap_pct": avg_cross_exchange_gap,

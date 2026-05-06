@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api import routes
-from app.models.schemas import AppConfig, Exchange, ExchangeCredentialValidationResult
+from app.models.schemas import AppConfig, Exchange, ExchangeCredentialValidationResult, Opportunity
 from app.services.auth import UserSession
 
 
@@ -26,6 +26,44 @@ def make_workspace(*, role: str = "owner", **overrides):
     return type("Workspace", (), payload)()
 
 
+def make_opportunity(**overrides) -> Opportunity:
+    payload = {
+        "id": "opp-1",
+        "exchange": Exchange.NOVADAX,
+        "pair": "BTC_BRL",
+        "score": 74.0,
+        "technical_score": 70.0,
+        "executability_score": 78.0,
+        "executability_band": "good",
+        "interesting_signal": True,
+        "operable_signal": True,
+        "estimated_trade_margin_pct": 1.2,
+        "operational_friction_pct": 0.18,
+        "estimated_net_trade_edge_pct": 1.02,
+        "trade_margin_score": 51.0,
+        "opportunity_type": "trade",
+        "volatility_pct": 4.0,
+        "volume_24h": 20.0,
+        "quote_volume_24h": 300000.0,
+        "liquidity_units": 10000.0,
+        "bid_notional_top_n": 20000.0,
+        "ask_notional_top_n": 21000.0,
+        "total_notional_top_n": 41000.0,
+        "spread_pct": 0.08,
+        "estimated_buy_slippage_bps": 4.0,
+        "estimated_sell_slippage_bps": 5.0,
+        "fillable_notional_within_slippage_cap": 3000.0,
+        "baseline_order_notional_brl": 1000.0,
+        "movement_type": "strong_range",
+        "movement_regime": "trend_continuation",
+        "movement_persistence_score": 0.6,
+        "last_price": 300000.0,
+        "change_pct": 1.4,
+    }
+    payload.update(overrides)
+    return Opportunity(**payload)
+
+
 def test_config_requires_admin_token(monkeypatch):
     monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
     routes.set_scan_config(AppConfig())
@@ -43,6 +81,35 @@ def test_dashboard_requires_authenticated_session(monkeypatch):
     response = client.get("/api/dashboard/stats")
 
     assert response.status_code == 401
+
+
+def test_dashboard_endpoint_returns_opportunities_and_stats_in_one_payload(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(role="owner"), AppConfig(enabled_pairs=["BTC_BRL"])
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    routes.update_state([make_opportunity()], None)
+
+    client = create_test_client()
+    response = client.get("/api/dashboard", headers={"X-Admin-Token": "secret-token"})
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["stats"]["total_opportunities"] == 1
+    assert body["stats"]["trade_opportunities"] == 1
+    assert body["opportunities"][0]["opportunity_type"] == "trade"
 
 
 def test_history_requires_authenticated_session(monkeypatch):

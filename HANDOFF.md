@@ -49,6 +49,9 @@ Documentos principais ja existentes:
 - Persistencia de historico, auditoria e configuracao por workspace.
 - Atualizacao em tempo real via WebSocket.
 - Painel web funcional com modal de detalhe, historico, login administrativo e seletor de workspace.
+- Dashboard consome payload agregado em `/api/dashboard`; historico usa `/api/history/summary` e analytics operacional sob demanda para reduzir egress.
+- Scanner em modo default faz descoberta ampla de pares BRL quando nao ha watchlist manual em `enabled_pairs`.
+- Oportunidades agora incluem margem operacional e classificacao `trade`, `hold`, `observe` ou `avoid`.
 - Fundacao multi-tenant com `users`, `workspaces`, `workspace_memberships` e `workspace_configs`.
 - Worker dedicado com mesmo contrato de scan que o processo principal.
 - API capaz de operar sem scanner local, lendo snapshots do banco (modo `api_only`).
@@ -61,6 +64,7 @@ Documentos principais ja existentes:
 - Feature gates por plano e integracao com Stripe.
 - Autoregistro aberto sem convite.
 - Observabilidade externa e operacao de producao mais refinadas.
+- Medicao objetiva de egress por rota/tela ainda precisa de telemetria em producao.
 
 ## Modelo de Dados P2
 

@@ -1,6 +1,6 @@
 # Backlog
 
-Ultima revisao: 2026-04-18
+Ultima revisao: 2026-05-05
 
 Legenda: `[x]` concluido · `[ ]` pendente · `[~]` parcialmente feito
 
@@ -36,6 +36,7 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 ## Concluido (historico)
 
 ### Plano de executabilidade operacional
+- [x] Especificacao BRL 2026-05 - margem operacional, classificacao `trade/hold/observe/avoid`, descoberta ampla BRL, resumo de historico e reducao de egress do dashboard/analytics
 - [x] Release E â€” trading profile por workspace, thresholds operacionais e filtros de alerta
 - [x] Release F â€” `duration_minutes`, `movement_persistence_score` e taxonomia `movement_regime`
 - [x] Release G â€” reweighting conservador por outcome e analytics operacionais por bucket

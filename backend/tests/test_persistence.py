@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models.database import Base, OpportunityRecord
+from app.models.database import RawMarketObservationRecord, SignalOutcomeRecord, TechnicalSignalRecord, WorkspaceSignalProjectionRecord
 from app.services import persistence
 from app.models.schemas import AppConfig, Exchange, MovementRegime, MovementType, Opportunity
 
@@ -271,6 +272,152 @@ def test_workspace_operability_recalculates_slippage_from_profile():
     assert serialized["estimated_sell_slippage_bps"] > 12
 
 
+def test_history_summary_returns_reduced_payload(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"history-summary-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(persistence, "async_session", session_factory)
+
+        async with session_factory() as session:
+            session.add(
+                OpportunityRecord(
+                    id="summary-1",
+                    exchange="binance",
+                    pair="BTC_BRL",
+                    score=80,
+                    technical_score=75,
+                    executability_score=72,
+                    trade_margin_score=44,
+                    estimated_net_trade_edge_pct=0.88,
+                    opportunity_type="trade",
+                    volatility_pct=5,
+                    volume_24h=1000,
+                    quote_volume_24h=100000,
+                    liquidity_units=5000,
+                    spread_pct=0.2,
+                    movement_type="strong_range",
+                    last_price=100,
+                    change_pct=4,
+                    detected_at=datetime(2026, 4, 15, 18, 55, 30),
+                    duration_minutes=10,
+                )
+            )
+            await session.commit()
+
+        rows = await persistence.get_history_summary(limit=10)
+
+        assert rows == [
+            {
+                "id": "summary-1",
+                "exchange": "binance",
+                "pair": "BTC_BRL",
+                "score": 80,
+                "executability_score": 72,
+                "trade_margin_score": 44,
+                "estimated_net_trade_edge_pct": 0.88,
+                "opportunity_type": "trade",
+                "spread_pct": 0.2,
+                "last_price": 100,
+                "change_pct": 4,
+                "movement_type": "strong_range",
+                "detected_at": "2026-04-15T18:55:30+00:00",
+            }
+        ]
+        assert "volume_24h" not in rows[0]
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
+
+
+def test_filtered_analytics_includes_opportunity_type_and_margin_distribution(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"analytics-margin-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(persistence, "async_session", session_factory)
+
+        now = datetime.now(timezone.utc)
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    OpportunityRecord(
+                        id="trade-1",
+                        exchange="binance",
+                        pair="BTC_BRL",
+                        score=80,
+                        volatility_pct=5,
+                        volume_24h=1000,
+                        quote_volume_24h=100000,
+                        liquidity_units=5000,
+                        spread_pct=0.2,
+                        movement_type="strong_range",
+                        last_price=100,
+                        change_pct=4,
+                        detected_at=now,
+                        duration_minutes=10,
+                        opportunity_type="trade",
+                        estimated_net_trade_edge_pct=0.8,
+                    ),
+                    OpportunityRecord(
+                        id="hold-1",
+                        exchange="binance",
+                        pair="ETH_BRL",
+                        score=65,
+                        volatility_pct=4,
+                        volume_24h=900,
+                        quote_volume_24h=90000,
+                        liquidity_units=4000,
+                        spread_pct=0.3,
+                        movement_type="spike",
+                        last_price=90,
+                        change_pct=3,
+                        detected_at=now,
+                        duration_minutes=8,
+                        opportunity_type="hold",
+                        estimated_net_trade_edge_pct=0.4,
+                    ),
+                ]
+            )
+            await session.commit()
+
+        analytics = await persistence.get_filtered_analytics(hours=1)
+
+        assert analytics["opportunity_type_distribution"] == {
+            "trade": 1,
+            "hold": 1,
+            "observe": 0,
+            "avoid": 0,
+        }
+        assert analytics["avg_net_trade_edge_by_type"] == {
+            "trade": 0.8,
+            "hold": 0.4,
+        }
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
+
+
 def test_save_opportunities_uses_semantic_dedup(monkeypatch):
     db_dir = Path(__file__).resolve().parent / ".tmp"
     db_dir.mkdir(exist_ok=True)
@@ -309,6 +456,113 @@ def test_save_opportunities_uses_semantic_dedup(monkeypatch):
 
         rows = await persistence.get_history(limit=10)
         assert [row["id"] for row in rows] == ["sem-1"]
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
+
+
+def test_history_retention_prunes_all_historical_layers(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"retention-layers-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(persistence, "async_session", session_factory)
+
+        now = datetime.now(timezone.utc)
+        stale = now - timedelta(days=120)
+        recent = now - timedelta(days=2)
+
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    TechnicalSignalRecord(
+                        id="stale-signal",
+                        exchange="binance",
+                        pair="BTC_BRL",
+                        technical_score=70,
+                        volatility_pct=5,
+                        volume_24h=1000,
+                        quote_volume_24h=100000,
+                        liquidity_units=5000,
+                        spread_pct=0.2,
+                        movement_type="strong_range",
+                        last_price=100,
+                        change_pct=4,
+                        detected_at=stale,
+                    ),
+                    TechnicalSignalRecord(
+                        id="recent-signal",
+                        exchange="binance",
+                        pair="ETH_BRL",
+                        technical_score=60,
+                        volatility_pct=4,
+                        volume_24h=800,
+                        quote_volume_24h=90000,
+                        liquidity_units=4000,
+                        spread_pct=0.3,
+                        movement_type="spike",
+                        last_price=90,
+                        change_pct=3,
+                        detected_at=recent,
+                    ),
+                    WorkspaceSignalProjectionRecord(
+                        id="stale-projection",
+                        workspace_id="workspace-1",
+                        technical_signal_id="stale-signal",
+                        workspace_score=70,
+                        created_at=stale,
+                    ),
+                    RawMarketObservationRecord(
+                        id="stale-raw",
+                        observation_cycle_id="cycle-old",
+                        exchange="binance",
+                        pair="BTC_BRL",
+                        movement_type="strong_range",
+                        last_price=100,
+                        quote_volume_24h=100000,
+                        liquidity_units=5000,
+                        spread_pct=0.2,
+                        detected_at=stale,
+                        created_at=stale,
+                    ),
+                    SignalOutcomeRecord(
+                        id="stale-outcome",
+                        technical_signal_id="stale-signal",
+                        exchange="binance",
+                        pair="BTC_BRL",
+                        entry_price=100,
+                        signal_detected_at=stale,
+                        created_at=stale,
+                    ),
+                ]
+            )
+            await session.commit()
+
+        removed = await persistence.purge_history_older_than(retention_days=90, now=now)
+
+        async with session_factory() as session:
+            stale_signal = await session.get(TechnicalSignalRecord, "stale-signal")
+            recent_signal = await session.get(TechnicalSignalRecord, "recent-signal")
+            stale_projection = await session.get(WorkspaceSignalProjectionRecord, "stale-projection")
+            stale_raw = await session.get(RawMarketObservationRecord, "stale-raw")
+            stale_outcome = await session.get(SignalOutcomeRecord, "stale-outcome")
+
+        assert removed == 0
+        assert stale_signal is None
+        assert recent_signal is not None
+        assert stale_projection is None
+        assert stale_raw is None
+        assert stale_outcome is None
 
         await engine.dispose()
         if db_path.exists():

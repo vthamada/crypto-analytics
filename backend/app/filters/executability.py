@@ -5,6 +5,8 @@ from typing import Literal
 
 from app.models.schemas import OrderBook
 
+OpportunityType = Literal["trade", "hold", "observe", "avoid"]
+
 
 def _get_entries(order_book: OrderBook, side: Literal["buy", "sell"]):
     return order_book.asks if side == "buy" else order_book.bids
@@ -167,3 +169,71 @@ def classify_executability_band(score: float | None) -> str | None:
     if score >= 40:
         return "fair"
     return "poor"
+
+
+def calculate_trade_margin_metrics(
+    *,
+    volatility_pct: float,
+    recent_change_pct: float,
+    spread_pct: float,
+    estimated_buy_slippage_bps: float | None,
+    estimated_sell_slippage_bps: float | None,
+    movement_type: str,
+    movement_regime: str | None,
+    movement_persistence_score: float | None,
+) -> dict[str, float]:
+    """Estimate whether the current move leaves enough net edge after friction."""
+    buy_slippage_pct = (estimated_buy_slippage_bps or 0.0) / 100.0
+    sell_slippage_pct = (estimated_sell_slippage_bps or 0.0) / 100.0
+    operational_friction_pct = max(spread_pct, 0.0) + buy_slippage_pct + sell_slippage_pct
+
+    gross_move_pct = max(abs(recent_change_pct), volatility_pct * 0.35, 0.0)
+    movement_multiplier = {
+        "strong_range": 1.0,
+        "spike": 0.75,
+        "weak": 0.4,
+        "trap": 0.2,
+    }.get(movement_type, 0.5)
+    regime_multiplier = {
+        "trend_continuation": 1.0,
+        "breakout_clean": 0.95,
+        "mean_reversion_candidate": 0.65,
+        "breakout_exhaustion": 0.45,
+        "illiquid_spike": 0.25,
+    }.get(movement_regime or "", 0.55)
+    persistence_multiplier = 0.5 + (_clamp(movement_persistence_score or 0.0) * 0.5)
+
+    estimated_trade_margin_pct = gross_move_pct * movement_multiplier * regime_multiplier * persistence_multiplier
+    estimated_net_trade_edge_pct = estimated_trade_margin_pct - operational_friction_pct
+    trade_margin_score = _normalize_linear(estimated_net_trade_edge_pct, 0.0, 2.0) * 100
+
+    return {
+        "estimated_trade_margin_pct": round(estimated_trade_margin_pct, 4),
+        "operational_friction_pct": round(operational_friction_pct, 4),
+        "estimated_net_trade_edge_pct": round(estimated_net_trade_edge_pct, 4),
+        "trade_margin_score": round(trade_margin_score, 1),
+    }
+
+
+def classify_opportunity_type(
+    *,
+    operable_signal: bool | None,
+    interesting_signal: bool | None,
+    executability_score: float | None,
+    trade_margin_score: float | None,
+    estimated_net_trade_edge_pct: float | None,
+    movement_regime: str | None,
+) -> OpportunityType:
+    """Classify an opportunity by practical actionability, not only by score."""
+    exec_score = executability_score or 0.0
+    margin_score = trade_margin_score or 0.0
+    net_edge = estimated_net_trade_edge_pct if estimated_net_trade_edge_pct is not None else -999.0
+    risky_regime = movement_regime in {"illiquid_spike", "breakout_exhaustion"}
+
+    if risky_regime or net_edge < 0 or exec_score < 35:
+        return "avoid"
+    if operable_signal and exec_score >= 60 and margin_score >= 35 and net_edge >= 0.3:
+        return "trade"
+    if interesting_signal and exec_score >= 55 and margin_score >= 30 and net_edge >= 0.2:
+        return "hold"
+    return "observe"

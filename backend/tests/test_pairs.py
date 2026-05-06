@@ -83,3 +83,42 @@ def test_filter_pairs_by_availability_returns_only_supported_pairs():
 
     assert filtered[Exchange.NOVADAX] == ["BTC_BRL"]
     assert filtered[Exchange.BINANCE] == ["BTC_BRL", "DOGE_BRL"]
+
+
+def test_scannable_pairs_uses_brl_discovery_when_enabled_pairs_empty(monkeypatch):
+    async def run_test():
+        catalog = {
+            "pairs": [
+                {
+                    "pair": "BTC_BRL",
+                    "display_name": "BTC/BRL",
+                    "availability": {"novadax": True, "mercado_bitcoin": True, "binance": True},
+                },
+                {
+                    "pair": "ETH_BRL",
+                    "display_name": "ETH/BRL",
+                    "availability": {"novadax": False, "mercado_bitcoin": True, "binance": True},
+                },
+                {
+                    "pair": "BTC_USDT",
+                    "display_name": "BTC/USDT",
+                    "availability": {"novadax": False, "mercado_bitcoin": False, "binance": True},
+                },
+            ]
+        }
+
+        async def fake_catalog(force_refresh: bool = False):
+            return catalog
+
+        monkeypatch.setattr(pairs, "get_available_pairs_catalog", fake_catalog)
+
+        scannable = await pairs.get_scannable_pairs_by_exchange(
+            enabled_pairs=[],
+            enabled_exchanges=[Exchange.NOVADAX, Exchange.MERCADO_BITCOIN, Exchange.BINANCE],
+        )
+
+        assert scannable[Exchange.NOVADAX] == ["BTC_BRL"]
+        assert scannable[Exchange.MERCADO_BITCOIN] == ["BTC_BRL", "ETH_BRL"]
+        assert scannable[Exchange.BINANCE] == ["BTC_BRL", "ETH_BRL"]
+
+    asyncio.run(run_test())

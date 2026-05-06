@@ -3,6 +3,8 @@ import type { Opportunity } from "./types";
 export type OpportunitySortMode =
   | "score"
   | "executability"
+  | "trade_margin"
+  | "net_edge"
   | "gap"
   | "volume"
   | "volatility"
@@ -81,6 +83,10 @@ export function getSortValue(opportunity: Opportunity, sortBy: OpportunitySortMo
   switch (sortBy) {
     case "executability":
       return getExecutabilityScore(opportunity) ?? -1;
+    case "trade_margin":
+      return opportunity.trade_margin_score ?? -1;
+    case "net_edge":
+      return opportunity.estimated_net_trade_edge_pct ?? -999;
     case "gap":
       return opportunity.cross_exchange_gap_pct;
     case "volume":
@@ -139,6 +145,23 @@ export function getOperabilityReasons(opportunity: Opportunity): OpportunityReas
     reasons.push({ label: "Operavel", tone: "positive" });
   } else if (isInterestingSignal(opportunity)) {
     reasons.push({ label: "Interessante", tone: "neutral" });
+  }
+
+  if (opportunity.opportunity_type === "trade") {
+    reasons.push({ label: "Trade", tone: "positive" });
+  } else if (opportunity.opportunity_type === "hold") {
+    reasons.push({ label: "Hold", tone: "warning" });
+  } else if (opportunity.opportunity_type === "avoid") {
+    reasons.push({ label: "Evitar", tone: "negative" });
+  }
+
+  const netEdge = opportunity.estimated_net_trade_edge_pct;
+  if (netEdge != null) {
+    if (netEdge >= 0.3) {
+      reasons.push({ label: `Margem +${netEdge.toFixed(2)}%`, tone: "positive" });
+    } else if (netEdge < 0) {
+      reasons.push({ label: "Margem negativa", tone: "negative" });
+    }
   }
 
   const band = getExecutabilityBand(opportunity);

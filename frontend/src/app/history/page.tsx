@@ -32,9 +32,9 @@ import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/inline-error-state";
 import { SessionRequiredState } from "@/components/session-required-state";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { getHistory, getOperationalAnalytics } from "@/lib/api";
+import { getHistorySummary, getOperationalAnalytics } from "@/lib/api";
 import { useHasAuthenticatedWorkspace } from "@/hooks/use-has-authenticated-workspace";
-import type { Analytics, HistoryRecord } from "@/lib/types";
+import type { Analytics, HistorySummaryRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const CHART_COLORS = [
@@ -112,9 +112,11 @@ function scoreColor(score: number): string {
 }
 
 function HistoryContent() {
-  const [records, setRecords] = useState<HistoryRecord[]>([]);
+  const [records, setRecords] = useState<HistorySummaryRecord[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hours, setHours] = useState<string>("24");
   const [page, setPage] = useState(0);
@@ -122,23 +124,38 @@ function HistoryContent() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [hist, anal] = await Promise.all([
-        getHistory({ hours: parseInt(hours, 10), limit: 100, offset: page * 100 }),
-        getOperationalAnalytics({ hours: parseInt(hours, 10) }),
-      ]);
+      const hist = await getHistorySummary({ hours: parseInt(hours, 10), limit: 100, offset: page * 100 });
       setRecords(hist);
-      setAnalytics(anal);
       setError(null);
     } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : "Falha ao carregar histórico e analytics.");
+      setError(fetchError instanceof Error ? fetchError.message : "Falha ao carregar historico.");
     } finally {
       setLoading(false);
     }
   }, [hours, page]);
 
+  const fetchAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true);
+    try {
+      const anal = await getOperationalAnalytics({ hours: parseInt(hours, 10) });
+      setAnalytics(anal);
+      setAnalyticsLoaded(true);
+      setError(null);
+    } catch (fetchError) {
+      setError(fetchError instanceof Error ? fetchError.message : "Falha ao carregar analytics.");
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [hours]);
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    setAnalytics(null);
+    setAnalyticsLoaded(false);
+  }, [hours]);
 
   const scoreDistData = analytics
     ? Object.entries(analytics.score_distribution).map(([range, count]) => ({ range, count }))
@@ -166,7 +183,7 @@ function HistoryContent() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Histórico & Analytics</h1>
           <p className="text-sm text-muted-foreground">
-            {analytics?.total_records ?? 0} sinais registrados
+            {records.length} sinais nesta pagina
           </p>
         </div>
         <Select value={hours} onValueChange={(value) => setHours(value ?? "24")}>
@@ -184,6 +201,22 @@ function HistoryContent() {
       </div>
 
       {error ? <InlineErrorState message={error} onRetry={() => void fetchData()} /> : null}
+
+      {!analyticsLoaded ? (
+        <Card className="rounded-2xl border-dashed">
+          <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium">Analytics operacional sob demanda</p>
+              <p className="text-sm text-muted-foreground">
+                Graficos e agregados pesados ficam desligados por padrao para reduzir leitura e egress do Supabase.
+              </p>
+            </div>
+            <Button onClick={() => void fetchAnalytics()} disabled={analyticsLoading}>
+              {analyticsLoading ? "Carregando..." : "Carregar analytics"}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {analytics ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -215,6 +248,7 @@ function HistoryContent() {
         </div>
       ) : null}
 
+      {analytics ? (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="rounded-2xl">
           <CardHeader className="pb-2">
@@ -277,7 +311,9 @@ function HistoryContent() {
           </CardContent>
         </Card>
       </div>
+      ) : null}
 
+      {analytics ? (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="rounded-2xl">
           <CardHeader className="pb-2">
@@ -336,6 +372,7 @@ function HistoryContent() {
           </CardContent>
         </Card>
       </div>
+      ) : null}
 
       {analytics && analytics.avg_score_by_exchange.length > 0 ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

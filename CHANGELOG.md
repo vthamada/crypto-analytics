@@ -12,6 +12,22 @@ Convencao deste repositorio:
 
 - Nenhuma entrada em aberto.
 
+## [2026-05-05]
+
+### Added
+- Score de margem operacional com `estimated_trade_margin_pct`, `operational_friction_pct`, `estimated_net_trade_edge_pct` e `trade_margin_score`.
+- Classificacao pratica da oportunidade em `trade`, `hold`, `observe` ou `avoid`.
+- Endpoint consolidado `GET /api/dashboard` para entregar stats e oportunidades em um unico payload.
+- Endpoint `GET /api/history/summary` com payload reduzido para listagem historica.
+- Migration `0008_operational_margin_classification` para persistir margem operacional e classificacao.
+
+### Changed
+- Dashboard inicial passou a usar payload agregado e derivar stats dos eventos WebSocket, evitando refetch duplicado de `/dashboard/stats`.
+- Historico passou a carregar analytics operacional apenas sob demanda; a listagem usa resumo paginado em vez do historico completo.
+- Analytics operacional agora agrega distribuicao por tipo de oportunidade e margem liquida media por tipo a partir de linhas compactas no backend.
+- Configuracao default de pares passou para modo descoberta BRL ampla; uma lista manual continua funcionando como watchlist.
+- Retencao historica agora limpa tambem `technical_signals`, `workspace_signal_projections`, `raw_market_observations` e `signal_outcomes`.
+
 ## [2026-04-24]
 
 ### Added

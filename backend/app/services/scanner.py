@@ -26,6 +26,8 @@ from app.filters.volatility import calculate_volatility, passes_volatility_filte
 from app.filters.volume import passes_volume_filter, volume_score
 from app.filters.executability import (
     calculate_executability_score,
+    calculate_trade_margin_metrics,
+    classify_opportunity_type,
     classify_executability_band,
     estimate_fillable_notional,
     estimate_slippage_bps,
@@ -163,9 +165,10 @@ class Scanner:
 
             # Classify movement
             movement_type = classify_movement(klines)
+            spread_pct = round(calculate_spread(order_book), 4)
             movement_regime = classify_movement_regime(
                 klines,
-                spread_pct=round(calculate_spread(order_book), 4),
+                spread_pct=spread_pct,
                 quote_volume_24h=ticker.quote_volume_24h,
             )
 
@@ -226,7 +229,7 @@ class Scanner:
                 ask_notional_top_n=ask_notional_top_n,
                 estimated_buy_slippage_bps=serialized_buy_slippage,
                 estimated_sell_slippage_bps=serialized_sell_slippage,
-                spread_pct=round(calculate_spread(order_book), 4),
+                spread_pct=spread_pct,
                 quote_volume_24h=ticker.quote_volume_24h,
                 fillable_notional_within_slippage_cap=serialized_fillable_notional,
                 order_notional_brl=trading_profile.order_notional_brl,
@@ -244,7 +247,6 @@ class Scanner:
             historical_confidence = self._historical_calibration.get(pair, {}).get("factor", 1.0)
             score = min(max(round(score * historical_confidence, 1), 0), 100)
             interesting_signal = score >= 40
-            spread_pct = round(calculate_spread(order_book), 4)
             operable_signal = (
                 executability_score >= DEFAULT_OPERABLE_EXECUTABILITY_SCORE
                 and ticker.quote_volume_24h >= trading_profile.min_quote_volume_brl
@@ -254,6 +256,25 @@ class Scanner:
                 and serialized_buy_slippage <= trading_profile.max_entry_slippage_bps
                 and spread_pct <= self.config.thresholds.max_spread_pct
                 and movement_persistence_score >= 0.02
+            )
+            recent_change_pct = round(calculate_recent_change(klines), 2)
+            trade_margin_metrics = calculate_trade_margin_metrics(
+                volatility_pct=volatility_pct,
+                recent_change_pct=recent_change_pct,
+                spread_pct=spread_pct,
+                estimated_buy_slippage_bps=serialized_buy_slippage,
+                estimated_sell_slippage_bps=serialized_sell_slippage,
+                movement_type=movement_type.value,
+                movement_regime=movement_regime.value,
+                movement_persistence_score=movement_persistence_score,
+            )
+            opportunity_type = classify_opportunity_type(
+                operable_signal=operable_signal,
+                interesting_signal=interesting_signal,
+                executability_score=executability_score,
+                trade_margin_score=trade_margin_metrics["trade_margin_score"],
+                estimated_net_trade_edge_pct=trade_margin_metrics["estimated_net_trade_edge_pct"],
+                movement_regime=movement_regime.value,
             )
 
             technical_score = calculate_technical_score(
@@ -280,6 +301,11 @@ class Scanner:
                 executability_band=executability_band,
                 interesting_signal=interesting_signal,
                 operable_signal=operable_signal,
+                estimated_trade_margin_pct=trade_margin_metrics["estimated_trade_margin_pct"],
+                operational_friction_pct=trade_margin_metrics["operational_friction_pct"],
+                estimated_net_trade_edge_pct=trade_margin_metrics["estimated_net_trade_edge_pct"],
+                trade_margin_score=trade_margin_metrics["trade_margin_score"],
+                opportunity_type=opportunity_type,
                 semantic_signal_key=semantic_signal_key,
                 reweighting_version="v1",
                 volatility_pct=round(volatility_pct, 2),
@@ -298,7 +324,7 @@ class Scanner:
                 movement_regime=movement_regime,
                 movement_persistence_score=movement_persistence_score,
                 last_price=ticker.last_price,
-                change_pct=round(calculate_recent_change(klines), 2),
+                change_pct=recent_change_pct,
                 detected_at=datetime.now(timezone.utc),
                 duration_minutes=duration_minutes,
                 historical_confidence=historical_confidence,

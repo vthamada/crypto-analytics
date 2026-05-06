@@ -91,6 +91,24 @@ def select_default_enabled_pairs(catalog: dict, limit: int = DEFAULT_ENABLED_PAI
     return [item["pair"] for item in ranked_pairs[:limit] if item.get("pair")]
 
 
+def select_relevant_brl_pairs(catalog: dict, limit: int | None = None) -> list[str]:
+    pairs = catalog.get("pairs", []) if isinstance(catalog, dict) else []
+    brl_pairs = [
+        item
+        for item in pairs
+        if isinstance(item.get("pair"), str) and item["pair"].upper().endswith("_BRL")
+    ]
+    ranked_pairs = sorted(
+        brl_pairs,
+        key=lambda item: (
+            -sum(1 for available in item.get("availability", {}).values() if available),
+            _sort_pair_key(item.get("pair", "")),
+        ),
+    )
+    selected = [item["pair"] for item in ranked_pairs if item.get("pair")]
+    return selected[:limit] if limit is not None else selected
+
+
 def filter_pairs_by_availability(
     *,
     enabled_pairs: list[str],
@@ -140,10 +158,13 @@ async def get_scannable_pairs_by_exchange(
     enabled_exchanges: list[Exchange],
     force_refresh: bool = False,
 ) -> dict[Exchange, list[str]]:
-    if not enabled_pairs or not enabled_exchanges:
+    if not enabled_exchanges:
         return {exchange: [] for exchange in enabled_exchanges}
 
     catalog = await get_available_pairs_catalog(force_refresh=force_refresh)
+    if not enabled_pairs:
+        enabled_pairs = select_relevant_brl_pairs(catalog)
+
     return filter_pairs_by_availability(
         enabled_pairs=enabled_pairs,
         enabled_exchanges=enabled_exchanges,

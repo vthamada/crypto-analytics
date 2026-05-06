@@ -7,8 +7,10 @@ import type {
   AuthResponse,
   AuditLogEntry,
   DashboardStats,
+  DashboardPayload,
   ExchangeCredentialValidationResponse,
   HistoryRecord,
+  HistorySummaryRecord,
   InvitePreview,
   InviteRecord,
   Opportunity,
@@ -277,6 +279,20 @@ export function getStats(): Promise<DashboardStats> {
   return fetchJSON("/dashboard/stats", { headers: sessionHeaders() });
 }
 
+export function getDashboard(params?: {
+  sort_by?: OpportunitySortMode;
+  limit?: number;
+}): Promise<DashboardPayload> {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return fetchJSON(`/dashboard${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
+}
+
 // Opportunities
 export function getOpportunities(params?: {
   exchange?: string;
@@ -319,6 +335,24 @@ export function getHistory(params?: {
   }
   const qs = query.toString();
   return fetchJSON(`/history${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
+}
+
+export function getHistorySummary(params?: {
+  limit?: number;
+  offset?: number;
+  exchange?: string;
+  pair?: string;
+  min_score?: number;
+  hours?: number;
+}): Promise<HistorySummaryRecord[]> {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return fetchJSON(`/history/summary${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
 }
 
 export function getAnalytics(params?: {

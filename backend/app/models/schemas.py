@@ -92,6 +92,11 @@ class Opportunity(BaseModel):
     executability_band: str | None = None
     interesting_signal: bool | None = None
     operable_signal: bool | None = None
+    estimated_trade_margin_pct: float | None = None
+    operational_friction_pct: float | None = None
+    estimated_net_trade_edge_pct: float | None = None
+    trade_margin_score: float | None = None
+    opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
     volatility_pct: float
     volume_24h: float
     quote_volume_24h: float
@@ -149,7 +154,7 @@ class AppConfig(BaseModel):
         Exchange.MERCADO_BITCOIN,
         Exchange.BINANCE,
     ]
-    enabled_pairs: list[str] = Field(default_factory=lambda: ["SOL_BRL", "WBTC_BRL", "USDT_BRL"])
+    enabled_pairs: list[str] = Field(default_factory=list)
     scan_interval_seconds: int = 30
     trading_profile: Literal["conservador", "intraday_liquido", "agressivo", "scalp"] = "intraday_liquido"
     order_notional_brl: float | None = None
@@ -188,7 +193,17 @@ class DashboardStats(BaseModel):
     best_score: float
     exchanges_online: int
     arbitrage_opportunities: int = 0
+    operable_opportunities: int = 0
+    trade_opportunities: int = 0
+    hold_opportunities: int = 0
+    observe_opportunities: int = 0
+    avoid_opportunities: int = 0
     last_scan: datetime | None = None
+
+
+class DashboardResponse(BaseModel):
+    stats: DashboardStats
+    opportunities: list[Opportunity]
 
 
 class HistoryRecord(BaseModel):
@@ -208,6 +223,11 @@ class HistoryRecord(BaseModel):
     executability_band: str | None = None
     interesting_signal: bool | None = None
     operable_signal: bool | None = None
+    estimated_trade_margin_pct: float | None = None
+    operational_friction_pct: float | None = None
+    estimated_net_trade_edge_pct: float | None = None
+    trade_margin_score: float | None = None
+    opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
     volatility_pct: float
     volume_24h: float
     liquidity_units: float
@@ -238,6 +258,22 @@ class HistoryRecord(BaseModel):
     spread_score: float = 0.0
     repetition_score: float = 0.0
     movement_multiplier: float = 1.0
+
+
+class HistorySummaryRecord(BaseModel):
+    id: str
+    exchange: Exchange
+    pair: str
+    score: float
+    executability_score: float | None = None
+    trade_margin_score: float | None = None
+    estimated_net_trade_edge_pct: float | None = None
+    opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
+    spread_pct: float
+    last_price: float
+    change_pct: float
+    movement_type: MovementType
+    detected_at: datetime
 
 
 class WorkspaceSummary(BaseModel):
