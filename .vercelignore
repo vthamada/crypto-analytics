@@ -1,0 +1,12 @@
+# Local/backend artifacts that are not part of the frontend deployment payload.
+backend/.pytest_cache/
+backend/pytest-cache-files-*/
+backend/*.db
+backend/**/*.pyc
+backend/**/__pycache__/
+
+# Repository and local tooling metadata.
+.git/
+.venv/
+venv/
+node_modules/
