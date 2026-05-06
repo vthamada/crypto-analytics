@@ -62,6 +62,7 @@ O worker:
 
 - carrega configuracao agregada dos workspaces
 - instancia providers por exchange
+- usa Mercado Bitcoin e NovaDAX como nucleo BRL padrao; Binance so entra no ciclo quando estiver habilitada manualmente
 - faz triagem leve por `ticker`/volume/movimento antes de chamadas caras
 - usa temperatura em memoria e cooldown por provider/par para reduzir chamadas repetidas em pares frios ou problemáticos
 - coleta `order_book` e `klines` somente para candidatos promovidos ao estagio profundo

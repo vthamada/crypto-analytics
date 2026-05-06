@@ -479,11 +479,11 @@ export default function SettingsPage() {
     return resolvedWorkspaceId;
   }
 
-  async function loadAdminWorkspaceData(token: string) {
+  async function loadAdminWorkspaceData(token: string): Promise<AppConfig | null> {
     const workspaceId = getStoredWorkspaceId();
     if (!workspaceId) {
       clearWorkspaceManagementState();
-      return;
+      return null;
     }
 
     setUsersLoading(true);
@@ -503,18 +503,23 @@ export default function SettingsPage() {
       setUsers(workspaceUsers);
       setInvites(workspaceInvites);
       setAuthError(null);
+      return data.config;
     } catch (error) {
       clearWorkspaceManagementState();
       setAuthError(error instanceof Error ? error.message : "Falha ao carregar dados administrativos");
+      return null;
     } finally {
       setUsersLoading(false);
     }
   }
 
-  async function loadAvailablePairsCatalog(forceRefresh = false) {
+  async function loadAvailablePairsCatalog(forceRefresh = false, enabledExchanges = config?.enabled_exchanges) {
     setPairCatalogLoading(true);
     try {
-      const catalog = await getAvailablePairs({ force_refresh: forceRefresh });
+      const catalog = await getAvailablePairs({
+        force_refresh: forceRefresh,
+        enabled_exchanges: enabledExchanges,
+      });
       setAvailablePairsCatalog(catalog);
       setPairCatalogError(null);
     } catch (error) {
@@ -540,8 +545,8 @@ export default function SettingsPage() {
     setAuthError(null);
 
     if (isWorkspaceAdminRole(resolvedWorkspace?.role)) {
-      await loadAdminWorkspaceData(token);
-      await loadAvailablePairsCatalog();
+      const loadedConfig = await loadAdminWorkspaceData(token);
+      await loadAvailablePairsCatalog(false, loadedConfig?.enabled_exchanges);
     } else {
       clearWorkspaceManagementState();
     }
@@ -2076,7 +2081,9 @@ export default function SettingsPage() {
                         ? "Catálogo OK"
                         : providerStatus.status === "empty"
                           ? "Sem pares retornados"
-                          : "Falha no catálogo";
+                          : providerStatus.status === "disabled"
+                            ? "Desativada"
+                            : "Falha no catálogo";
 
                     return (
                       <div
@@ -2085,7 +2092,9 @@ export default function SettingsPage() {
                           "rounded-xl border p-3 text-xs",
                           providerStatus.status === "ok"
                             ? "bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
-                            : "bg-amber-500/5 text-amber-700 dark:text-amber-300",
+                            : providerStatus.status === "disabled"
+                              ? "bg-slate-500/5 text-slate-600 dark:text-slate-300"
+                              : "bg-amber-500/5 text-amber-700 dark:text-amber-300",
                         )}
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -2295,7 +2304,9 @@ export default function SettingsPage() {
                                             ? "Negociavel"
                                             : pairRecord.status[id] === "empty"
                                               ? "Catálogo vazio"
-                                              : pairRecord.status[id] === "error"
+                                              : pairRecord.status[id] === "disabled"
+                                                ? "Exchange desativada"
+                                                : pairRecord.status[id] === "error"
                                                 ? "Erro no provider"
                                                 : pairRecord.status[id]}
                                         </p>

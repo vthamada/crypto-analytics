@@ -13,7 +13,7 @@ Legenda: `[x]` concluido · `[ ]` pendente · `[~]` parcialmente feito
 | Registro de usuarios | Autoregistro por convite (beta) → autoregistro aberto + Free tier (SaaS publico) |
 | Scanner | Global com recalculo por workspace na leitura — 1 scan serve todos sem multiplicar chamadas as exchanges |
 | Trading | Sequencial: Monitoramento → Paper trading → Manual confirmado → Automatico |
-| Exchange prioritaria | **Binance** — maior liquidez em BRL, API mais madura, rate limits generosos, 0.1% de fee |
+| Exchange prioritaria | **Mercado Bitcoin + NovaDAX** como nucleo BRL inicial; Binance fica provider complementar, opcional e desativado por padrao |
 | Unidade de cobranca (SaaS) | `Organization` — e a conta que paga; `Workspace` e subdivisao operacional dentro dela |
 | Modelo de planos | Free / Pro / Trading / Enterprise (ver tabela em P3) |
 
@@ -37,6 +37,7 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 
 ### Plano de executabilidade operacional
 - [x] Release I parcial - scanner em dois estagios com triagem leve, temperatura/cooldown em memoria, telemetria agregada em health, dashboard consumindo payload resumido, detalhe sob demanda e catalogo observavel por provider
+- [x] Refinamento de escopo BRL 2026-05 - Binance desativada por padrao, Mercado Bitcoin/NovaDAX como nucleo, catalogo com providers desativados isolados e ativacao manual por workspace
 - [x] Especificacao BRL 2026-05 - margem operacional, classificacao `trade/hold/observe/avoid`, descoberta ampla BRL, resumo de historico e reducao de egress do dashboard/analytics
 - [x] Release E â€” trading profile por workspace, thresholds operacionais e filtros de alerta
 - [x] Release F â€” `duration_minutes`, `movement_persistence_score` e taxonomia `movement_regime`

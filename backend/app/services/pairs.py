@@ -13,10 +13,12 @@ logger = logging.getLogger(__name__)
 
 PAIR_CATALOG_TTL_SECONDS = 3600
 DEFAULT_ENABLED_PAIR_LIMIT = 10
+DEFAULT_CATALOG_EXCHANGES = [Exchange.NOVADAX, Exchange.MERCADO_BITCOIN]
+KNOWN_EXCHANGES = [Exchange.NOVADAX, Exchange.MERCADO_BITCOIN, Exchange.BINANCE]
 
-_pair_catalog_cache: dict | None = None
-_pair_catalog_generated_at: datetime | None = None
-_pair_catalog_provider_status: list[dict] = []
+_pair_catalog_cache: dict[tuple[str, ...], dict] | dict | None = {}
+_pair_catalog_generated_at: dict[tuple[str, ...], datetime] | datetime | None = {}
+_pair_catalog_provider_status: dict[tuple[str, ...], list[dict]] | list[dict] = {}
 
 
 def utcnow() -> datetime:
@@ -48,10 +50,52 @@ def normalize_pair_symbol(pair: str) -> str:
     return pair.upper().replace("/", "_").replace("-", "_")
 
 
-async def _fetch_provider_pairs() -> dict[Exchange, list[str]]:
+def _normalize_enabled_exchanges(enabled_exchanges: list[Exchange] | None = None) -> list[Exchange]:
+    selected = enabled_exchanges or DEFAULT_CATALOG_EXCHANGES
+    normalized: list[Exchange] = []
+    for exchange in selected:
+        parsed = exchange if isinstance(exchange, Exchange) else Exchange(str(exchange))
+        if parsed not in normalized:
+            normalized.append(parsed)
+    return normalized
+
+
+def _catalog_cache_key(enabled_exchanges: list[Exchange] | None = None) -> tuple[str, ...]:
+    return tuple(exchange.value for exchange in _normalize_enabled_exchanges(enabled_exchanges))
+
+
+def _get_cache_entry(key: tuple[str, ...], now: datetime) -> dict | None:
+    if not isinstance(_pair_catalog_cache, dict) or not isinstance(_pair_catalog_generated_at, dict):
+        return None
+    cached = _pair_catalog_cache.get(key)
+    generated_at = _pair_catalog_generated_at.get(key)
+    if cached is None or generated_at is None:
+        return None
+    if (now - generated_at).total_seconds() >= PAIR_CATALOG_TTL_SECONDS:
+        return None
+    return cached
+
+
+def _set_cache_entry(key: tuple[str, ...], payload: dict, generated_at: datetime) -> None:
+    global _pair_catalog_cache, _pair_catalog_generated_at
+    if not isinstance(_pair_catalog_cache, dict):
+        _pair_catalog_cache = {}
+    if not isinstance(_pair_catalog_generated_at, dict):
+        _pair_catalog_generated_at = {}
+    _pair_catalog_cache[key] = payload
+    _pair_catalog_generated_at[key] = generated_at
+
+
+async def _fetch_provider_pairs(enabled_exchanges: list[Exchange] | None = None) -> dict[Exchange, list[str]]:
     global _pair_catalog_provider_status
 
-    providers = [NovaDaxProvider(), MercadoBitcoinProvider(), BinanceProvider()]
+    provider_map = {
+        Exchange.NOVADAX: NovaDaxProvider,
+        Exchange.MERCADO_BITCOIN: MercadoBitcoinProvider,
+        Exchange.BINANCE: BinanceProvider,
+    }
+    active_exchanges = _normalize_enabled_exchanges(enabled_exchanges)
+    providers = [provider_map[exchange]() for exchange in active_exchanges if exchange in provider_map]
     checked_at = utcnow()
     try:
         results = await asyncio.gather(
@@ -100,19 +144,34 @@ async def _fetch_provider_pairs() -> dict[Exchange, list[str]]:
                 normalized_pairs[:5],
             )
 
-        _pair_catalog_provider_status = provider_status
+        if not isinstance(_pair_catalog_provider_status, dict):
+            _pair_catalog_provider_status = {}
+        _pair_catalog_provider_status[_catalog_cache_key(active_exchanges)] = provider_status
         return provider_pairs
     finally:
         await asyncio.gather(*(provider.close() for provider in providers), return_exceptions=True)
 
 
-def _build_catalog_payload(provider_pairs: dict[Exchange, list[str]], generated_at: datetime) -> dict:
-    known_exchanges = [Exchange.NOVADAX, Exchange.MERCADO_BITCOIN, Exchange.BINANCE]
+def _provider_status_for_key(key: tuple[str, ...]) -> list[dict]:
+    if isinstance(_pair_catalog_provider_status, dict):
+        return _pair_catalog_provider_status.get(key, [])
+    return _pair_catalog_provider_status
+
+
+def _build_catalog_payload(
+    provider_pairs: dict[Exchange, list[str]],
+    generated_at: datetime,
+    *,
+    enabled_exchanges: list[Exchange] | None = None,
+) -> dict:
+    active_exchanges = _normalize_enabled_exchanges(enabled_exchanges)
+    active_exchange_set = set(active_exchanges)
     provider_pair_sets = {exchange: set(pairs) for exchange, pairs in provider_pairs.items()}
+    provider_status = _provider_status_for_key(_catalog_cache_key(active_exchanges))
     provider_status_by_exchange = {
         item["exchange"]: item
-        for item in _pair_catalog_provider_status
-        if item.get("exchange") in known_exchanges
+        for item in provider_status
+        if item.get("exchange") in KNOWN_EXCHANGES
     }
     all_pairs = sorted(
         {pair for pairs in provider_pair_sets.values() for pair in pairs},
@@ -132,31 +191,33 @@ def _build_catalog_payload(provider_pairs: dict[Exchange, list[str]], generated_
                 "is_brl_pair": pair.endswith("_BRL"),
                 "availability": {
                     exchange.value: pair in provider_pair_sets.get(exchange, set())
-                    for exchange in known_exchanges
+                    for exchange in KNOWN_EXCHANGES
                 },
                 "raw_symbols": {
                     exchange.value: pair if pair in provider_pair_sets.get(exchange, set()) else None
-                    for exchange in known_exchanges
+                    for exchange in KNOWN_EXCHANGES
                 },
                 "is_active": {
-                    exchange.value: pair in provider_pair_sets.get(exchange, set())
-                    for exchange in known_exchanges
+                    exchange.value: exchange in active_exchange_set and pair in provider_pair_sets.get(exchange, set())
+                    for exchange in KNOWN_EXCHANGES
                 },
                 "is_tradable": {
-                    exchange.value: pair in provider_pair_sets.get(exchange, set())
-                    for exchange in known_exchanges
+                    exchange.value: exchange in active_exchange_set and pair in provider_pair_sets.get(exchange, set())
+                    for exchange in KNOWN_EXCHANGES
                 },
                 "status": {
                     exchange.value: (
-                        "tradable"
+                        "disabled"
+                        if exchange not in active_exchange_set
+                        else "tradable"
                         if pair in provider_pair_sets.get(exchange, set())
                         else provider_status_by_exchange.get(exchange, {}).get("status", "not_listed")
                     )
-                    for exchange in known_exchanges
+                    for exchange in KNOWN_EXCHANGES
                 },
                 "error_message": {
                     exchange.value: provider_status_by_exchange.get(exchange, {}).get("error_message")
-                    for exchange in known_exchanges
+                    for exchange in KNOWN_EXCHANGES
                 },
             }
             for pair in all_pairs
@@ -168,13 +229,17 @@ def _build_catalog_payload(provider_pairs: dict[Exchange, list[str]], generated_
                     "exchange": exchange,
                     "returned_pairs": len(provider_pair_sets.get(exchange, set())),
                     "brl_pairs": len([pair for pair in provider_pair_sets.get(exchange, set()) if pair.endswith("_BRL")]),
-                    "status": "ok" if provider_pair_sets.get(exchange, set()) else "empty",
+                    "status": "disabled"
+                    if exchange not in active_exchange_set
+                    else "ok"
+                    if provider_pair_sets.get(exchange, set())
+                    else "empty",
                     "checked_at": generated_at,
                     "error_message": None,
                     "examples": sorted(provider_pair_sets.get(exchange, set()))[:5],
                 },
             )
-            for exchange in known_exchanges
+            for exchange in KNOWN_EXCHANGES
         ],
     }
 
@@ -236,22 +301,22 @@ def filter_pairs_by_availability(
     return filtered_pairs
 
 
-async def get_available_pairs_catalog(*, force_refresh: bool = False) -> dict:
-    global _pair_catalog_cache, _pair_catalog_generated_at
-
+async def get_available_pairs_catalog(
+    *,
+    enabled_exchanges: list[Exchange] | None = None,
+    force_refresh: bool = False,
+) -> dict:
     now = utcnow()
-    if (
-        not force_refresh
-        and _pair_catalog_cache is not None
-        and _pair_catalog_generated_at is not None
-        and (now - _pair_catalog_generated_at).total_seconds() < PAIR_CATALOG_TTL_SECONDS
-    ):
-        return _pair_catalog_cache
+    normalized_exchanges = _normalize_enabled_exchanges(enabled_exchanges)
+    cache_key = _catalog_cache_key(normalized_exchanges)
+    if not force_refresh:
+        cached = _get_cache_entry(cache_key, now)
+        if cached is not None:
+            return cached
 
-    provider_pairs = await _fetch_provider_pairs()
-    payload = _build_catalog_payload(provider_pairs, now)
-    _pair_catalog_cache = payload
-    _pair_catalog_generated_at = now
+    provider_pairs = await _fetch_provider_pairs(normalized_exchanges)
+    payload = _build_catalog_payload(provider_pairs, now, enabled_exchanges=normalized_exchanges)
+    _set_cache_entry(cache_key, payload, now)
     return payload
 
 
@@ -264,7 +329,7 @@ async def get_scannable_pairs_by_exchange(
     if not enabled_exchanges:
         return {exchange: [] for exchange in enabled_exchanges}
 
-    catalog = await get_available_pairs_catalog(force_refresh=force_refresh)
+    catalog = await get_available_pairs_catalog(enabled_exchanges=enabled_exchanges, force_refresh=force_refresh)
     if not enabled_pairs:
         enabled_pairs = select_relevant_brl_pairs(catalog)
 

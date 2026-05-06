@@ -152,7 +152,6 @@ class AppConfig(BaseModel):
     enabled_exchanges: list[Exchange] = [
         Exchange.NOVADAX,
         Exchange.MERCADO_BITCOIN,
-        Exchange.BINANCE,
     ]
     enabled_pairs: list[str] = Field(default_factory=list)
     scan_interval_seconds: int = 30
@@ -387,7 +386,7 @@ class AvailablePairProviderStatus(BaseModel):
     exchange: Exchange
     returned_pairs: int
     brl_pairs: int
-    status: Literal["ok", "empty", "error"]
+    status: Literal["ok", "empty", "error", "disabled"]
     checked_at: datetime
     error_message: str | None = None
     examples: list[str] = Field(default_factory=list)

@@ -29,6 +29,9 @@ Convencao deste repositorio:
 - Dashboard principal passou a carregar `/api/dashboard/summary` por padrao e buscar `/api/opportunities/{id}` apenas ao abrir o detalhe do sinal.
 - A tela de configuracoes passou a mostrar o estado do catalogo por exchange e o status tecnico de cada par/provedor.
 - O catalogo de pares agora preserva metadados de normalizacao (`base_asset`, `quote_asset`, `normalized_symbol`, disponibilidade, tradabilidade e status por exchange).
+- Escopo operacional padrao alinhado ao mercado BRL: Mercado Bitcoin e NovaDAX ficam ativas por padrao, Binance fica opcional/desativada ate ativacao manual.
+- `GET /api/pairs/available` passou a aceitar `enabled_exchanges` e o catalogo agora evita consultar providers desativados, marcando-os como `disabled`.
+- A tela de configuracoes passou a solicitar o catalogo conforme as exchanges habilitadas no workspace, permitindo ativar Binance manualmente sem contaminar o fluxo BRL padrao.
 
 ## [2026-05-05]
 

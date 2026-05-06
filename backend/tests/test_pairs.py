@@ -2,21 +2,30 @@ from __future__ import annotations
 
 import asyncio
 
-from app.models.schemas import Exchange
+from app.models.schemas import AppConfig, Exchange
 from app.services import pairs
+
+
+def test_app_config_defaults_to_brl_core_exchanges():
+    assert AppConfig().enabled_exchanges == [Exchange.NOVADAX, Exchange.MERCADO_BITCOIN]
 
 
 def test_available_pairs_catalog_uses_cache(monkeypatch):
     async def run_test():
         calls = 0
 
-        async def fake_fetch_provider_pairs():
+        async def fake_fetch_provider_pairs(enabled_exchanges):
             nonlocal calls
             calls += 1
-            return {
+            provider_pairs = {
                 Exchange.NOVADAX: ["BTC_BRL"],
                 Exchange.MERCADO_BITCOIN: ["BTC_BRL"],
                 Exchange.BINANCE: ["BTC_BRL", "POL_BRL"],
+            }
+            return {
+                exchange: provider_pairs[exchange]
+                for exchange in enabled_exchanges
+                if exchange in provider_pairs
             }
 
         monkeypatch.setattr(pairs, "_pair_catalog_cache", None)
@@ -27,13 +36,73 @@ def test_available_pairs_catalog_uses_cache(monkeypatch):
         second = await pairs.get_available_pairs_catalog(force_refresh=False)
 
         assert calls == 1
-        assert [item["pair"] for item in first["pairs"]] == ["BTC_BRL", "POL_BRL"]
+        assert [item["pair"] for item in first["pairs"]] == ["BTC_BRL"]
         assert first["pairs"][0]["base_asset"] == "BTC"
         assert first["pairs"][0]["quote_asset"] == "BRL"
         assert first["pairs"][0]["is_brl_pair"] is True
         assert first["pairs"][0]["status"]["novadax"] == "tradable"
         assert first["provider_status"][0]["exchange"] == Exchange.NOVADAX
         assert first == second
+
+    asyncio.run(run_test())
+
+
+def test_available_pairs_catalog_uses_default_brl_core_exchanges(monkeypatch):
+    async def run_test():
+        requested_exchanges = None
+
+        async def fake_fetch_provider_pairs(enabled_exchanges):
+            nonlocal requested_exchanges
+            requested_exchanges = enabled_exchanges
+            return {
+                Exchange.NOVADAX: ["SOL_BRL"],
+                Exchange.MERCADO_BITCOIN: ["WBTC_BRL"],
+            }
+
+        monkeypatch.setattr(pairs, "_pair_catalog_cache", None)
+        monkeypatch.setattr(pairs, "_pair_catalog_generated_at", None)
+        monkeypatch.setattr(pairs, "_fetch_provider_pairs", fake_fetch_provider_pairs)
+
+        catalog = await pairs.get_available_pairs_catalog(force_refresh=True)
+
+        assert requested_exchanges == [Exchange.NOVADAX, Exchange.MERCADO_BITCOIN]
+        assert {item["pair"] for item in catalog["pairs"]} == {"SOL_BRL", "WBTC_BRL"}
+        assert next(item for item in catalog["provider_status"] if item["exchange"] == Exchange.BINANCE)["status"] == "disabled"
+
+    asyncio.run(run_test())
+
+
+def test_available_pairs_catalog_cache_is_scoped_by_enabled_exchanges(monkeypatch):
+    async def run_test():
+        calls: list[tuple[Exchange, ...]] = []
+
+        async def fake_fetch_provider_pairs(enabled_exchanges):
+            key = tuple(enabled_exchanges)
+            calls.append(key)
+            payload = {
+                Exchange.NOVADAX: ["SOL_BRL"],
+                Exchange.MERCADO_BITCOIN: ["WBTC_BRL"],
+            }
+            if Exchange.BINANCE in enabled_exchanges:
+                payload[Exchange.BINANCE] = ["BTC_USDT"]
+            return payload
+
+        monkeypatch.setattr(pairs, "_pair_catalog_cache", None)
+        monkeypatch.setattr(pairs, "_pair_catalog_generated_at", None)
+        monkeypatch.setattr(pairs, "_fetch_provider_pairs", fake_fetch_provider_pairs)
+
+        await pairs.get_available_pairs_catalog(force_refresh=False)
+        await pairs.get_available_pairs_catalog(force_refresh=False)
+        catalog_with_binance = await pairs.get_available_pairs_catalog(
+            enabled_exchanges=[Exchange.NOVADAX, Exchange.MERCADO_BITCOIN, Exchange.BINANCE],
+            force_refresh=False,
+        )
+
+        assert calls == [
+            (Exchange.NOVADAX, Exchange.MERCADO_BITCOIN),
+            (Exchange.NOVADAX, Exchange.MERCADO_BITCOIN, Exchange.BINANCE),
+        ]
+        assert any(item["pair"] == "BTC_USDT" for item in catalog_with_binance["pairs"])
 
     asyncio.run(run_test())
 
@@ -118,7 +187,7 @@ def test_scannable_pairs_uses_brl_discovery_when_enabled_pairs_empty(monkeypatch
             ]
         }
 
-        async def fake_catalog(force_refresh: bool = False):
+        async def fake_catalog(enabled_exchanges=None, force_refresh: bool = False):
             return catalog
 
         monkeypatch.setattr(pairs, "get_available_pairs_catalog", fake_catalog)

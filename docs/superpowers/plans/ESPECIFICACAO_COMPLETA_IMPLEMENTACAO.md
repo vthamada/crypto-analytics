@@ -121,7 +121,7 @@ O sistema deve considerar prioritariamente exchanges compatíveis com o fluxo br
 - NovaDAX
 - Mercado Bitcoin
 
-A Binance pode existir como provider complementar, mas o núcleo do produto deve refletir o comportamento do mercado BRL.
+A Binance pode existir como provider complementar, mas deve ficar **desativada por padrão**. O usuário poderá ativá-la manualmente se desejar. O núcleo inicial do produto deve refletir o comportamento do mercado BRL nas exchanges onde o usuário opera: **Mercado Bitcoin e NovaDAX**.
 
 ---
 
@@ -1452,3 +1452,417 @@ Ainda pendente para completar a Release I:
 - persistencia seletiva de descartes apenas como agregados
 - migracao opcional para catalogo persistido em banco caso o cache em memoria nao seja suficiente
 - expandir o uso dos endpoints resumidos em outras telas, quando aplicavel
+
+---
+
+## 47. Refinamento de escopo: foco inicial em Mercado Bitcoin e NovaDAX
+
+### 47.1 Decisão de produto
+
+O escopo operacional inicial deve ser focado em:
+
+- Mercado Bitcoin
+- NovaDAX
+- pares BRL
+- principais moedas dessas exchanges
+- oportunidades com volume, liquidez e operabilidade
+
+A Binance deve continuar existindo como provider opcional, mas deve ficar **desativada por padrão**.
+
+### 47.2 Justificativa
+
+O usuário final informou que não está operando na Binance no momento e pediu para deixar apenas Mercado Bitcoin e NovaDAX como foco inicial.
+
+Além disso, a lógica operacional observada está fortemente ligada ao mercado brasileiro, especialmente aos pares negociados em reais.
+
+### 47.3 Requisito
+
+O sistema deve permitir:
+
+- habilitar/desabilitar exchanges por configuração
+- deixar Mercado Bitcoin e NovaDAX habilitadas por padrão
+- deixar Binance desabilitada por padrão
+- permitir ativação manual da Binance pelo usuário
+- exibir no painel quais exchanges estão ativas
+- não permitir que falhas da Binance afetem o funcionamento das exchanges principais
+
+### 47.4 Critério de aceitação
+
+A configuração padrão estará correta quando:
+
+- Mercado Bitcoin estiver ativa por padrão
+- NovaDAX estiver ativa por padrão
+- Binance estiver inativa por padrão
+- o usuário puder ativar Binance manualmente
+- o scanner não tentar consultar Binance quando ela estiver desativada
+- erros de Binance não contaminarem alertas, dashboard ou health geral do produto quando a exchange estiver desativada
+
+---
+
+## 48. Escopo correto: principais pares BRL das exchanges nacionais
+
+### 48.1 Diretriz
+
+O sistema não deve se limitar a uma pequena watchlist manual.
+
+Também não deve tentar analisar profundamente todos os pares de todas as exchanges sem critério.
+
+A direção correta é:
+
+> **monitorar de forma ampla e barata os principais pares BRL da Mercado Bitcoin e NovaDAX, promover candidatos com potencial e entregar apenas a shortlist operacional.**
+
+### 48.2 O que significa "principais pares"
+
+"Principais pares" não deve significar apenas moedas grandes tradicionais.
+
+Deve significar pares que tenham pelo menos um dos seguintes fatores:
+
+- volume diário mínimo
+- liquidez mínima
+- atividade recente
+- variação relevante
+- presença no ranking da exchange
+- histórico recente de movimentos úteis
+- disponibilidade operacional em BRL
+
+### 48.3 Requisito
+
+O sistema deve construir dinamicamente um universo de pares BRL relevantes por exchange.
+
+Esse universo deve ser derivado de:
+
+- catálogo da exchange
+- pares ativos
+- pares negociáveis
+- volume recente
+- liquidez observável
+- status operacional do provider
+- regras de whitelist/blacklist
+
+### 48.4 Watchlist como prioridade, não limite
+
+A watchlist deve continuar existindo, mas não deve limitar o universo escaneado.
+
+Ela deve servir para:
+
+- favoritos
+- prioridade adicional
+- filtros visuais
+- alertas personalizados
+- acompanhamento próximo
+
+O scanner principal deve continuar olhando o mercado BRL relevante mesmo quando a watchlist for pequena.
+
+---
+
+## 49. Tese consolidada do produto
+
+### 49.1 Tese única
+
+A tese do produto deve ser congelada nesta forma para evitar dispersão:
+
+> **Radar de oportunidades operáveis em BRL, focado inicialmente em Mercado Bitcoin e NovaDAX, que monitora os principais pares líquidos, identifica movimentos fortes ou rompimentos relevantes, filtra por volume/liquidez, avalia margem operacional no livro e alerta apenas as melhores oportunidades para trade ou hold.**
+
+### 49.2 O que está dentro do escopo agora
+
+Está dentro do escopo:
+
+- Mercado Bitcoin
+- NovaDAX
+- pares BRL
+- principais pares líquidos
+- scan leve amplo
+- análise profunda apenas de candidatos
+- classificação trade/hold/observe/avoid
+- score de força
+- score de liquidez/executabilidade
+- score de margem operacional
+- detecção de movimento forte
+- detecção de lateralização seguida de rompimento
+- alertas seletivos
+- dashboard com shortlist operacional
+
+### 49.3 O que fica fora do foco imediato
+
+Fica fora do foco imediato:
+
+- trading automático
+- execução de ordens
+- Binance como fonte principal
+- múltiplas exchanges globais
+- machine learning avançado
+- paper trading complexo
+- análise excessivamente sofisticada de microestrutura
+- alertas em grande quantidade
+- persistência detalhada de todos os pares
+
+Esses itens podem existir como evolução futura, mas não devem competir com o foco operacional atual.
+
+---
+
+## 50. Novo padrão de oportunidade: lateralização + rompimento
+
+### 50.1 Contexto
+
+Foi observado um exemplo real em LAB/BRL:
+
+- o ativo ficou lateralizado por um período
+- permaneceu abaixo de uma faixa de preço por algum tempo
+- depois rompeu fortemente
+- chegou a movimento superior a 400%
+
+Esse tipo de evento representa uma oportunidade que o sistema deve tentar detectar ou, pelo menos, destacar cedo quando começar a se formar.
+
+### 50.2 Definição do padrão
+
+O padrão **lateralização + rompimento** ocorre quando:
+
+- o ativo permanece por um período relevante em faixa estreita ou relativamente controlada
+- a volatilidade fica comprimida ou lateral
+- o volume começa a aumentar
+- o preço rompe uma faixa anterior
+- o movimento ganha aceleração
+- há liquidez suficiente para operação
+- o rompimento não é apenas um candle isolado sem continuidade
+
+### 50.3 Classificação esperada
+
+Esse padrão pode gerar dois tipos de oportunidade:
+
+#### Continuidade / hold
+
+Quando houver:
+
+- rompimento forte
+- volume crescente
+- persistência
+- tendência clara
+- liquidez suficiente
+
+#### Trade
+
+Quando houver:
+
+- oscilação após rompimento
+- margem operacional no livro
+- zonas de compra e venda aproveitáveis
+- repetição de movimentos
+
+### 50.4 Métricas sugeridas
+
+O sistema deve considerar métricas como:
+
+- `range_compression_score`
+- `breakout_strength_score`
+- `volume_expansion_score`
+- `breakout_confirmation_score`
+- `post_breakout_liquidity_score`
+- `continuation_potential_score`
+
+### 50.5 Requisitos de implementação
+
+O agente deve propor e/ou implementar uma primeira versão heurística para detectar:
+
+- ativos lateralizados em janela recente
+- rompimento de faixa recente
+- aumento de volume no rompimento
+- aceleração de preço
+- continuidade após rompimento
+- liquidez mínima após rompimento
+
+### 50.6 Critério de aceitação
+
+O sistema estará adequado quando conseguir:
+
+- destacar ativos que saíram de lateralização e entraram em movimento forte
+- diferenciar rompimento com volume de alta isolada sem liquidez
+- classificar rompimentos como possíveis oportunidades de hold ou trade
+- incluir esse padrão no ranking operacional
+- exibir no alerta ou dashboard o motivo do sinal quando houver rompimento relevante
+
+---
+
+## 51. Ajuste de ranking para movimentos fortes perdidos
+
+### 51.1 Problema observado
+
+O sistema pode enviar sinais medianos enquanto existem ativos com movimentos muito mais fortes e líquidos no mercado.
+
+Isso indica que o ranking deve comparar oportunidades dentro do universo amplo da exchange, e não avaliar cada sinal de forma isolada.
+
+### 51.2 Requisito
+
+O ranking deve considerar concorrência entre sinais.
+
+Se houver ativos com:
+
+- maior força de movimento
+- maior liquidez
+- maior continuidade
+- maior margem operacional
+- melhor classificação de oportunidade
+
+esses ativos devem superar sinais médios.
+
+### 51.3 Regra
+
+Sinais `trade` ou `hold` com alta força, boa liquidez e boa margem devem ter prioridade sobre sinais apenas `observe` ou sinais médios.
+
+### 51.4 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- sinais fracos não forem alertados se houver sinais melhores no mesmo ciclo
+- o Telegram priorizar apenas a shortlist real
+- o dashboard deixar claro por que um sinal foi ranqueado acima de outro
+- movimentos fortes em pares BRL relevantes não forem omitidos por escopo estreito
+
+---
+
+## 52. Configuração padrão recomendada
+
+### 52.1 Exchanges
+
+Configuração padrão:
+
+- Mercado Bitcoin: habilitada
+- NovaDAX: habilitada
+- Binance: desabilitada
+
+### 52.2 Pares
+
+Configuração padrão:
+
+- descobrir pares BRL automaticamente
+- aplicar scan leve amplo
+- promover candidatos para análise completa
+- permitir watchlist manual como camada adicional
+
+### 52.3 Alertas
+
+Configuração padrão:
+
+- alertar apenas shortlist qualificada
+- priorizar trade e hold
+- evitar alertas de observe, salvo se configurado
+- não alertar avoid
+- baixa frequência
+- alto valor informativo
+
+### 52.4 Painel
+
+O painel deve mostrar:
+
+- exchanges ativas
+- mercado BRL em destaque
+- oportunidades de trade
+- oportunidades de hold
+- watchlist/favoritos
+- status do catálogo
+- motivo de exclusão ou ausência de pares quando aplicável
+
+---
+
+## 53. Requisitos técnicos adicionais para providers
+
+### 53.1 Provider não deve bloquear o sistema
+
+Cada provider deve ser isolado.
+
+Falha em uma exchange não deve derrubar o scanner inteiro.
+
+### 53.2 Binance opcional
+
+Quando Binance estiver desativada:
+
+- não consultar endpoints Binance
+- não exibir erros Binance como erro principal
+- não afetar ranking
+- não afetar health geral, exceto como provider desativado
+
+Quando Binance estiver ativada:
+
+- exibir status próprio
+- aplicar os mesmos filtros de catálogo
+- tratar erros regulatórios, geográficos ou HTTP de forma isolada
+
+### 53.3 Mercado Bitcoin e NovaDAX como núcleo
+
+O scanner deve garantir maior confiabilidade para:
+
+- listagem de pares
+- normalização
+- ticker
+- order book
+- candles
+- status de negociação
+
+nessas duas exchanges.
+
+---
+
+## 54. Backlog adicional após refinamento de escopo
+
+### P0
+
+- configurar Binance como desativada por padrão
+- garantir Mercado Bitcoin e NovaDAX ativas por padrão
+- corrigir descoberta/listagem de pares BRL da NovaDAX
+- garantir descoberta/listagem de pares BRL da Mercado Bitcoin
+- implementar ou validar scan leve para principais pares BRL dessas exchanges
+- garantir que watchlist não limite o scanner amplo
+- ajustar ranking para priorizar melhores oportunidades do ciclo
+- exibir exchanges ativas/inativas no painel
+
+### P1
+
+- implementar detecção heurística de lateralização + rompimento
+- adicionar métricas de rompimento no score de força
+- exibir motivo do sinal no alerta e dashboard
+- criar ranking comparativo entre pares do mesmo ciclo
+- melhorar UI de catálogo e diagnóstico por exchange
+
+### P2
+
+- calibrar rompimentos com outcomes históricos
+- sugerir automaticamente novos pares relevantes para watchlist
+- habilitar Binance como módulo opcional mais robusto
+- paper trading futuro para validar trade/hold antes de automação
+
+---
+
+## 55. Critérios de aceitação atualizados
+
+O produto estará alinhado com a direção atual quando:
+
+- Mercado Bitcoin e NovaDAX forem o núcleo operacional padrão
+- Binance estiver disponível, mas desativada por padrão
+- o scanner descobrir principais pares BRL automaticamente
+- a watchlist não limitar o mercado escaneado
+- o sistema detectar movimentos fortes em pares BRL relevantes
+- o sistema destacar rompimentos após lateralização
+- sinais medianos não abafarem oportunidades muito melhores
+- o ranking priorizar liquidez, força, margem e operabilidade
+- o painel mostrar claramente o estado das exchanges e do catálogo
+- o usuário conseguir entender por que determinada moeda apareceu ou não apareceu
+
+---
+
+## 56. Status de implementação do refinamento BRL
+
+### 56.1 Implementado em 2026-05-06
+
+- Mercado Bitcoin e NovaDAX passaram a ser as exchanges habilitadas por padrão em `AppConfig`.
+- Binance passou a ficar disponível como provider complementar, mas desativada por padrão.
+- O catálogo de pares passou a aceitar escopo de `enabled_exchanges`.
+- O backend deixou de consultar providers desativados durante a construção do catálogo.
+- Providers desativados passam a aparecer no catálogo com status `disabled`.
+- A tela de configurações passou a solicitar o catálogo conforme as exchanges habilitadas no workspace.
+- O scanner amplo continua usando a configuração agregada dos workspaces e consulta Binance apenas se ela estiver habilitada nessa configuração.
+
+### 56.2 Ainda pendente após este refinamento
+
+- implementar heurística dedicada de lateralização + rompimento
+- enriquecer o ranking comparativo entre sinais do mesmo ciclo
+- exibir motivo específico de rompimento no dashboard e nos alertas
+- calibrar os novos padrões com outcomes históricos

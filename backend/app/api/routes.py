@@ -1001,8 +1001,11 @@ async def operational_analytics(
 
 
 @router.get("/pairs/available", response_model=AvailablePairsResponse)
-async def available_pairs(force_refresh: bool = Query(default=False)):
-    return await get_available_pairs_catalog(force_refresh=force_refresh)
+async def available_pairs(
+    force_refresh: bool = Query(default=False),
+    enabled_exchanges: list[Exchange] | None = Query(default=None),
+):
+    return await get_available_pairs_catalog(enabled_exchanges=enabled_exchanges, force_refresh=force_refresh)
 
 
 @router.get("/config", response_model=ConfigResponse)

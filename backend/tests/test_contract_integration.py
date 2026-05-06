@@ -41,7 +41,7 @@ def _make_workspace(*, role: str = "owner", **overrides):
 def _fake_opportunity(**overrides) -> Opportunity:
     defaults = dict(
         id="opp-1",
-        exchange=Exchange.BINANCE,
+        exchange=Exchange.NOVADAX,
         pair="BTC_BRL",
         score=72.5,
         technical_score=68.3,

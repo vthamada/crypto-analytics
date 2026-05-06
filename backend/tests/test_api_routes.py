@@ -618,7 +618,7 @@ def test_users_endpoint_requires_workspace_owner_role(monkeypatch):
 
 
 def test_available_pairs_endpoint_returns_aggregated_catalog(monkeypatch):
-    async def fake_catalog(force_refresh: bool = False):
+    async def fake_catalog(enabled_exchanges=None, force_refresh: bool = False):
         return {
             "generated_at": "2026-04-15T12:00:00+00:00",
             "expires_at": "2026-04-15T13:00:00+00:00",
@@ -653,6 +653,29 @@ def test_available_pairs_endpoint_returns_aggregated_catalog(monkeypatch):
     assert response.status_code == 200
     assert body["pairs"][0]["pair"] == "BTC_BRL"
     assert body["pairs"][1]["availability"]["binance"] is True
+
+
+def test_available_pairs_endpoint_forwards_enabled_exchanges(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_catalog(enabled_exchanges=None, force_refresh: bool = False):
+        captured["enabled_exchanges"] = enabled_exchanges
+        captured["force_refresh"] = force_refresh
+        return {
+            "generated_at": "2026-04-15T12:00:00+00:00",
+            "expires_at": "2026-04-15T13:00:00+00:00",
+            "pairs": [],
+            "provider_status": [],
+        }
+
+    monkeypatch.setattr(routes, "get_available_pairs_catalog", fake_catalog)
+
+    client = create_test_client()
+    response = client.get("/api/pairs/available?enabled_exchanges=novadax&enabled_exchanges=binance&force_refresh=true")
+
+    assert response.status_code == 200
+    assert captured["enabled_exchanges"] == [Exchange.NOVADAX, Exchange.BINANCE]
+    assert captured["force_refresh"] is True
 
 
 def test_telegram_test_endpoint_uses_workspace_config_fallback(monkeypatch):

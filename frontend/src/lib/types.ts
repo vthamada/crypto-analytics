@@ -352,7 +352,7 @@ export interface AvailablePairProviderStatus {
   exchange: Exchange;
   returned_pairs: number;
   brl_pairs: number;
-  status: "ok" | "empty" | "error";
+  status: "ok" | "empty" | "error" | "disabled";
   checked_at: string;
   error_message?: string | null;
   examples: string[];

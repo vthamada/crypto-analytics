@@ -9,6 +9,7 @@ import type {
   DashboardStats,
   DashboardPayload,
   DashboardSummaryPayload,
+  Exchange,
   ExchangeCredentialValidationResponse,
   HistoryRecord,
   HistorySummaryRecord,
@@ -549,9 +550,10 @@ export function acceptInvite(payload: {
   });
 }
 
-export function getAvailablePairs(params?: { force_refresh?: boolean }): Promise<AvailablePairsResponse> {
+export function getAvailablePairs(params?: { force_refresh?: boolean; enabled_exchanges?: Exchange[] }): Promise<AvailablePairsResponse> {
   const query = new URLSearchParams();
   if (params?.force_refresh) query.set("force_refresh", "true");
+  params?.enabled_exchanges?.forEach((exchange) => query.append("enabled_exchanges", exchange));
   const qs = query.toString();
   return fetchJSON(`/pairs/available${qs ? `?${qs}` : ""}`, { skipAuthRefresh: true });
 }

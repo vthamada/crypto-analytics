@@ -1,6 +1,6 @@
 # Estado Atual do Sistema
 
-Ultima revisao: 2026-04-17
+Ultima revisao: 2026-05-06
 
 ## Objetivo deste documento
 
@@ -24,6 +24,7 @@ O ponto mais importante para entender o comportamento atual e este:
 - o historico persistido e global, mas filtrado por workspace na leitura
 - o WebSocket e isolado por workspace
 - os alertas Telegram sao enviados por workspace
+- o escopo operacional padrao prioriza Mercado Bitcoin e NovaDAX; Binance existe como provider complementar e fica desativada ate ativacao manual
 
 Em outras palavras, o produto ja tem autenticacao e autorizacao multi-workspace na camada de acesso e configuracao, mas ainda nao opera um pipeline fisicamente isolado por tenant.
 
@@ -48,7 +49,7 @@ Worker de scan
   +--> Providers de exchange
   |       - NovaDAX
   |       - Mercado Bitcoin
-  |       - Binance
+  |       - Binance (opcional/desativada por padrao)
   |
   +--> Filtros e score
   +--> Estado compartilhado em banco
