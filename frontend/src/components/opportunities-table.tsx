@@ -69,6 +69,42 @@ function movementBadge(type: string) {
   );
 }
 
+function movementPhaseBadge(phase?: string | null, late?: boolean) {
+  if (!phase || phase === "neutral") return null;
+  const map: Record<string, { label: string; variant: string }> = {
+    accumulation: { label: "Acumulacao", variant: "bg-slate-500/15 text-slate-500" },
+    early_breakout: { label: "Rompimento inicial", variant: "bg-emerald-500/15 text-emerald-500" },
+    continuation: { label: "Continuacao", variant: "bg-blue-500/15 text-blue-500" },
+    extended: { label: "Esticado", variant: "bg-amber-500/15 text-amber-500" },
+    distribution_or_profit_zone: { label: "Realizacao", variant: "bg-orange-500/15 text-orange-500" },
+    exhaustion: { label: "Esgotamento", variant: "bg-red-500/15 text-red-500" },
+  };
+  const info = map[phase] || { label: phase, variant: "bg-muted text-muted-foreground" };
+  return (
+    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium", info.variant)}>
+      {late ? `${info.label} / tarde` : info.label}
+    </span>
+  );
+}
+
+function operationalRangeBadge(quality?: string | null, marginPct?: number | null) {
+  if (!quality || quality === "none") return null;
+  const map: Record<string, { label: string; variant: string }> = {
+    weak: { label: "Faixa fraca", variant: "bg-amber-500/15 text-amber-500" },
+    valid_small_trade: { label: "Faixa pequena", variant: "bg-sky-500/15 text-sky-500" },
+    valid_medium_trade: { label: "Faixa media", variant: "bg-blue-500/15 text-blue-500" },
+    valid_large_trade: { label: "Faixa grande", variant: "bg-emerald-500/15 text-emerald-500" },
+    high_quality_reusable_range: { label: "Faixa reutilizavel", variant: "bg-emerald-500/15 text-emerald-500" },
+  };
+  const info = map[quality] || { label: quality, variant: "bg-muted text-muted-foreground" };
+  const suffix = marginPct != null ? ` ${marginPct.toFixed(1)}%` : "";
+  return (
+    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium", info.variant)}>
+      {info.label}{suffix}
+    </span>
+  );
+}
+
 function exchangeLabel(exchange: string): string {
   const map: Record<string, string> = {
     novadax: "NovaDAX",
@@ -385,6 +421,8 @@ export function OpportunitiesTable({
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     {movementBadge(opportunity.movement_type)}
+                    {movementPhaseBadge(opportunity.movement_phase, opportunity.is_late_entry_risk)}
+                    {operationalRangeBadge(opportunity.operational_range_quality, opportunity.operational_range_margin_pct)}
                     {reasons.map((reason) => (
                       <Badge
                         key={`${opportunity.id}-${reason.label}`}
@@ -412,6 +450,14 @@ export function OpportunitiesTable({
                     <MobileMetric label="Volume 24h" value={formatCurrencyCompact(opportunity.quote_volume_24h)} />
                     <MobileMetric label="Liquidez" value={formatNotionalOrFallback(opportunity)} />
                     <MobileMetric label="Spread" value={`${opportunity.spread_pct.toFixed(4)}%`} />
+                    <MobileMetric
+                      label="Faixa operacional"
+                      value={
+                        opportunity.operational_range_margin_pct != null
+                          ? `${opportunity.operational_range_margin_pct.toFixed(2)}%`
+                          : "n/d"
+                      }
+                    />
                     <MobileMetric
                       label={executabilityScore != null ? "Slippage saida" : "Volatilidade"}
                       value={
@@ -549,6 +595,8 @@ export function OpportunitiesTable({
                           <div className="flex flex-col gap-1.5">
                             <div className="flex flex-wrap items-center gap-1.5">
                               {movementBadge(opportunity.movement_type)}
+                              {movementPhaseBadge(opportunity.movement_phase, opportunity.is_late_entry_risk)}
+                              {operationalRangeBadge(opportunity.operational_range_quality, opportunity.operational_range_margin_pct)}
                               {opportunity.arbitrage_available ? (
                                 <span className="text-[11px] font-medium text-blue-500">
                                   Gap {opportunity.cross_exchange_gap_pct.toFixed(2)}%

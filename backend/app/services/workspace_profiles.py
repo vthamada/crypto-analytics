@@ -46,6 +46,9 @@ def widest_slippage_cap(configs: list[AppConfig]) -> float:
 
 
 def opportunity_matches_alert_scope(opportunity: Opportunity, config: AppConfig) -> bool:
+    if opportunity.opportunity_type == "avoid":
+        return False
+
     if config.telegram_alert_exchanges:
         allowed = {
             exchange.value if hasattr(exchange, "value") else str(exchange)

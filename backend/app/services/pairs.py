@@ -19,6 +19,15 @@ KNOWN_EXCHANGES = [Exchange.NOVADAX, Exchange.MERCADO_BITCOIN, Exchange.BINANCE]
 _pair_catalog_cache: dict[tuple[str, ...], dict] | dict | None = {}
 _pair_catalog_generated_at: dict[tuple[str, ...], datetime] | datetime | None = {}
 _pair_catalog_provider_status: dict[tuple[str, ...], list[dict]] | list[dict] = {}
+_provider_last_successful_pairs: dict[Exchange, list[str]] = {}
+
+
+def _provider_map() -> dict[Exchange, type]:
+    return {
+        Exchange.NOVADAX: NovaDaxProvider,
+        Exchange.MERCADO_BITCOIN: MercadoBitcoinProvider,
+        Exchange.BINANCE: BinanceProvider,
+    }
 
 
 def utcnow() -> datetime:
@@ -89,11 +98,7 @@ def _set_cache_entry(key: tuple[str, ...], payload: dict, generated_at: datetime
 async def _fetch_provider_pairs(enabled_exchanges: list[Exchange] | None = None) -> dict[Exchange, list[str]]:
     global _pair_catalog_provider_status
 
-    provider_map = {
-        Exchange.NOVADAX: NovaDaxProvider,
-        Exchange.MERCADO_BITCOIN: MercadoBitcoinProvider,
-        Exchange.BINANCE: BinanceProvider,
-    }
+    provider_map = _provider_map()
     active_exchanges = _normalize_enabled_exchanges(enabled_exchanges)
     providers = [provider_map[exchange]() for exchange in active_exchanges if exchange in provider_map]
     checked_at = utcnow()
@@ -108,22 +113,24 @@ async def _fetch_provider_pairs(enabled_exchanges: list[Exchange] | None = None)
         for provider, result in zip(providers, results, strict=False):
             if isinstance(result, Exception):
                 logger.warning("available_pairs_fetch_failed exchange=%s error=%s", provider.exchange.value, result)
-                provider_pairs[provider.exchange] = []
+                stale_pairs = _provider_last_successful_pairs.get(provider.exchange, [])
+                provider_pairs[provider.exchange] = stale_pairs
                 provider_status.append(
                     {
                         "exchange": provider.exchange,
-                        "returned_pairs": 0,
-                        "brl_pairs": 0,
-                        "status": "error",
+                        "returned_pairs": len(stale_pairs),
+                        "brl_pairs": len([pair for pair in stale_pairs if pair.endswith("_BRL")]),
+                        "status": "stale" if stale_pairs else "error",
                         "checked_at": checked_at,
                         "error_message": str(result),
-                        "examples": [],
+                        "examples": stale_pairs[:5],
                     }
                 )
                 continue
 
             normalized_pairs = sorted({normalize_pair_symbol(pair) for pair in result if pair})
             brl_pairs = [pair for pair in normalized_pairs if pair.endswith("_BRL")]
+            _provider_last_successful_pairs[provider.exchange] = normalized_pairs
             provider_pairs[provider.exchange] = normalized_pairs
             provider_status.append(
                 {
@@ -156,6 +163,80 @@ def _provider_status_for_key(key: tuple[str, ...]) -> list[dict]:
     if isinstance(_pair_catalog_provider_status, dict):
         return _pair_catalog_provider_status.get(key, [])
     return _pair_catalog_provider_status
+
+
+def _provider_for_exchange(exchange: Exchange):
+    provider_map = _provider_map()
+    provider_cls = provider_map.get(exchange)
+    if provider_cls is None:
+        raise ValueError(f"Unsupported exchange: {exchange}")
+    return provider_cls()
+
+
+async def _run_diagnostic_check(name: str, func) -> dict:
+    try:
+        result = await func()
+        details: dict[str, object] = {}
+        if isinstance(result, list):
+            details["count"] = len(result)
+        elif hasattr(result, "model_dump"):
+            details = result.model_dump(mode="json")
+        return {"name": name, "status": "ok", "message": None, "details": details}
+    except Exception as exc:
+        return {"name": name, "status": "error", "message": str(exc), "details": {}}
+
+
+async def get_pair_exchange_diagnostic(exchange: Exchange, pair: str) -> dict:
+    parsed_exchange = exchange if isinstance(exchange, Exchange) else Exchange(str(exchange))
+    normalized_pair = normalize_pair_symbol(pair)
+    provider = _provider_for_exchange(parsed_exchange)
+    checked_at = utcnow()
+    try:
+        raw_symbol = provider.normalize_pair(normalized_pair)
+        available_pairs: list[str] = []
+        try:
+            available_pairs = await provider.get_available_pairs()
+            catalog_status = "ok"
+            catalog_message = None
+        except Exception as exc:
+            catalog_status = "error"
+            catalog_message = str(exc)
+
+        normalized_available_pairs = [normalize_pair_symbol(item) for item in available_pairs]
+        exists_in_catalog = normalized_pair in set(normalized_available_pairs)
+
+        checks = [
+            {
+                "name": "catalog",
+                "status": catalog_status,
+                "message": catalog_message,
+                "details": {
+                    "returned_pairs": len(normalized_available_pairs),
+                    "examples": normalized_available_pairs[:5],
+                    "exists_in_catalog": exists_in_catalog,
+                },
+            },
+            await _run_diagnostic_check("ticker", lambda: provider.get_ticker(normalized_pair)),
+            await _run_diagnostic_check("order_book", lambda: provider.get_order_book(normalized_pair)),
+            await _run_diagnostic_check(
+                "klines",
+                lambda: provider.get_klines(normalized_pair, interval="5m", limit=50),
+            ),
+        ]
+        has_errors = any(check["status"] == "error" for check in checks)
+        overall_status = "error" if has_errors else "ok" if exists_in_catalog else "warning"
+        return {
+            "exchange": parsed_exchange,
+            "pair": normalized_pair,
+            "display_name": normalized_pair.replace("_", "/"),
+            "raw_symbol": raw_symbol,
+            "exists_in_catalog": exists_in_catalog,
+            "overall_status": overall_status,
+            "checked_at": checked_at,
+            "checks": checks,
+        }
+    finally:
+        await provider.close()
 
 
 def _build_catalog_payload(

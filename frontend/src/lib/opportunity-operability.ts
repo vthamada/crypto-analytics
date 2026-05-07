@@ -99,8 +99,44 @@ export function getSortValue(opportunity: OpportunityListItem, sortBy: Opportuni
       return -opportunity.spread_pct;
     case "score":
     default:
-      return getTechnicalScore(opportunity);
+      return getOperationalRankValue(opportunity);
   }
+}
+
+export function getOperationalRankValue(opportunity: OpportunityListItem): number {
+  const phaseBonus: Record<string, number> = {
+    early_breakout: 8,
+    continuation: 5,
+    accumulation: 2,
+    extended: -4,
+    distribution_or_profit_zone: -6,
+    exhaustion: -8,
+    neutral: 0,
+  };
+  const rangeBonus: Record<string, number> = {
+    high_quality_reusable_range: 7,
+    valid_large_trade: 5,
+    valid_medium_trade: 3,
+    valid_small_trade: 1.5,
+    weak: -1,
+    none: 0,
+  };
+  const typeBonus: Record<string, number> = {
+    trade: 5,
+    hold: 4,
+    observe: -2,
+    avoid: -12,
+  };
+  return (
+    getTechnicalScore(opportunity) +
+    (getExecutabilityScore(opportunity) ?? 0) * 0.12 +
+    (opportunity.trade_margin_score ?? 0) * 0.08 +
+    clamp(opportunity.operational_range_margin_pct ?? 0, 0, 20) * 0.3 +
+    (phaseBonus[opportunity.movement_phase ?? "neutral"] ?? 0) +
+    (rangeBonus[opportunity.operational_range_quality ?? "none"] ?? 0) +
+    (typeBonus[opportunity.opportunity_type ?? "observe"] ?? 0) -
+    (opportunity.is_late_entry_risk ? 8 : 0)
+  );
 }
 
 export function formatCurrency(value: number, digits = 2): string {
@@ -164,6 +200,25 @@ export function getOperabilityReasons(opportunity: OpportunityListItem): Opportu
     } else if (netEdge < 0) {
       reasons.push({ label: "Margem negativa", tone: "negative" });
     }
+  }
+
+  if (opportunity.is_late_entry_risk) {
+    reasons.push({ label: "Entrada tardia", tone: "warning" });
+  }
+
+  if (opportunity.alert_moment_type === "early_breakout") {
+    reasons.push({ label: "Rompimento inicial", tone: "positive" });
+  } else if (opportunity.alert_moment_type === "profit_zone" || opportunity.alert_moment_type === "extended") {
+    reasons.push({ label: "Zona de realizacao", tone: "warning" });
+  }
+
+  if (
+    opportunity.operational_range_quality === "high_quality_reusable_range" ||
+    opportunity.operational_range_quality === "valid_large_trade"
+  ) {
+    reasons.push({ label: "Faixa forte", tone: "positive" });
+  } else if (opportunity.operational_range_quality === "weak") {
+    reasons.push({ label: "Faixa fraca", tone: "warning" });
   }
 
   const band = getExecutabilityBand(opportunity);

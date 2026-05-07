@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -7,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
   Area,
@@ -19,7 +21,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { Opportunity } from "@/lib/types";
+import { submitSignalFeedback } from "@/lib/api";
+import type { Opportunity, SignalFeedbackLabel } from "@/lib/types";
 import {
   formatBps,
   formatCurrency,
@@ -83,6 +86,7 @@ export function SignalDetailModal({
   open,
   onClose,
 }: SignalDetailModalProps) {
+  const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   if (!opportunity) return null;
 
   const technicalScore = getTechnicalScore(opportunity);
@@ -100,6 +104,21 @@ export function SignalDetailModal({
     high: kline.high,
     low: kline.low,
   }));
+
+  async function handleFeedback(feedbackLabel: SignalFeedbackLabel) {
+    if (!opportunity) return;
+    setFeedbackStatus("saving");
+    try {
+      await submitSignalFeedback({
+        signal_id: opportunity.technical_signal_id,
+        opportunity_id: opportunity.id,
+        feedback_label: feedbackLabel,
+      });
+      setFeedbackStatus("saved");
+    } catch {
+      setFeedbackStatus("error");
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={() => onClose()}>
@@ -302,6 +321,98 @@ export function SignalDetailModal({
           </>
         ) : null}
 
+        <Separator className="my-4" />
+
+        <div className="space-y-4">
+          <div className="flex flex-col gap-1">
+            <h4 className="text-sm font-semibold">Faixa e momento operacional</h4>
+            <p className="text-sm text-muted-foreground">
+              Use esta leitura para separar entrada, continuidade, realizacao e sinal atrasado.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <DetailCard
+              label="Fase"
+              value={opportunity.movement_phase?.replaceAll("_", " ") ?? "neutral"}
+              valueClass={opportunity.is_late_entry_risk ? "text-amber-500" : undefined}
+            />
+            <DetailCard
+              label="Momento"
+              value={opportunity.alert_moment_type?.replaceAll("_", " ") ?? "neutral"}
+            />
+            <DetailCard
+              label="Margem faixa"
+              value={
+                opportunity.operational_range_margin_pct != null
+                  ? `${opportunity.operational_range_margin_pct.toFixed(2)}%`
+                  : "n/d"
+              }
+            />
+            <DetailCard
+              label="Capacidade estimada"
+              value={
+                opportunity.capital_capacity_estimate_brl != null
+                  ? formatCurrencyCompact(opportunity.capital_capacity_estimate_brl)
+                  : "n/d"
+              }
+            />
+            <DetailCard
+              label="Zona compra"
+              value={
+                opportunity.operational_buy_zone_low != null && opportunity.operational_buy_zone_high != null
+                  ? `${formatCurrency(opportunity.operational_buy_zone_low)} - ${formatCurrency(opportunity.operational_buy_zone_high)}`
+                  : "n/d"
+              }
+            />
+            <DetailCard
+              label="Zona venda"
+              value={
+                opportunity.operational_sell_zone_low != null && opportunity.operational_sell_zone_high != null
+                  ? `${formatCurrency(opportunity.operational_sell_zone_low)} - ${formatCurrency(opportunity.operational_sell_zone_high)}`
+                  : "n/d"
+              }
+            />
+            <DetailCard
+              label="Qualidade faixa"
+              value={opportunity.operational_range_quality?.replaceAll("_", " ") ?? "none"}
+            />
+            <DetailCard
+              label="Motivo"
+              value={opportunity.alert_reason ?? opportunity.phase_reason ?? "n/d"}
+            />
+          </div>
+        </div>
+
+        <Separator className="my-4" />
+
+        <div className="space-y-3">
+          <div>
+            <h4 className="text-sm font-semibold">Feedback do sinal</h4>
+            <p className="text-sm text-muted-foreground">
+              Marque rapidamente se este sinal foi util, atrasado ou pouco operacional.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {FEEDBACK_ACTIONS.map((action) => (
+              <Button
+                key={action.label}
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={feedbackStatus === "saving"}
+                onClick={() => void handleFeedback(action.value)}
+              >
+                {action.label}
+              </Button>
+            ))}
+          </div>
+          {feedbackStatus === "saved" ? (
+            <p className="text-xs text-emerald-500">Feedback registrado.</p>
+          ) : feedbackStatus === "error" ? (
+            <p className="text-xs text-red-500">Nao foi possivel registrar o feedback.</p>
+          ) : null}
+        </div>
+
         {chartData.length > 0 ? (
           <>
             <Separator className="my-4" />
@@ -391,6 +502,15 @@ export function SignalDetailModal({
     </Dialog>
   );
 }
+
+const FEEDBACK_ACTIONS: { label: string; value: SignalFeedbackLabel }[] = [
+  { label: "Util", value: "useful" },
+  { label: "Atrasada", value: "late" },
+  { label: "Sem liquidez", value: "illiquid" },
+  { label: "Boa margem", value: "good_margin" },
+  { label: "Falso positivo", value: "false_positive" },
+  { label: "Risco de prender", value: "trapped_risk" },
+];
 
 function DetailCard({
   label,

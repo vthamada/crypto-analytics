@@ -20,6 +20,7 @@ from app.models.database import (
     RawMarketObservationRecord,
     RepetitionCountRecord,
     ScannerRuntimeStateRecord,
+    SignalFeedbackRecord,
     SignalOutcomeRecord,
     TechnicalSignalRecord,
     WorkspaceSignalProjectionRecord,
@@ -193,6 +194,25 @@ async def write_opportunity_snapshots(
                 baseline_order_notional_brl=opp.baseline_order_notional_brl,
                 movement_type=opp.movement_type.value,
                 movement_regime=opp.movement_regime.value if opp.movement_regime else None,
+                movement_phase=opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase,
+                phase_confidence_score=opp.phase_confidence_score,
+                phase_reason=opp.phase_reason,
+                is_late_entry_risk=opp.is_late_entry_risk,
+                is_profit_zone_candidate=opp.is_profit_zone_candidate,
+                distance_from_accumulation_zone_pct=opp.distance_from_accumulation_zone_pct,
+                distance_from_breakout_pct=opp.distance_from_breakout_pct,
+                operational_buy_zone_low=opp.operational_buy_zone_low,
+                operational_buy_zone_high=opp.operational_buy_zone_high,
+                operational_sell_zone_low=opp.operational_sell_zone_low,
+                operational_sell_zone_high=opp.operational_sell_zone_high,
+                operational_range_margin_pct=opp.operational_range_margin_pct,
+                range_reuse_count=opp.range_reuse_count,
+                range_reliability_score=opp.range_reliability_score,
+                zone_liquidity_score=opp.zone_liquidity_score,
+                capital_capacity_estimate_brl=opp.capital_capacity_estimate_brl,
+                operational_range_quality=opp.operational_range_quality,
+                alert_moment_type=opp.alert_moment_type,
+                alert_reason=opp.alert_reason,
                 movement_persistence_score=opp.movement_persistence_score,
                 last_price=opp.last_price,
                 change_pct=opp.change_pct,
@@ -262,6 +282,25 @@ async def read_opportunity_snapshots() -> list[dict]:
                 "baseline_order_notional_brl": getattr(r, "baseline_order_notional_brl", None),
                 "movement_type": r.movement_type,
                 "movement_regime": getattr(r, "movement_regime", None),
+                "movement_phase": getattr(r, "movement_phase", None) or "neutral",
+                "phase_confidence_score": getattr(r, "phase_confidence_score", None),
+                "phase_reason": getattr(r, "phase_reason", None),
+                "is_late_entry_risk": getattr(r, "is_late_entry_risk", False),
+                "is_profit_zone_candidate": getattr(r, "is_profit_zone_candidate", False),
+                "distance_from_accumulation_zone_pct": getattr(r, "distance_from_accumulation_zone_pct", None),
+                "distance_from_breakout_pct": getattr(r, "distance_from_breakout_pct", None),
+                "operational_buy_zone_low": getattr(r, "operational_buy_zone_low", None),
+                "operational_buy_zone_high": getattr(r, "operational_buy_zone_high", None),
+                "operational_sell_zone_low": getattr(r, "operational_sell_zone_low", None),
+                "operational_sell_zone_high": getattr(r, "operational_sell_zone_high", None),
+                "operational_range_margin_pct": getattr(r, "operational_range_margin_pct", None),
+                "range_reuse_count": getattr(r, "range_reuse_count", 0),
+                "range_reliability_score": getattr(r, "range_reliability_score", None),
+                "zone_liquidity_score": getattr(r, "zone_liquidity_score", None),
+                "capital_capacity_estimate_brl": getattr(r, "capital_capacity_estimate_brl", None),
+                "operational_range_quality": getattr(r, "operational_range_quality", None) or "none",
+                "alert_moment_type": getattr(r, "alert_moment_type", None) or "neutral",
+                "alert_reason": getattr(r, "alert_reason", None),
                 "movement_persistence_score": getattr(r, "movement_persistence_score", None),
                 "last_price": r.last_price,
                 "change_pct": r.change_pct,
@@ -344,6 +383,17 @@ async def save_technical_signals(opportunities: list[Opportunity]) -> dict[str, 
                 repetition_score=opp.repetition_score,
                 movement_type=opp.movement_type.value,
                 movement_regime=opp.movement_regime.value if opp.movement_regime else None,
+                movement_phase=opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase,
+                phase_confidence_score=opp.phase_confidence_score,
+                phase_reason=opp.phase_reason,
+                is_late_entry_risk=opp.is_late_entry_risk,
+                is_profit_zone_candidate=opp.is_profit_zone_candidate,
+                distance_from_accumulation_zone_pct=opp.distance_from_accumulation_zone_pct,
+                distance_from_breakout_pct=opp.distance_from_breakout_pct,
+                operational_range_margin_pct=opp.operational_range_margin_pct,
+                operational_range_quality=opp.operational_range_quality,
+                alert_moment_type=opp.alert_moment_type,
+                alert_reason=opp.alert_reason,
                 movement_multiplier=opp.movement_multiplier,
                 last_price=opp.last_price,
                 change_pct=opp.change_pct,
@@ -385,6 +435,17 @@ async def save_raw_market_observations(opportunities: list[Opportunity], cycle_i
                     semantic_signal_key=opp.semantic_signal_key,
                     movement_type=opp.movement_type.value,
                     movement_regime=opp.movement_regime.value if opp.movement_regime else None,
+                    movement_phase=opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase,
+                    phase_confidence_score=opp.phase_confidence_score,
+                    phase_reason=opp.phase_reason,
+                    is_late_entry_risk=opp.is_late_entry_risk,
+                    is_profit_zone_candidate=opp.is_profit_zone_candidate,
+                    distance_from_accumulation_zone_pct=opp.distance_from_accumulation_zone_pct,
+                    distance_from_breakout_pct=opp.distance_from_breakout_pct,
+                    operational_range_margin_pct=opp.operational_range_margin_pct,
+                    operational_range_quality=opp.operational_range_quality,
+                    alert_moment_type=opp.alert_moment_type,
+                    alert_reason=opp.alert_reason,
                     last_price=opp.last_price,
                     quote_volume_24h=opp.quote_volume_24h,
                     liquidity_units=opp.liquidity_units,
@@ -488,6 +549,7 @@ async def create_pending_outcomes(signals: list[dict]) -> int:
                 exchange=sig["exchange"],
                 pair=sig["pair"],
                 entry_price=sig["entry_price"],
+                late_signal_detected=sig.get("late_signal_detected"),
                 signal_detected_at=normalize_db_datetime(sig["signal_detected_at"]),
                 created_at=utcnow(),
             )
@@ -500,7 +562,7 @@ async def create_pending_outcomes(signals: list[dict]) -> int:
 async def get_pending_outcomes(
     *,
     min_age_minutes: int = 5,
-    max_age_hours: int = 5,
+    max_age_hours: int = 25,
     limit: int = 100,
 ) -> list[dict]:
     """Get outcomes that haven't been fully evaluated yet."""
@@ -509,17 +571,21 @@ async def get_pending_outcomes(
     max_age_cutoff = now - timedelta(hours=max_age_hours)
 
     async with async_session() as session:
+        missing_windows = [
+            SignalOutcomeRecord.price_after_5m.is_(None),
+            SignalOutcomeRecord.price_after_15m.is_(None),
+            SignalOutcomeRecord.price_after_1h.is_(None),
+            SignalOutcomeRecord.price_after_4h.is_(None),
+        ]
+        if max_age_hours >= 24:
+            missing_windows.append(SignalOutcomeRecord.price_after_24h.is_(None))
+
         query = (
             select(SignalOutcomeRecord)
             .where(
                 SignalOutcomeRecord.signal_detected_at <= min_age_cutoff,
                 SignalOutcomeRecord.signal_detected_at >= max_age_cutoff,
-                or_(
-                    SignalOutcomeRecord.price_after_5m.is_(None),
-                    SignalOutcomeRecord.price_after_15m.is_(None),
-                    SignalOutcomeRecord.price_after_1h.is_(None),
-                    SignalOutcomeRecord.price_after_4h.is_(None),
-                ),
+                or_(*missing_windows),
             )
             .order_by(SignalOutcomeRecord.signal_detected_at)
             .limit(limit)
@@ -533,6 +599,7 @@ async def get_pending_outcomes(
                 "exchange": r.exchange,
                 "pair": r.pair,
                 "entry_price": r.entry_price,
+                "late_signal_detected": getattr(r, "late_signal_detected", None),
                 "signal_detected_at": r.signal_detected_at,
             }
             for r in rows
@@ -546,8 +613,13 @@ async def update_outcome(
     price_after_15m: float | None = None,
     price_after_1h: float | None = None,
     price_after_4h: float | None = None,
+    price_after_24h: float | None = None,
     max_price_1h: float | None = None,
     min_price_1h: float | None = None,
+    max_price_after_signal: float | None = None,
+    min_price_after_signal: float | None = None,
+    volume_after_signal: float | None = None,
+    late_signal_detected: bool | None = None,
 ) -> None:
     """Update an outcome with price observations."""
     async with async_session() as session:
@@ -567,6 +639,9 @@ async def update_outcome(
         if price_after_4h is not None and record.price_after_4h is None:
             record.price_after_4h = price_after_4h
             record.outcome_pct_4h = round((price_after_4h - record.entry_price) / record.entry_price * 100, 4) if record.entry_price else None
+        if price_after_24h is not None and record.price_after_24h is None:
+            record.price_after_24h = price_after_24h
+            record.outcome_pct_24h = round((price_after_24h - record.entry_price) / record.entry_price * 100, 4) if record.entry_price else None
         if max_price_1h is not None:
             record.max_price_1h = max(
                 [value for value in (record.max_price_1h, max_price_1h) if value is not None]
@@ -575,6 +650,73 @@ async def update_outcome(
             record.min_price_1h = min(
                 [value for value in (record.min_price_1h, min_price_1h) if value is not None]
             )
+        if max_price_after_signal is not None:
+            record.max_price_after_signal = max(
+                [value for value in (record.max_price_after_signal, max_price_after_signal) if value is not None]
+            )
+        if min_price_after_signal is not None:
+            record.min_price_after_signal = min(
+                [value for value in (record.min_price_after_signal, min_price_after_signal) if value is not None]
+            )
+        if volume_after_signal is not None:
+            record.volume_after_signal = volume_after_signal
+        if late_signal_detected is not None:
+            record.late_signal_detected = late_signal_detected
+
+        if record.entry_price:
+            if record.max_price_after_signal is not None:
+                record.max_favorable_excursion_pct = round(
+                    (record.max_price_after_signal - record.entry_price) / record.entry_price * 100,
+                    4,
+                )
+            if record.min_price_after_signal is not None:
+                record.max_adverse_excursion_pct = round(
+                    (record.min_price_after_signal - record.entry_price) / record.entry_price * 100,
+                    4,
+                )
+
+        best_return = max(
+            [
+                value
+                for value in (
+                    record.outcome_pct_5m,
+                    record.outcome_pct_15m,
+                    record.outcome_pct_1h,
+                    record.outcome_pct_4h,
+                    record.outcome_pct_24h,
+                    record.max_favorable_excursion_pct,
+                )
+                if value is not None
+            ],
+            default=None,
+        )
+        worst_return = min(
+            [
+                value
+                for value in (
+                    record.outcome_pct_5m,
+                    record.outcome_pct_15m,
+                    record.outcome_pct_1h,
+                    record.outcome_pct_4h,
+                    record.outcome_pct_24h,
+                    record.max_adverse_excursion_pct,
+                )
+                if value is not None
+            ],
+            default=None,
+        )
+        record.movement_continued = (
+            (record.outcome_pct_1h is not None and record.outcome_pct_1h > 0.5)
+            or (record.outcome_pct_4h is not None and record.outcome_pct_4h > 1.0)
+            or (record.outcome_pct_24h is not None and record.outcome_pct_24h > 2.0)
+        )
+        record.breakout_confirmed = best_return is not None and best_return >= 2.0
+        record.outcome_label = _classify_outcome_label(
+            best_return=best_return,
+            worst_return=worst_return,
+            late_signal_detected=record.late_signal_detected,
+            movement_continued=record.movement_continued,
+        )
 
         if all(
             value is not None
@@ -587,6 +729,61 @@ async def update_outcome(
         ):
             record.evaluated_at = utcnow()
         await session.commit()
+
+
+def _classify_outcome_label(
+    *,
+    best_return: float | None,
+    worst_return: float | None,
+    late_signal_detected: bool | None,
+    movement_continued: bool | None,
+) -> str | None:
+    if best_return is None and worst_return is None:
+        return None
+    if late_signal_detected and (best_return or 0) < 1.0:
+        return "late"
+    if best_return is not None and best_return >= 5.0:
+        return "excellent"
+    if best_return is not None and best_return >= 2.0 and movement_continued:
+        return "good"
+    if worst_return is not None and worst_return <= -3.0 and (best_return or 0) < 1.0:
+        return "false_positive"
+    if best_return is not None and best_return < 0.5:
+        return "neutral"
+    return "good" if movement_continued else "neutral"
+
+
+async def create_signal_feedback(
+    *,
+    signal_id: str | None,
+    opportunity_id: str | None,
+    user_id: str | None,
+    workspace_id: str | None,
+    feedback_label: str,
+    feedback_note: str | None = None,
+) -> dict:
+    async with async_session() as session:
+        record = SignalFeedbackRecord(
+            signal_id=signal_id,
+            opportunity_id=opportunity_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            feedback_label=feedback_label,
+            feedback_note=feedback_note,
+            created_at=utcnow(),
+        )
+        session.add(record)
+        await session.commit()
+        return {
+            "id": record.id,
+            "signal_id": record.signal_id,
+            "opportunity_id": record.opportunity_id,
+            "user_id": record.user_id,
+            "workspace_id": record.workspace_id,
+            "feedback_label": record.feedback_label,
+            "feedback_note": record.feedback_note,
+            "created_at": record.created_at,
+        }
 
 
 # ---------------------------------------------------------------------------

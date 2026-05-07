@@ -209,6 +209,7 @@ async def scan_loop() -> None:
                         "exchange": opp.exchange.value,
                         "pair": opp.pair,
                         "entry_price": opp.last_price,
+                        "late_signal_detected": opp.is_late_entry_risk,
                         "signal_detected_at": opp.detected_at,
                     })
             if outcome_entries:

@@ -328,6 +328,12 @@ def test_history_summary_returns_reduced_payload(monkeypatch):
                 "last_price": 100,
                 "change_pct": 4,
                 "movement_type": "strong_range",
+                "movement_phase": "neutral",
+                "is_late_entry_risk": False,
+                "operational_range_margin_pct": None,
+                "operational_range_quality": "none",
+                "alert_moment_type": "neutral",
+                "alert_reason": None,
                 "detected_at": "2026-04-15T18:55:30+00:00",
             }
         ]

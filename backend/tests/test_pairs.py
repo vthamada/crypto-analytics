@@ -107,6 +107,86 @@ def test_available_pairs_catalog_cache_is_scoped_by_enabled_exchanges(monkeypatc
     asyncio.run(run_test())
 
 
+def test_fetch_provider_pairs_uses_stale_success_when_provider_fails(monkeypatch):
+    async def run_test():
+        class WorkingNovaDaxProvider:
+            exchange = Exchange.NOVADAX
+
+            async def get_available_pairs(self):
+                return ["LAB_BRL", "TON_BRL"]
+
+            async def close(self):
+                return None
+
+        class FailingNovaDaxProvider:
+            exchange = Exchange.NOVADAX
+
+            async def get_available_pairs(self):
+                raise RuntimeError("novadax unavailable")
+
+            async def close(self):
+                return None
+
+        monkeypatch.setattr(pairs, "_pair_catalog_provider_status", {})
+        monkeypatch.setattr(pairs, "_provider_last_successful_pairs", {})
+        monkeypatch.setattr(pairs, "NovaDaxProvider", WorkingNovaDaxProvider)
+
+        first = await pairs._fetch_provider_pairs([Exchange.NOVADAX])
+
+        monkeypatch.setattr(pairs, "NovaDaxProvider", FailingNovaDaxProvider)
+        second = await pairs._fetch_provider_pairs([Exchange.NOVADAX])
+        status = pairs._provider_status_for_key((Exchange.NOVADAX.value,))[0]
+
+        assert first[Exchange.NOVADAX] == ["LAB_BRL", "TON_BRL"]
+        assert second[Exchange.NOVADAX] == ["LAB_BRL", "TON_BRL"]
+        assert status["status"] == "stale"
+        assert status["error_message"] == "novadax unavailable"
+
+    asyncio.run(run_test())
+
+
+def test_pair_diagnostic_reports_symbol_and_endpoint_checks(monkeypatch, sample_ticker, sample_order_book, sample_klines):
+    async def run_test():
+        class DiagnosticProvider:
+            exchange = Exchange.NOVADAX
+
+            def normalize_pair(self, pair: str):
+                return pair.upper()
+
+            async def get_available_pairs(self):
+                return ["LAB_BRL"]
+
+            async def get_ticker(self, pair: str):
+                return sample_ticker.model_copy(update={"exchange": Exchange.NOVADAX, "pair": pair})
+
+            async def get_order_book(self, pair: str):
+                return sample_order_book.model_copy(update={"exchange": Exchange.NOVADAX, "pair": pair})
+
+            async def get_klines(self, pair: str, interval: str = "5m", limit: int = 50):
+                return sample_klines
+
+            async def close(self):
+                return None
+
+        monkeypatch.setattr(pairs, "NovaDaxProvider", DiagnosticProvider)
+
+        diagnostic = await pairs.get_pair_exchange_diagnostic(Exchange.NOVADAX, "LAB/BRL")
+
+        assert diagnostic["exchange"] == Exchange.NOVADAX
+        assert diagnostic["pair"] == "LAB_BRL"
+        assert diagnostic["raw_symbol"] == "LAB_BRL"
+        assert diagnostic["exists_in_catalog"] is True
+        assert diagnostic["overall_status"] == "ok"
+        assert {check["name"]: check["status"] for check in diagnostic["checks"]} == {
+            "catalog": "ok",
+            "ticker": "ok",
+            "order_book": "ok",
+            "klines": "ok",
+        }
+
+    asyncio.run(run_test())
+
+
 def test_normalize_pair_symbol_accepts_exchange_formats():
     assert pairs.normalize_pair_symbol("SOLBRL") == "SOL_BRL"
     assert pairs.normalize_pair_symbol("wbtc/brl") == "WBTC_BRL"

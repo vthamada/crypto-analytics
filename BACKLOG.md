@@ -1,6 +1,6 @@
 # Backlog
 
-Ultima revisao: 2026-05-06
+Ultima revisao: 2026-05-07
 
 Legenda: `[x]` concluido · `[ ]` pendente · `[~]` parcialmente feito
 
@@ -36,6 +36,7 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 ## Concluido (historico)
 
 ### Plano de executabilidade operacional
+- [x] Refinamento final 2026-05 - fase do movimento, faixa operacional reaproveitavel, ranking comparativo por ciclo, outcomes 24h/enriquecidos e feedback manual de sinais
 - [x] Release I parcial - scanner em dois estagios com triagem leve, temperatura/cooldown em memoria, telemetria agregada em health, dashboard consumindo payload resumido, detalhe sob demanda e catalogo observavel por provider
 - [x] Refinamento de escopo BRL 2026-05 - Binance desativada por padrao, Mercado Bitcoin/NovaDAX como nucleo, catalogo com providers desativados isolados e ativacao manual por workspace
 - [x] Especificacao BRL 2026-05 - margem operacional, classificacao `trade/hold/observe/avoid`, descoberta ampla BRL, resumo de historico e reducao de egress do dashboard/analytics

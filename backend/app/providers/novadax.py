@@ -32,17 +32,14 @@ class NovaDaxProvider(ExchangeProvider):
         return None
 
     async def get_available_pairs(self) -> list[str]:
-        try:
-            data = await self._request("GET", "/common/symbols")
-            pairs = []
-            for item in data.get("data", []):
-                symbol = item.get("symbol", "")
-                if symbol.endswith("_BRL"):
-                    pairs.append(symbol)
-            return pairs
-        except Exception as e:
-            logger.error(f"[NovaDAX] Failed to get pairs: {e}")
-            return []
+        data = await self._request("GET", "/common/symbols")
+        pairs = []
+        for item in data.get("data", []):
+            symbol = item.get("symbol", "")
+            status = str(item.get("status", "ONLINE")).upper()
+            if symbol.endswith("_BRL") and status == "ONLINE":
+                pairs.append(symbol)
+        return pairs
 
     async def get_ticker(self, pair: str) -> Ticker:
         symbol = self.normalize_pair(pair)

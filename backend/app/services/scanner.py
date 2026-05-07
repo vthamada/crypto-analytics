@@ -42,8 +42,13 @@ from app.filters.liquidity import (
     liquidity_score,
 )
 from app.filters.spread import calculate_spread, passes_spread_filter, spread_score
-from app.filters.movement import classify_movement
-from app.filters.movement import classify_movement_regime
+from app.filters.movement import (
+    classify_alert_moment,
+    classify_movement,
+    classify_movement_phase,
+    classify_movement_regime,
+)
+from app.filters.operational_range import calculate_operational_range_metrics
 from app.filters.scoring import calculate_score
 
 logger = logging.getLogger(__name__)
@@ -540,6 +545,11 @@ class Scanner:
                 and movement_persistence_score >= 0.02
             )
             recent_change_pct = round(calculate_recent_change(klines), 2)
+            phase_metrics = classify_movement_phase(
+                klines,
+                movement_regime=movement_regime,
+                recent_change_pct=recent_change_pct,
+            )
             trade_margin_metrics = calculate_trade_margin_metrics(
                 volatility_pct=volatility_pct,
                 recent_change_pct=recent_change_pct,
@@ -557,6 +567,19 @@ class Scanner:
                 trade_margin_score=trade_margin_metrics["trade_margin_score"],
                 estimated_net_trade_edge_pct=trade_margin_metrics["estimated_net_trade_edge_pct"],
                 movement_regime=movement_regime.value,
+            )
+            if phase_metrics["is_late_entry_risk"]:
+                score = min(max(round(score * 0.9, 1), 0), 100)
+            range_metrics = calculate_operational_range_metrics(
+                klines,
+                order_book=order_book,
+                movement_phase=phase_metrics["movement_phase"],
+                fillable_notional_within_slippage_cap=serialized_fillable_notional,
+            )
+            alert_moment_type, alert_reason = classify_alert_moment(
+                movement_phase=phase_metrics["movement_phase"],
+                is_late_entry_risk=phase_metrics["is_late_entry_risk"],
+                is_profit_zone_candidate=phase_metrics["is_profit_zone_candidate"],
             )
 
             technical_score = calculate_technical_score(
@@ -604,6 +627,25 @@ class Scanner:
                 baseline_order_notional_brl=trading_profile.order_notional_brl,
                 movement_type=movement_type,
                 movement_regime=movement_regime,
+                movement_phase=phase_metrics["movement_phase"],
+                phase_confidence_score=phase_metrics["phase_confidence_score"],
+                phase_reason=phase_metrics["phase_reason"],
+                is_late_entry_risk=phase_metrics["is_late_entry_risk"],
+                is_profit_zone_candidate=phase_metrics["is_profit_zone_candidate"],
+                distance_from_accumulation_zone_pct=phase_metrics["distance_from_accumulation_zone_pct"],
+                distance_from_breakout_pct=phase_metrics["distance_from_breakout_pct"],
+                operational_buy_zone_low=range_metrics["operational_buy_zone_low"],
+                operational_buy_zone_high=range_metrics["operational_buy_zone_high"],
+                operational_sell_zone_low=range_metrics["operational_sell_zone_low"],
+                operational_sell_zone_high=range_metrics["operational_sell_zone_high"],
+                operational_range_margin_pct=range_metrics["operational_range_margin_pct"],
+                range_reuse_count=range_metrics["range_reuse_count"],
+                range_reliability_score=range_metrics["range_reliability_score"],
+                zone_liquidity_score=range_metrics["zone_liquidity_score"],
+                capital_capacity_estimate_brl=range_metrics["capital_capacity_estimate_brl"],
+                operational_range_quality=range_metrics["operational_range_quality"],
+                alert_moment_type=alert_moment_type,
+                alert_reason=alert_reason,
                 movement_persistence_score=movement_persistence_score,
                 last_price=ticker.last_price,
                 change_pct=recent_change_pct,
@@ -681,7 +723,9 @@ class Scanner:
             elif isinstance(result, Exception):
                 logger.error(f"Scan task error: {result}")
 
-        self._opportunities = self._enrich_cross_exchange_context(new_opportunities)
+        self._opportunities = self._rank_cycle_opportunities(
+            self._enrich_cross_exchange_context(new_opportunities)
+        )
         self._scan_diagnostics["opportunities"] = len(new_opportunities)
         self._refresh_temperature_diagnostics()
         logger.info(
@@ -690,6 +734,40 @@ class Scanner:
             self._scan_diagnostics,
         )
         return self._opportunities
+
+    def _rank_cycle_opportunities(self, opportunities: list[Opportunity]) -> list[Opportunity]:
+        def rank_value(opportunity: Opportunity) -> float:
+            phase = opportunity.movement_phase.value if hasattr(opportunity.movement_phase, "value") else opportunity.movement_phase
+            phase_bonus = {
+                "early_breakout": 8.0,
+                "continuation": 5.0,
+                "accumulation": 2.0,
+                "extended": -4.0,
+                "distribution_or_profit_zone": -6.0,
+                "exhaustion": -8.0,
+                "neutral": 0.0,
+            }
+            range_bonus = {
+                "high_quality_reusable_range": 7.0,
+                "valid_large_trade": 5.0,
+                "valid_medium_trade": 3.0,
+                "valid_small_trade": 1.5,
+                "weak": -1.0,
+                "none": 0.0,
+            }
+            type_bonus = {"trade": 5.0, "hold": 4.0, "observe": -2.0, "avoid": -12.0}
+            return (
+                opportunity.score
+                + ((opportunity.executability_score or 0.0) * 0.12)
+                + ((opportunity.trade_margin_score or 0.0) * 0.08)
+                + min(max(opportunity.operational_range_margin_pct or 0.0, 0.0), 20.0) * 0.3
+                + phase_bonus.get(str(phase), 0.0)
+                + range_bonus.get(opportunity.operational_range_quality or "none", 0.0)
+                + type_bonus.get(opportunity.opportunity_type or "observe", 0.0)
+                - (8.0 if opportunity.is_late_entry_risk else 0.0)
+            )
+
+        return sorted(opportunities, key=rank_value, reverse=True)
 
     def _enrich_cross_exchange_context(self, opportunities: list[Opportunity]) -> list[Opportunity]:
         opportunities_by_pair: dict[str, list[Opportunity]] = {}

@@ -67,6 +67,11 @@ def test_scan_all_returns_opportunities(monkeypatch, sample_ticker, sample_order
     assert opportunities[0].interesting_signal is True
     assert opportunities[0].operable_signal in {True, False}
     assert opportunities[0].movement_regime is not None
+    assert opportunities[0].movement_phase is not None
+    assert opportunities[0].alert_moment_type is not None
+    assert opportunities[0].operational_range_quality is not None
+    assert opportunities[0].operational_range_margin_pct is not None
+    assert opportunities[0].capital_capacity_estimate_brl is not None
     assert opportunities[0].movement_persistence_score is not None
     assert opportunities[0].baseline_order_notional_brl is not None
     assert opportunities[0].duration_minutes > 0
@@ -98,6 +103,56 @@ def test_scan_all_uses_workspace_operability_thresholds(monkeypatch, sample_tick
     assert len(opportunities) == 1
     assert opportunities[0].interesting_signal is True
     assert opportunities[0].operable_signal is False
+
+
+def test_scan_all_marks_extended_phase_as_late_entry(monkeypatch, sample_order_book):
+    monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+
+    async def fake_scannable_pairs(self):
+        return {Exchange.BINANCE: ["LAB_BRL"]}
+
+    monkeypatch.setattr(Scanner, "_get_scannable_pairs_by_exchange", fake_scannable_pairs)
+
+    from datetime import datetime, timedelta, timezone
+    from app.models.schemas import Kline
+
+    now = datetime.now(timezone.utc)
+    extended_klines = [
+        Kline(
+            open_time=now + timedelta(minutes=index * 5),
+            open=open_price,
+            high=close_price * 1.01,
+            low=open_price * 0.99,
+            close=close_price,
+            volume=2000 + index * 100,
+        )
+        for index, (open_price, close_price) in enumerate(
+            [(10, 10.4), (10.4, 11.2), (11.2, 12.9), (12.9, 14.8), (14.8, 17.0)]
+        )
+    ]
+    ticker = Ticker(
+        exchange=Exchange.BINANCE,
+        pair="LAB_BRL",
+        last_price=17.0,
+        high_24h=17.2,
+        low_24h=9.8,
+        volume_24h=30000,
+        quote_volume_24h=500000,
+        change_pct_24h=70.0,
+    )
+    scanner = Scanner(AppConfig(enabled_exchanges=[Exchange.BINANCE], enabled_pairs=["LAB_BRL"]))
+    scanner._providers = {
+        Exchange.BINANCE: FakeProvider(ticker, sample_order_book, extended_klines)
+    }
+
+    import asyncio
+
+    opportunities = asyncio.run(scanner.scan_all())
+
+    assert len(opportunities) == 1
+    assert opportunities[0].movement_phase == "extended"
+    assert opportunities[0].is_late_entry_risk is True
+    assert opportunities[0].is_profit_zone_candidate is True
 
 
 def test_scan_all_enriches_cross_exchange_context(monkeypatch, sample_order_book, sample_klines):

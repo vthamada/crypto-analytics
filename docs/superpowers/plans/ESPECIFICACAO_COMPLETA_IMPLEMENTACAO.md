@@ -1866,3 +1866,584 @@ O produto estará alinhado com a direção atual quando:
 - enriquecer o ranking comparativo entre sinais do mesmo ciclo
 - exibir motivo específico de rompimento no dashboard e nos alertas
 - calibrar os novos padrões com outcomes históricos
+
+---
+
+## 57. Refinamento final: universo dinâmico, fase do movimento e validação operacional
+
+### 57.1 Objetivo deste refinamento
+
+Este bloco consolida o refinamento final de produto após os exemplos mais recentes observados com TON/BRL e LAB/BRL.
+
+A direção final do sistema não deve ser interpretada como uma simples lista fixa de moedas ou como um ranking de maiores altas.
+
+O sistema deve funcionar como:
+
+> **um radar operacional em BRL que monitora dinamicamente pares relevantes, identifica estruturas de compra/venda com liquidez, detecta rompimentos e movimentos fortes no momento útil, classifica a fase do movimento e aprende com o resultado dos sinais.**
+
+---
+
+## 58. Universo dinâmico de pares, sem limite rígido de 20 a 30 moedas
+
+### 58.1 Contexto
+
+Foi mencionado que algo como 20 a 30 moedas por corretora poderia valer a pena monitorar.
+
+Esse número deve ser tratado como **referência operacional**, não como limite rígido.
+
+### 58.2 Regra correta
+
+O sistema não deve limitar o scanner a exatamente 20 ou 30 moedas.
+
+O sistema deve:
+
+- descobrir todos os pares BRL disponíveis nas exchanges habilitadas
+- aplicar filtros mínimos de relevância, volume, liquidez e atividade
+- classificar os pares por prioridade dinâmica
+- monitorar pares mais promissores com maior frequência
+- manter pares menos promissores em observação leve
+- entregar ao usuário apenas a shortlist operacional
+
+### 58.3 Interpretação prática
+
+O número de pares monitoráveis pode variar conforme o mercado.
+
+Em alguns momentos, podem existir:
+- 10 pares realmente relevantes
+- 25 pares realmente relevantes
+- 50 ou mais pares com atividade suficiente
+
+O sistema não deve excluir uma boa oportunidade apenas porque ultrapassou um limite artificial.
+
+### 58.4 Modelo recomendado
+
+O sistema deve trabalhar com quatro camadas:
+
+#### Universo bruto
+Todos os pares BRL disponíveis nas exchanges habilitadas.
+
+#### Universo elegível
+Pares que passaram pelos filtros mínimos de volume, liquidez, atividade e status operacional.
+
+#### Universo priorizado
+Pares classificados como `hot`, `warm` ou `cold`.
+
+#### Shortlist operacional
+Poucos pares destacados no dashboard e/ou Telegram.
+
+### 58.5 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- não houver limite fixo rígido de 20 a 30 moedas
+- pares bons não forem descartados por limite arbitrário
+- pares frios continuarem em observação leve
+- pares quentes receberem análise mais frequente e profunda
+- o frontend e o Telegram continuarem recebendo apenas shortlist qualificada
+
+---
+
+## 59. Fase do movimento
+
+### 59.1 Problema
+
+Um alerta pode ser inútil se chegar tarde demais.
+
+Dizer apenas que um ativo subiu muito não é suficiente.
+
+O sistema precisa indicar **em qual fase do movimento** o ativo parece estar.
+
+### 59.2 Fases que o sistema deve reconhecer
+
+O sistema deve classificar, sempre que possível, a fase do movimento como:
+
+- `accumulation`: acumulação/lateralização
+- `early_breakout`: início de rompimento
+- `continuation`: continuação do movimento
+- `extended`: movimento esticado
+- `distribution_or_profit_zone`: possível zona de realização
+- `exhaustion`: possível esgotamento
+- `neutral`: sem fase clara
+
+### 59.3 Uso prático
+
+A fase do movimento deve ajudar a separar:
+
+- oportunidade começando
+- oportunidade em andamento
+- oportunidade possivelmente atrasada
+- oportunidade para realização/venda
+- movimento já esgotado
+
+### 59.4 Exemplo prático
+
+Um ativo que lateralizou entre R$ 6 e R$ 8 e rompeu para R$ 12 deve ser tratado de forma diferente dependendo do momento:
+
+- perto de R$ 6 a R$ 8: possível zona de compra/acumulação
+- rompendo acima da faixa: início de oportunidade
+- avançando com volume: continuação
+- muito esticado após forte alta: possível realização ou alerta atrasado
+
+### 59.5 Campos sugeridos
+
+Adicionar ou calcular campos como:
+
+- `movement_phase`
+- `phase_confidence_score`
+- `phase_reason`
+- `is_late_entry_risk`
+- `is_profit_zone_candidate`
+- `distance_from_accumulation_zone_pct`
+- `distance_from_breakout_pct`
+
+### 59.6 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- sinais não forem tratados todos como iguais
+- o alerta indicar se o movimento está no início, em continuação ou esticado
+- o usuário conseguir diferenciar oportunidade de entrada de possível zona de realização
+- o ranking penalizar sinais muito atrasados para entrada, quando aplicável
+
+---
+
+## 60. Zona operacional e faixa operacional reaproveitável
+
+### 60.1 Contexto
+
+Foi observado que o usuário identifica oportunidades como:
+
+- compras repetidas em uma faixa inferior
+- vendas repetidas em uma faixa superior
+- margem alta entre as duas zonas
+- liquidez suficiente para operar valores relevantes
+
+Exemplo observado:
+
+- zona de compra entre 6 e 8
+- zona de venda próxima de 12
+- margem alta
+- liquidez suficiente
+- possibilidade de operar capital relevante
+
+### 60.2 Conceito
+
+O sistema deve implementar o conceito de:
+
+> **Faixa Operacional Reaproveitável**
+
+Uma faixa operacional reaproveitável ocorre quando existe:
+
+- zona de compra relativamente clara
+- zona de venda relativamente clara
+- liquidez suficiente nas duas regiões
+- margem operacional atrativa
+- repetição ou recorrência do movimento
+- possibilidade de entrada e saída sem risco excessivo de aprisionamento
+
+### 60.3 Requisitos
+
+O sistema deve estimar:
+
+- `operational_buy_zone_low`
+- `operational_buy_zone_high`
+- `operational_sell_zone_low`
+- `operational_sell_zone_high`
+- `operational_range_margin_pct`
+- `range_reuse_count`
+- `range_reliability_score`
+- `zone_liquidity_score`
+- `capital_capacity_estimate_brl`
+
+### 60.4 Capacidade de capital
+
+O sistema deve avaliar se a oportunidade suporta diferentes tamanhos de operação.
+
+Além das faixas já existentes, o sistema deve considerar explicitamente:
+
+- operação pequena
+- operação média
+- operação maior
+- operação relevante entre R$ 5.000 e R$ 10.000, quando houver liquidez suficiente
+
+### 60.5 Classificação sugerida
+
+A faixa operacional pode ser classificada como:
+
+- `none`: sem faixa identificável
+- `weak`: faixa fraca
+- `valid_small_trade`: válida apenas para trade pequeno
+- `valid_medium_trade`: válida para trade médio
+- `valid_large_trade`: válida para capital maior
+- `high_quality_reusable_range`: faixa de alta qualidade e reaproveitável
+
+### 60.6 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- conseguir apontar possível zona de compra e zona de venda
+- estimar margem entre essas zonas
+- indicar se o preço atual ainda está em região útil
+- indicar se o movimento já está esticado
+- avaliar se há liquidez para operar valores maiores
+- destacar oportunidades com faixa operacional reaproveitável
+
+---
+
+## 61. Alertas por momento: início, confirmação e atraso
+
+### 61.1 Problema
+
+O mesmo ativo pode gerar diferentes tipos de alerta dependendo do momento.
+
+Um alerta de início de rompimento tem valor diferente de um alerta enviado depois que o preço já subiu muito.
+
+### 61.2 Tipos de alerta
+
+O sistema deve diferenciar pelo menos estes tipos:
+
+#### Alerta de preparação
+Quando o ativo está lateralizado/acumulando com volume ou liquidez começando a melhorar.
+
+Exemplo:
+> TON/BRL está em lateralização com volume crescente. Possível preparação.
+
+#### Alerta de início de rompimento
+Quando o ativo começa a romper a faixa anterior com volume.
+
+Exemplo:
+> TON/BRL iniciou rompimento acima da zona de lateralização com aumento de volume.
+
+#### Alerta de continuação
+Quando o ativo segue forte após o rompimento e ainda há margem ou liquidez.
+
+Exemplo:
+> TON/BRL segue em continuação com volume e liquidez.
+
+#### Alerta de movimento esticado
+Quando o ativo já avançou muito e pode estar tarde para entrada.
+
+Exemplo:
+> TON/BRL teve forte avanço, mas já está distante da zona de compra. Avaliar risco de entrada atrasada.
+
+#### Alerta de zona de realização
+Quando o ativo se aproxima da zona de venda estimada ou apresenta sinais de esticamento.
+
+Exemplo:
+> TON/BRL se aproxima de zona de realização estimada.
+
+### 61.3 Regra
+
+O sistema deve evitar enviar alerta de compra implícita quando o movimento já estiver esticado.
+
+A linguagem deve ser operacional e descritiva, não prescritiva.
+
+### 61.4 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- os alertas indicarem o momento/fase do sinal
+- alertas atrasados forem rotulados como risco de entrada tardia
+- alertas de rompimento inicial forem priorizados
+- alertas de zona de realização forem diferenciados de alertas de entrada
+
+---
+
+## 62. Resultado dos sinais e simulação simples pós-sinal
+
+### 62.1 Objetivo
+
+O sistema deve medir se os sinais gerados teriam sido úteis depois de emitidos.
+
+Isso ainda não é trading automático.
+
+É uma simulação simples e operacional para validação.
+
+### 62.2 Métricas pós-sinal
+
+Para cada sinal relevante, o sistema deve medir:
+
+- preço no momento do sinal
+- preço após 5 minutos
+- preço após 15 minutos
+- preço após 1 hora
+- preço após 4 horas
+- preço após 24 horas
+- maior preço após o sinal
+- menor preço após o sinal
+- volume após o sinal
+- continuidade do movimento
+- se houve rompimento confirmado
+- se o sinal ficou atrasado
+- se o sinal teria sido útil para trade
+- se o sinal teria sido útil para hold
+
+### 62.3 Campos sugeridos
+
+Adicionar ou enriquecer `signal_outcomes` com:
+
+- `entry_price_at_signal`
+- `max_price_after_signal`
+- `min_price_after_signal`
+- `return_5m`
+- `return_15m`
+- `return_1h`
+- `return_4h`
+- `return_24h`
+- `max_favorable_excursion_pct`
+- `max_adverse_excursion_pct`
+- `volume_after_signal`
+- `movement_continued`
+- `breakout_confirmed`
+- `late_signal_detected`
+- `outcome_label`
+
+### 62.4 Labels de outcome
+
+Classificações sugeridas:
+
+- `excellent`
+- `good`
+- `neutral`
+- `late`
+- `false_positive`
+- `illiquid`
+- `failed_breakout`
+
+### 62.5 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- cada sinal relevante puder ser avaliado depois
+- o usuário conseguir ver se o alerta foi útil ou atrasado
+- o sistema puder calibrar ranking com base em dados reais
+- a validação acontecer sem executar trades reais
+
+---
+
+## 63. Feedback manual do usuário
+
+### 63.1 Objetivo
+
+O conhecimento operacional do usuário deve virar dado.
+
+O sistema deve permitir que o usuário marque a qualidade de cada oportunidade.
+
+### 63.2 Feedbacks sugeridos
+
+Para cada sinal/oportunidade, permitir marcar:
+
+- útil
+- fraca
+- atrasada
+- sem liquidez
+- boa para trade
+- boa para hold
+- ignorar
+- falso positivo
+- boa margem
+- margem insuficiente
+- risco de ficar preso
+
+### 63.3 Campos sugeridos
+
+Criar ou enriquecer estrutura como `signal_feedback` com:
+
+- `signal_id`
+- `user_id`
+- `workspace_id`
+- `feedback_label`
+- `feedback_note`
+- `created_at`
+
+### 63.4 Uso do feedback
+
+O feedback deve ser usado para:
+
+- calibrar pesos de score
+- identificar falsos positivos recorrentes
+- ajustar sensibilidade dos alertas
+- entender preferências reais do operador
+- melhorar ranking futuro
+
+### 63.5 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- o usuário conseguir marcar rapidamente a qualidade de um sinal
+- o feedback aparecer em analytics
+- os feedbacks puderem ser exportados ou usados para calibração futura
+- o fluxo não atrapalhar o uso operacional
+
+---
+
+## 64. Diagnóstico reforçado da NovaDAX e das exchanges nacionais
+
+### 64.1 Prioridade
+
+A NovaDAX é parte do núcleo operacional do produto.
+
+Se a NovaDAX não retornar moedas, pares ou dados corretamente, o sistema não atende ao escopo atual.
+
+### 64.2 Requisito reforçado
+
+O sistema deve ter uma tela ou seção clara de diagnóstico por exchange mostrando:
+
+- exchange ativa ou inativa
+- provider habilitado ou desabilitado
+- último refresh do catálogo
+- quantidade total de pares retornados
+- quantidade de pares BRL retornados
+- quantidade de pares ativos
+- quantidade de pares negociáveis
+- exemplos de símbolos retornados
+- erros HTTP recentes
+- erros de parsing
+- status do cache
+- motivo de ausência de pares esperados
+
+### 64.3 Teste individual de par
+
+O sistema deve permitir testar um par específico.
+
+Exemplo:
+- usuário procura `TON/BRL`
+- sistema verifica se existe na exchange
+- sistema mostra símbolo bruto da API
+- sistema mostra símbolo normalizado
+- sistema mostra se está ativo
+- sistema mostra se ticker/order book/candles funcionam
+
+### 64.4 Critério de aceitação
+
+A correção será considerada adequada quando:
+
+- falha da NovaDAX não for silenciosa
+- o usuário conseguir entender por que não está recebendo dados da NovaDAX
+- pares existentes puderem ser diagnosticados individualmente
+- o catálogo puder ser atualizado manualmente
+- o sistema usar último catálogo válido quando a API falhar temporariamente
+
+---
+
+## 65. Ranking comparativo por ciclo
+
+### 65.1 Problema
+
+O sistema não deve avaliar cada sinal isoladamente.
+
+Se existirem 10 sinais no mesmo ciclo, ele precisa selecionar os melhores.
+
+### 65.2 Requisito
+
+Cada ciclo de scanner deve produzir uma visão comparativa.
+
+O ranking deve considerar:
+
+- score operacional final
+- fase do movimento
+- liquidez
+- margem operacional
+- força do rompimento
+- risco de alerta atrasado
+- qualidade da faixa operacional
+- feedbacks anteriores
+- outcomes históricos daquele tipo de sinal
+
+### 65.3 Regra de entrega
+
+O Telegram deve receber apenas os melhores sinais do ciclo, e não todos os sinais que passaram em algum threshold mínimo.
+
+### 65.4 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- oportunidades fortes não forem abafadas por sinais medianos
+- alertas forem enviados com base no ranking global do ciclo
+- o dashboard mostrar a shortlist ordenada por qualidade operacional
+- sinais fracos ficarem visíveis apenas se o usuário quiser investigar
+
+---
+
+## 66. Backlog final consolidado
+
+### 66.1 P0 — Núcleo operacional imediato
+
+Implementar ou garantir:
+
+- Mercado Bitcoin e NovaDAX habilitadas por padrão
+- Binance desativada por padrão, mas ativável
+- descoberta dinâmica de pares BRL
+- ausência de limite rígido de 20 a 30 pares
+- scan leve amplo
+- análise profunda somente de candidatos
+- correção/diagnóstico da NovaDAX
+- catálogo com status técnico por exchange e por par
+- shortlist operacional no dashboard
+- alertas seletivos no Telegram
+- ranking comparativo por ciclo
+- identificação básica da fase do movimento
+- marcação de alerta atrasado
+- histórico paginado e payload reduzido
+- redução contínua de egress do Supabase
+
+### 66.2 P1 — Qualidade operacional
+
+Implementar:
+
+- detecção heurística de lateralização + rompimento
+- zona operacional de compra/venda
+- faixa operacional reaproveitável
+- score de rompimento
+- score de fase do movimento
+- score de faixa operacional
+- simulação simples pós-sinal
+- feedback manual do usuário
+- dashboard com motivo do sinal
+- alertas com fase e risco de entrada tardia
+
+### 66.3 P2 — Aprendizado e evolução
+
+Implementar posteriormente:
+
+- calibração por outcomes reais
+- ranking adaptativo por feedback
+- paper trading simples
+- relatórios de sinais úteis vs falsos positivos
+- sugestão automática de pares para watchlist
+- ajuste automático de thresholds por exchange
+- evolução opcional da Binance
+- preparação futura para automação, sem execução real por enquanto
+
+---
+
+## 67. Critérios finais de aceitação do produto
+
+O produto estará alinhado ao objetivo quando conseguir:
+
+- monitorar dinamicamente o mercado BRL relevante sem limite rígido artificial
+- priorizar Mercado Bitcoin e NovaDAX
+- manter Binance opcional e desativada por padrão
+- identificar pares com volume, liquidez e atividade suficiente
+- detectar lateralização, rompimento, continuação e movimento esticado
+- estimar zona de compra, zona de venda e margem operacional
+- identificar faixas operacionais reaproveitáveis
+- avaliar se há liquidez para capital pequeno, médio e maior
+- marcar sinais atrasados ou em zona de realização
+- enviar alertas seletivos e úteis
+- reduzir ruído operacional
+- mostrar por que um ativo apareceu ou não apareceu
+- permitir feedback manual do usuário
+- medir outcome pós-sinal
+- reduzir egress e custo operacional
+- servir como assistente operacional, não como robô automático de ordens
+
+---
+
+## 68. Definição final do sistema
+
+A definição final consolidada é:
+
+> **Um assistente operacional de oportunidades em cripto BRL, focado inicialmente em Mercado Bitcoin e NovaDAX, que monitora dinamicamente pares relevantes, identifica zonas de compra e venda, detecta lateralização, rompimento e continuação, avalia liquidez, margem e risco de atraso, entrega apenas shortlist qualificada e aprende com outcomes e feedbacks do usuário.**
+
+Essa definição deve orientar as próximas implementações.

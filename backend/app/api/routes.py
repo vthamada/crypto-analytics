@@ -23,7 +23,10 @@ from app.models.schemas import (
     InviteRecordResponse,
     Opportunity,
     OpportunitySummary,
+    PairExchangeDiagnosticResponse,
     ScoreWeights,
+    SignalFeedbackCreate,
+    SignalFeedbackResponse,
     UserCreateResponse,
     UserRecordResponse,
     UserSessionResponse,
@@ -59,9 +62,9 @@ from app.services.auth import (
     verify_refresh_token,
 )
 from app.services.monitoring import scan_monitor
-from app.services.pairs import get_available_pairs_catalog
+from app.services.pairs import get_available_pairs_catalog, get_pair_exchange_diagnostic
 from app.services.exchange_credentials import validate_exchange_credentials
-from app.services.shared_state import get_scanner_runtime_state, read_opportunity_snapshots
+from app.services.shared_state import create_signal_feedback, get_scanner_runtime_state, read_opportunity_snapshots
 from app.services.persistence import (
     DEFAULT_WORKSPACE_ID,
     get_filtered_analytics,
@@ -224,6 +227,8 @@ def project_workspace_opportunity(opportunity: Opportunity, config: AppConfig) -
         historical_confidence=opportunity.historical_confidence,
         weights=config.weights,
     )
+    if opportunity.is_late_entry_risk:
+        data["score"] = min(max(round(data["score"] * 0.9, 1), 0), 100)
     operability = get_workspace_operability_fields(
         bid_notional_top_n=opportunity.bid_notional_top_n,
         ask_notional_top_n=opportunity.ask_notional_top_n,
@@ -703,8 +708,38 @@ async def _effective_opportunities() -> list[Opportunity]:
 
 
 def _opportunity_sort_value(opportunity: Opportunity, sort_by: str) -> float:
+    if sort_by in {"score", "operational", "comparative"}:
+        phase_bonus = {
+            "early_breakout": 8.0,
+            "continuation": 5.0,
+            "accumulation": 2.0,
+            "extended": -4.0,
+            "distribution_or_profit_zone": -6.0,
+            "exhaustion": -8.0,
+            "neutral": 0.0,
+        }
+        range_bonus = {
+            "high_quality_reusable_range": 7.0,
+            "valid_large_trade": 5.0,
+            "valid_medium_trade": 3.0,
+            "valid_small_trade": 1.5,
+            "weak": -1.0,
+            "none": 0.0,
+        }
+        type_bonus = {"trade": 5.0, "hold": 4.0, "observe": -2.0, "avoid": -12.0}
+        phase = opportunity.movement_phase.value if hasattr(opportunity.movement_phase, "value") else opportunity.movement_phase
+        late_penalty = -8.0 if opportunity.is_late_entry_risk else 0.0
+        return (
+            opportunity.score
+            + ((opportunity.executability_score or 0.0) * 0.12)
+            + ((opportunity.trade_margin_score or 0.0) * 0.08)
+            + min(max(opportunity.operational_range_margin_pct or 0.0, 0.0), 20.0) * 0.3
+            + phase_bonus.get(str(phase), 0.0)
+            + range_bonus.get(opportunity.operational_range_quality or "none", 0.0)
+            + type_bonus.get(opportunity.opportunity_type or "observe", 0.0)
+            + late_penalty
+        )
     sort_keys = {
-        "score": lambda item: item.score,
         "executability": lambda item: item.executability_score if item.executability_score is not None else -1,
         "trade_margin": lambda item: item.trade_margin_score if item.trade_margin_score is not None else -1,
         "net_edge": lambda item: item.estimated_net_trade_edge_pct if item.estimated_net_trade_edge_pct is not None else -999,
@@ -714,7 +749,7 @@ def _opportunity_sort_value(opportunity: Opportunity, sort_by: str) -> float:
         "spread": lambda item: item.spread_pct,
         "price": lambda item: item.last_price,
     }
-    return sort_keys.get(sort_by, sort_keys["score"])(opportunity)
+    return sort_keys.get(sort_by, lambda item: item.score)(opportunity)
 
 
 def _sort_opportunities(opportunities: list[Opportunity], sort_by: str = "score") -> list[Opportunity]:
@@ -754,6 +789,18 @@ def _summarize_opportunity(opportunity: Opportunity) -> OpportunitySummary:
         change_pct=opportunity.change_pct,
         movement_type=opportunity.movement_type,
         movement_regime=opportunity.movement_regime,
+        movement_phase=opportunity.movement_phase,
+        phase_confidence_score=opportunity.phase_confidence_score,
+        phase_reason=opportunity.phase_reason,
+        is_late_entry_risk=opportunity.is_late_entry_risk,
+        is_profit_zone_candidate=opportunity.is_profit_zone_candidate,
+        distance_from_accumulation_zone_pct=opportunity.distance_from_accumulation_zone_pct,
+        distance_from_breakout_pct=opportunity.distance_from_breakout_pct,
+        operational_range_margin_pct=opportunity.operational_range_margin_pct,
+        capital_capacity_estimate_brl=opportunity.capital_capacity_estimate_brl,
+        operational_range_quality=opportunity.operational_range_quality,
+        alert_moment_type=opportunity.alert_moment_type,
+        alert_reason=opportunity.alert_reason,
         detected_at=opportunity.detected_at,
         cross_exchange_gap_pct=opportunity.cross_exchange_gap_pct,
         cross_exchange_reference_exchange=opportunity.cross_exchange_reference_exchange,
@@ -915,6 +962,28 @@ async def get_opportunity(
     return None
 
 
+@router.post("/signals/feedback", response_model=SignalFeedbackResponse)
+async def submit_signal_feedback(
+    payload: SignalFeedbackCreate,
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    if not payload.signal_id and not payload.opportunity_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="signal_id or opportunity_id is required",
+        )
+    return await create_signal_feedback(
+        signal_id=payload.signal_id,
+        opportunity_id=payload.opportunity_id,
+        user_id=session_info.user_id,
+        workspace_id=workspace.id,
+        feedback_label=payload.feedback_label,
+        feedback_note=payload.feedback_note,
+    )
+
+
 @router.get("/history")
 async def history(
     limit: int = Query(default=100, le=500),
@@ -1006,6 +1075,11 @@ async def available_pairs(
     enabled_exchanges: list[Exchange] | None = Query(default=None),
 ):
     return await get_available_pairs_catalog(enabled_exchanges=enabled_exchanges, force_refresh=force_refresh)
+
+
+@router.get("/pairs/diagnostics/{exchange}/{pair:path}", response_model=PairExchangeDiagnosticResponse)
+async def pair_diagnostic(exchange: Exchange, pair: str):
+    return await get_pair_exchange_diagnostic(exchange, pair)
 
 
 @router.get("/config", response_model=ConfigResponse)

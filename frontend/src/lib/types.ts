@@ -7,7 +7,16 @@ export type MovementRegime =
   | "breakout_exhaustion"
   | "mean_reversion_candidate"
   | "illiquid_spike";
+export type MovementPhase =
+  | "accumulation"
+  | "early_breakout"
+  | "continuation"
+  | "extended"
+  | "distribution_or_profit_zone"
+  | "exhaustion"
+  | "neutral";
 export type OpportunityType = "trade" | "hold" | "observe" | "avoid";
+export type AlertMomentType = "preparation" | "early_breakout" | "continuation" | "extended" | "profit_zone" | "neutral";
 
 export interface Kline {
   open_time: string;
@@ -55,6 +64,25 @@ export interface Opportunity {
   baseline_order_notional_brl?: number | null;
   movement_type: MovementType;
   movement_regime?: MovementRegime | null;
+  movement_phase?: MovementPhase;
+  phase_confidence_score?: number | null;
+  phase_reason?: string | null;
+  is_late_entry_risk?: boolean;
+  is_profit_zone_candidate?: boolean;
+  distance_from_accumulation_zone_pct?: number | null;
+  distance_from_breakout_pct?: number | null;
+  operational_buy_zone_low?: number | null;
+  operational_buy_zone_high?: number | null;
+  operational_sell_zone_low?: number | null;
+  operational_sell_zone_high?: number | null;
+  operational_range_margin_pct?: number | null;
+  range_reuse_count?: number;
+  range_reliability_score?: number | null;
+  zone_liquidity_score?: number | null;
+  capital_capacity_estimate_brl?: number | null;
+  operational_range_quality?: string;
+  alert_moment_type?: AlertMomentType;
+  alert_reason?: string | null;
   movement_persistence_score?: number | null;
   last_price: number;
   change_pct: number;
@@ -124,6 +152,18 @@ export type OpportunitySummary = Pick<
   | "change_pct"
   | "movement_type"
   | "movement_regime"
+  | "movement_phase"
+  | "phase_confidence_score"
+  | "phase_reason"
+  | "is_late_entry_risk"
+  | "is_profit_zone_candidate"
+  | "distance_from_accumulation_zone_pct"
+  | "distance_from_breakout_pct"
+  | "operational_range_margin_pct"
+  | "capital_capacity_estimate_brl"
+  | "operational_range_quality"
+  | "alert_moment_type"
+  | "alert_reason"
   | "detected_at"
   | "cross_exchange_gap_pct"
   | "cross_exchange_reference_exchange"
@@ -223,6 +263,20 @@ export interface HistoryRecord {
   baseline_order_notional_brl?: number | null;
   movement_type: MovementType;
   movement_regime?: MovementRegime | null;
+  movement_phase?: MovementPhase;
+  is_late_entry_risk?: boolean;
+  operational_buy_zone_low?: number | null;
+  operational_buy_zone_high?: number | null;
+  operational_sell_zone_low?: number | null;
+  operational_sell_zone_high?: number | null;
+  operational_range_margin_pct?: number | null;
+  range_reuse_count?: number;
+  range_reliability_score?: number | null;
+  zone_liquidity_score?: number | null;
+  capital_capacity_estimate_brl?: number | null;
+  operational_range_quality?: string;
+  alert_moment_type?: AlertMomentType;
+  alert_reason?: string | null;
   movement_persistence_score?: number | null;
   last_price: number;
   change_pct: number;
@@ -254,6 +308,12 @@ export interface HistorySummaryRecord {
   last_price: number;
   change_pct: number;
   movement_type: MovementType;
+  movement_phase?: MovementPhase;
+  is_late_entry_risk?: boolean;
+  operational_range_margin_pct?: number | null;
+  operational_range_quality?: string;
+  alert_moment_type?: AlertMomentType;
+  alert_reason?: string | null;
   detected_at: string;
 }
 
@@ -265,6 +325,10 @@ export interface Analytics {
   executability_distribution?: Record<string, number>;
   movement_distribution: Record<string, number>;
   movement_regime_distribution?: Record<string, number>;
+  movement_phase_distribution?: Record<string, number>;
+  operational_range_distribution?: Record<string, number>;
+  alert_moment_distribution?: Record<string, number>;
+  feedback_distribution?: Record<string, number>;
   opportunity_type_distribution?: Record<OpportunityType, number>;
   avg_net_trade_edge_by_type?: Partial<Record<OpportunityType, number>>;
   hourly_distribution: Record<string, number>;
@@ -352,7 +416,7 @@ export interface AvailablePairProviderStatus {
   exchange: Exchange;
   returned_pairs: number;
   brl_pairs: number;
-  status: "ok" | "empty" | "error" | "disabled";
+  status: "ok" | "empty" | "error" | "disabled" | "stale";
   checked_at: string;
   error_message?: string | null;
   examples: string[];
@@ -363,6 +427,48 @@ export interface AvailablePairsResponse {
   expires_at: string;
   pairs: AvailablePairRecord[];
   provider_status: AvailablePairProviderStatus[];
+}
+
+export type SignalFeedbackLabel =
+  | "useful"
+  | "weak"
+  | "late"
+  | "illiquid"
+  | "good_for_trade"
+  | "good_for_hold"
+  | "ignore"
+  | "false_positive"
+  | "good_margin"
+  | "insufficient_margin"
+  | "trapped_risk";
+
+export interface SignalFeedbackResponse {
+  id: string;
+  signal_id?: string | null;
+  opportunity_id?: string | null;
+  user_id?: string | null;
+  workspace_id?: string | null;
+  feedback_label: string;
+  feedback_note?: string | null;
+  created_at: string;
+}
+
+export interface PairDiagnosticCheck {
+  name: "catalog" | "ticker" | "order_book" | "klines";
+  status: "ok" | "error";
+  message?: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface PairExchangeDiagnostic {
+  exchange: Exchange;
+  pair: string;
+  display_name: string;
+  raw_symbol: string;
+  exists_in_catalog: boolean;
+  overall_status: "ok" | "warning" | "error";
+  checked_at: string;
+  checks: PairDiagnosticCheck[];
 }
 
 export interface AuditLogEntry {

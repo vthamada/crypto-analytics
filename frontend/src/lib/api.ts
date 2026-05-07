@@ -17,6 +17,9 @@ import type {
   InviteRecord,
   Opportunity,
   OpportunitySummary,
+  PairExchangeDiagnostic,
+  SignalFeedbackLabel,
+  SignalFeedbackResponse,
   UserCreateResult,
   UserRecord,
   WorkspaceStatus,
@@ -354,6 +357,19 @@ export function getOpportunity(id: string): Promise<Opportunity | null> {
   return fetchJSON(`/opportunities/${id}`, { headers: sessionHeaders() });
 }
 
+export function submitSignalFeedback(payload: {
+  signal_id?: string | null;
+  opportunity_id?: string | null;
+  feedback_label: SignalFeedbackLabel;
+  feedback_note?: string | null;
+}): Promise<SignalFeedbackResponse> {
+  return fetchJSON("/signals/feedback", {
+    method: "POST",
+    headers: sessionHeaders(),
+    body: JSON.stringify(payload),
+  });
+}
+
 // History
 export function getHistory(params?: {
   limit?: number;
@@ -421,6 +437,10 @@ export function getOperationalAnalytics(params?: {
   }
   const qs = query.toString();
   return fetchJSON(`/analytics/operational${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
+}
+
+export function getPairDiagnostic(exchange: Exchange, pair: string): Promise<PairExchangeDiagnostic> {
+  return fetchJSON(`/pairs/diagnostics/${exchange}/${encodeURIComponent(pair)}`, { headers: sessionHeaders() });
 }
 
 // Config

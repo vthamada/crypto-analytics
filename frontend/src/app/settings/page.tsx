@@ -29,6 +29,7 @@ import {
   getAdminSession,
   getAvailablePairs,
   getConfig,
+  getPairDiagnostic,
   getStoredAuthToken,
   getStoredWorkspaceId,
   listInvites,
@@ -51,6 +52,7 @@ import type {
   ExchangeCredentialValidationResult,
   Exchange,
   InviteRecord,
+  PairExchangeDiagnostic,
   UserRecord,
   WorkspaceSummary,
 } from "@/lib/types";
@@ -387,6 +389,11 @@ export default function SettingsPage() {
   const [pairSearch, setPairSearch] = useState("");
   const [manualPairInput, setManualPairInput] = useState("");
   const [manualPairFeedback, setManualPairFeedback] = useState<string | null>(null);
+  const [diagnosticPairInput, setDiagnosticPairInput] = useState("");
+  const [diagnosticExchange, setDiagnosticExchange] = useState<Exchange>("novadax");
+  const [pairDiagnostic, setPairDiagnostic] = useState<PairExchangeDiagnostic | null>(null);
+  const [pairDiagnosticLoading, setPairDiagnosticLoading] = useState(false);
+  const [pairDiagnosticError, setPairDiagnosticError] = useState<string | null>(null);
   const [pairCatalogLoading, setPairCatalogLoading] = useState(false);
   const [pairCatalogError, setPairCatalogError] = useState<string | null>(null);
   const [pairCatalogView, setPairCatalogView] = useState<PairCatalogView>("active");
@@ -974,6 +981,27 @@ export default function SettingsPage() {
         ? `${pair.replace("_", "/")} foi adicionado, mas nao aparece disponivel nas exchanges ativas. Ative a exchange correta antes do scan.`
         : `${pair.replace("_", "/")} adicionado. Se o par nao existir na exchange ativa, o scanner vai ignorar/falhar sem bloquear os demais.`,
     );
+  }
+
+  async function diagnosePair() {
+    const pair = normalizeManualPair(diagnosticPairInput || manualPairInput);
+    if (!/^[A-Z0-9]{2,20}_[A-Z0-9]{2,10}$/.test(pair)) {
+      setPairDiagnosticError("Informe um par no formato BASE_COTACAO, por exemplo LAB_BRL ou TON_BRL.");
+      return;
+    }
+
+    setPairDiagnosticLoading(true);
+    setPairDiagnosticError(null);
+    try {
+      const diagnostic = await getPairDiagnostic(diagnosticExchange, pair);
+      setPairDiagnostic(diagnostic);
+      setDiagnosticPairInput(pair);
+    } catch (error) {
+      setPairDiagnostic(null);
+      setPairDiagnosticError(error instanceof Error ? error.message : "Falha ao diagnosticar o par.");
+    } finally {
+      setPairDiagnosticLoading(false);
+    }
   }
 
   function toggleShow(field: string) {
@@ -2083,7 +2111,9 @@ export default function SettingsPage() {
                           ? "Sem pares retornados"
                           : providerStatus.status === "disabled"
                             ? "Desativada"
-                            : "Falha no catálogo";
+                            : providerStatus.status === "stale"
+                              ? "Usando cache anterior"
+                              : "Falha no catálogo";
 
                     return (
                       <div
@@ -2094,6 +2124,8 @@ export default function SettingsPage() {
                             ? "bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
                             : providerStatus.status === "disabled"
                               ? "bg-slate-500/5 text-slate-600 dark:text-slate-300"
+                              : providerStatus.status === "stale"
+                                ? "bg-blue-500/5 text-blue-700 dark:text-blue-300"
                               : "bg-amber-500/5 text-amber-700 dark:text-amber-300",
                         )}
                       >
@@ -2147,6 +2179,97 @@ export default function SettingsPage() {
                 </div>
                 {manualPairFeedback ? (
                   <p className="mt-3 text-xs text-muted-foreground">{manualPairFeedback}</p>
+                ) : null}
+              </div>
+
+              <div className="rounded-xl border bg-background p-4">
+                <div className="grid gap-3 lg:grid-cols-[180px,minmax(0,1fr),auto] lg:items-end">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">Diagnosticar par</p>
+                    <select
+                      value={diagnosticExchange}
+                      onChange={(event) => setDiagnosticExchange(event.target.value as Exchange)}
+                      className="h-9 w-full rounded-lg border bg-background px-3 text-sm"
+                    >
+                      {ALL_EXCHANGES.map(({ id, label }) => (
+                        <option key={id} value={id}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Input
+                    value={diagnosticPairInput}
+                    onChange={(event) => {
+                      setDiagnosticPairInput(event.target.value);
+                      setPairDiagnosticError(null);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void diagnosePair();
+                      }
+                    }}
+                    placeholder="Ex: LAB_BRL, TON_BRL"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void diagnosePair()}
+                    disabled={pairDiagnosticLoading}
+                    className="gap-2"
+                  >
+                    {pairDiagnosticLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Info className="h-3.5 w-3.5" />}
+                    Diagnosticar
+                  </Button>
+                </div>
+
+                {pairDiagnosticError ? (
+                  <p className="mt-3 text-xs text-amber-600 dark:text-amber-300">{pairDiagnosticError}</p>
+                ) : null}
+
+                {pairDiagnostic ? (
+                  <div className="mt-4 rounded-lg border bg-muted/20 p-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">{pairDiagnostic.display_name} em {ALL_EXCHANGES.find((exchange) => exchange.id === pairDiagnostic.exchange)?.label ?? pairDiagnostic.exchange}</p>
+                        <p className="text-muted-foreground">
+                          Símbolo bruto: {pairDiagnostic.raw_symbol} · Catálogo: {pairDiagnostic.exists_in_catalog ? "encontrado" : "não encontrado"}
+                        </p>
+                      </div>
+                      <Badge
+                        variant={pairDiagnostic.overall_status === "ok" ? "default" : "outline"}
+                        className={cn(
+                          pairDiagnostic.overall_status === "error"
+                            ? "border-amber-500/40 text-amber-700 dark:text-amber-300"
+                            : "",
+                        )}
+                      >
+                        {pairDiagnostic.overall_status === "ok"
+                          ? "Operacional"
+                          : pairDiagnostic.overall_status === "warning"
+                            ? "Atenção"
+                            : "Falha"}
+                      </Badge>
+                    </div>
+                    <div className="mt-3 grid gap-2 md:grid-cols-4">
+                      {pairDiagnostic.checks.map((check) => (
+                        <div key={check.name} className="rounded-lg border bg-background p-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium">
+                              {check.name === "order_book" ? "book" : check.name}
+                            </span>
+                            <Badge variant={check.status === "ok" ? "default" : "outline"}>
+                              {check.status === "ok" ? "OK" : "Erro"}
+                            </Badge>
+                          </div>
+                          {check.message ? (
+                            <p className="mt-1 break-words text-muted-foreground">{check.message}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 ) : null}
               </div>
 

@@ -12,6 +12,21 @@ Convencao deste repositorio:
 
 - Nenhuma entrada em aberto.
 
+## [2026-05-07]
+
+### Added
+- Classificacao de fase do movimento, risco de entrada tardia e motivo operacional do alerta.
+- Faixa operacional reaproveitavel com zonas de compra/venda, margem, confiabilidade, liquidez e capacidade estimada.
+- Diagnostico individual de par por exchange em `GET /api/pairs/diagnostics/{exchange}/{pair}`.
+- Outcomes enriquecidos com janela de 24h, maior/menor preco pos-sinal, MFE/MAE, volume, continuidade, rompimento confirmado e label.
+- Feedback manual de sinais via `POST /api/signals/feedback` e botoes rapidos no detalhe do sinal.
+- Migrations `0010_movement_phase_fields` e `0011_operational_range_outcomes_feedback`.
+
+### Changed
+- Ranking do ciclo, shortlist e Telegram passaram a considerar fase, liquidez, margem, qualidade da faixa e risco de sinal atrasado.
+- Alertas Telegram agora exibem fase, momento, motivo, faixa operacional, margem e capacidade estimada.
+- NovaDAX deixou de falhar silenciosamente quando a listagem de pares falha, usando erro explicito ou ultimo catalogo valido.
+
 ## [2026-05-06]
 
 ### Added

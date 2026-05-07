@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
@@ -29,6 +29,16 @@ class MovementRegime(str, Enum):
     BREAKOUT_EXHAUSTION = "breakout_exhaustion"
     MEAN_REVERSION_CANDIDATE = "mean_reversion_candidate"
     ILLIQUID_SPIKE = "illiquid_spike"
+
+
+class MovementPhase(str, Enum):
+    ACCUMULATION = "accumulation"
+    EARLY_BREAKOUT = "early_breakout"
+    CONTINUATION = "continuation"
+    EXTENDED = "extended"
+    DISTRIBUTION_OR_PROFIT_ZONE = "distribution_or_profit_zone"
+    EXHAUSTION = "exhaustion"
+    NEUTRAL = "neutral"
 
 
 class Ticker(BaseModel):
@@ -111,6 +121,25 @@ class Opportunity(BaseModel):
     baseline_order_notional_brl: float | None = None
     movement_type: MovementType
     movement_regime: MovementRegime | None = None
+    movement_phase: MovementPhase = MovementPhase.NEUTRAL
+    phase_confidence_score: float | None = None
+    phase_reason: str | None = None
+    is_late_entry_risk: bool = False
+    is_profit_zone_candidate: bool = False
+    distance_from_accumulation_zone_pct: float | None = None
+    distance_from_breakout_pct: float | None = None
+    operational_buy_zone_low: float | None = None
+    operational_buy_zone_high: float | None = None
+    operational_sell_zone_low: float | None = None
+    operational_sell_zone_high: float | None = None
+    operational_range_margin_pct: float | None = None
+    range_reuse_count: int = 0
+    range_reliability_score: float | None = None
+    zone_liquidity_score: float | None = None
+    capital_capacity_estimate_brl: float | None = None
+    operational_range_quality: str = "none"
+    alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
+    alert_reason: str | None = None
     movement_persistence_score: float | None = None
     last_price: float
     change_pct: float
@@ -233,6 +262,18 @@ class OpportunitySummary(BaseModel):
     change_pct: float
     movement_type: MovementType
     movement_regime: MovementRegime | None = None
+    movement_phase: MovementPhase = MovementPhase.NEUTRAL
+    phase_confidence_score: float | None = None
+    phase_reason: str | None = None
+    is_late_entry_risk: bool = False
+    is_profit_zone_candidate: bool = False
+    distance_from_accumulation_zone_pct: float | None = None
+    distance_from_breakout_pct: float | None = None
+    operational_range_margin_pct: float | None = None
+    capital_capacity_estimate_brl: float | None = None
+    operational_range_quality: str = "none"
+    alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
+    alert_reason: str | None = None
     detected_at: datetime
     cross_exchange_gap_pct: float = 0.0
     cross_exchange_reference_exchange: Exchange | None = None
@@ -282,6 +323,25 @@ class HistoryRecord(BaseModel):
     baseline_order_notional_brl: float | None = None
     movement_type: MovementType
     movement_regime: MovementRegime | None = None
+    movement_phase: MovementPhase = MovementPhase.NEUTRAL
+    phase_confidence_score: float | None = None
+    phase_reason: str | None = None
+    is_late_entry_risk: bool = False
+    is_profit_zone_candidate: bool = False
+    distance_from_accumulation_zone_pct: float | None = None
+    distance_from_breakout_pct: float | None = None
+    operational_buy_zone_low: float | None = None
+    operational_buy_zone_high: float | None = None
+    operational_sell_zone_low: float | None = None
+    operational_sell_zone_high: float | None = None
+    operational_range_margin_pct: float | None = None
+    range_reuse_count: int = 0
+    range_reliability_score: float | None = None
+    zone_liquidity_score: float | None = None
+    capital_capacity_estimate_brl: float | None = None
+    operational_range_quality: str = "none"
+    alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
+    alert_reason: str | None = None
     movement_persistence_score: float | None = None
     last_price: float
     change_pct: float
@@ -313,7 +373,43 @@ class HistorySummaryRecord(BaseModel):
     last_price: float
     change_pct: float
     movement_type: MovementType
+    movement_phase: MovementPhase = MovementPhase.NEUTRAL
+    is_late_entry_risk: bool = False
+    operational_range_margin_pct: float | None = None
+    operational_range_quality: str = "none"
+    alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
+    alert_reason: str | None = None
     detected_at: datetime
+
+
+class SignalFeedbackCreate(BaseModel):
+    signal_id: str | None = None
+    opportunity_id: str | None = None
+    feedback_label: Literal[
+        "useful",
+        "weak",
+        "late",
+        "illiquid",
+        "good_for_trade",
+        "good_for_hold",
+        "ignore",
+        "false_positive",
+        "good_margin",
+        "insufficient_margin",
+        "trapped_risk",
+    ]
+    feedback_note: str | None = None
+
+
+class SignalFeedbackResponse(BaseModel):
+    id: str
+    signal_id: str | None = None
+    opportunity_id: str | None = None
+    user_id: str | None = None
+    workspace_id: str | None = None
+    feedback_label: str
+    feedback_note: str | None = None
+    created_at: datetime
 
 
 class WorkspaceSummary(BaseModel):
@@ -386,7 +482,7 @@ class AvailablePairProviderStatus(BaseModel):
     exchange: Exchange
     returned_pairs: int
     brl_pairs: int
-    status: Literal["ok", "empty", "error", "disabled"]
+    status: Literal["ok", "empty", "error", "disabled", "stale"]
     checked_at: datetime
     error_message: str | None = None
     examples: list[str] = Field(default_factory=list)
@@ -397,6 +493,24 @@ class AvailablePairsResponse(BaseModel):
     expires_at: datetime
     pairs: list[AvailablePairRecord]
     provider_status: list[AvailablePairProviderStatus] = Field(default_factory=list)
+
+
+class PairDiagnosticCheck(BaseModel):
+    name: Literal["catalog", "ticker", "order_book", "klines"]
+    status: Literal["ok", "error"]
+    message: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class PairExchangeDiagnosticResponse(BaseModel):
+    exchange: Exchange
+    pair: str
+    display_name: str
+    raw_symbol: str
+    exists_in_catalog: bool
+    overall_status: Literal["ok", "warning", "error"]
+    checked_at: datetime
+    checks: list[PairDiagnosticCheck]
 
 
 class InviteRecordResponse(BaseModel):

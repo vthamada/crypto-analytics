@@ -85,6 +85,25 @@ class OpportunityRecord(Base):
     fillable_notional_within_slippage_cap = Column(Float, nullable=True)
     baseline_order_notional_brl = Column(Float, nullable=True)
     movement_regime = Column(String, nullable=True)
+    movement_phase = Column(String, nullable=True)
+    phase_confidence_score = Column(Float, nullable=True)
+    phase_reason = Column(String, nullable=True)
+    is_late_entry_risk = Column(Boolean, default=False)
+    is_profit_zone_candidate = Column(Boolean, default=False)
+    distance_from_accumulation_zone_pct = Column(Float, nullable=True)
+    distance_from_breakout_pct = Column(Float, nullable=True)
+    operational_buy_zone_low = Column(Float, nullable=True)
+    operational_buy_zone_high = Column(Float, nullable=True)
+    operational_sell_zone_low = Column(Float, nullable=True)
+    operational_sell_zone_high = Column(Float, nullable=True)
+    operational_range_margin_pct = Column(Float, nullable=True)
+    range_reuse_count = Column(Integer, default=0)
+    range_reliability_score = Column(Float, nullable=True)
+    zone_liquidity_score = Column(Float, nullable=True)
+    capital_capacity_estimate_brl = Column(Float, nullable=True)
+    operational_range_quality = Column(String, nullable=True)
+    alert_moment_type = Column(String, nullable=True)
+    alert_reason = Column(String, nullable=True)
     movement_persistence_score = Column(Float, nullable=True)
 
 
@@ -257,6 +276,25 @@ class OpportunitySnapshotRecord(Base):
     baseline_order_notional_brl = Column(Float, nullable=True)
     movement_type = Column(String, nullable=False)
     movement_regime = Column(String, nullable=True)
+    movement_phase = Column(String, nullable=True)
+    phase_confidence_score = Column(Float, nullable=True)
+    phase_reason = Column(String, nullable=True)
+    is_late_entry_risk = Column(Boolean, default=False)
+    is_profit_zone_candidate = Column(Boolean, default=False)
+    distance_from_accumulation_zone_pct = Column(Float, nullable=True)
+    distance_from_breakout_pct = Column(Float, nullable=True)
+    operational_buy_zone_low = Column(Float, nullable=True)
+    operational_buy_zone_high = Column(Float, nullable=True)
+    operational_sell_zone_low = Column(Float, nullable=True)
+    operational_sell_zone_high = Column(Float, nullable=True)
+    operational_range_margin_pct = Column(Float, nullable=True)
+    range_reuse_count = Column(Integer, default=0)
+    range_reliability_score = Column(Float, nullable=True)
+    zone_liquidity_score = Column(Float, nullable=True)
+    capital_capacity_estimate_brl = Column(Float, nullable=True)
+    operational_range_quality = Column(String, nullable=True)
+    alert_moment_type = Column(String, nullable=True)
+    alert_reason = Column(String, nullable=True)
     movement_persistence_score = Column(Float, nullable=True)
     last_price = Column(Float, nullable=False)
     change_pct = Column(Float, nullable=False)
@@ -299,6 +337,17 @@ class TechnicalSignalRecord(Base):
     repetition_score = Column(Float, default=0.0)
     movement_type = Column(String, nullable=False)
     movement_regime = Column(String, nullable=True)
+    movement_phase = Column(String, nullable=True)
+    phase_confidence_score = Column(Float, nullable=True)
+    phase_reason = Column(String, nullable=True)
+    is_late_entry_risk = Column(Boolean, default=False)
+    is_profit_zone_candidate = Column(Boolean, default=False)
+    distance_from_accumulation_zone_pct = Column(Float, nullable=True)
+    distance_from_breakout_pct = Column(Float, nullable=True)
+    operational_range_margin_pct = Column(Float, nullable=True)
+    operational_range_quality = Column(String, nullable=True)
+    alert_moment_type = Column(String, nullable=True)
+    alert_reason = Column(String, nullable=True)
     movement_multiplier = Column(Float, default=1.0)
     last_price = Column(Float, nullable=False)
     change_pct = Column(Float, nullable=False)
@@ -339,6 +388,17 @@ class RawMarketObservationRecord(Base):
     semantic_signal_key = Column(String, nullable=True, index=True)
     movement_type = Column(String, nullable=False)
     movement_regime = Column(String, nullable=True)
+    movement_phase = Column(String, nullable=True)
+    phase_confidence_score = Column(Float, nullable=True)
+    phase_reason = Column(String, nullable=True)
+    is_late_entry_risk = Column(Boolean, default=False)
+    is_profit_zone_candidate = Column(Boolean, default=False)
+    distance_from_accumulation_zone_pct = Column(Float, nullable=True)
+    distance_from_breakout_pct = Column(Float, nullable=True)
+    operational_range_margin_pct = Column(Float, nullable=True)
+    operational_range_quality = Column(String, nullable=True)
+    alert_moment_type = Column(String, nullable=True)
+    alert_reason = Column(String, nullable=True)
     last_price = Column(Float, nullable=False)
     quote_volume_24h = Column(Float, nullable=False)
     liquidity_units = Column(Float, nullable=False)
@@ -362,15 +422,39 @@ class SignalOutcomeRecord(Base):
     price_after_15m = Column(Float, nullable=True)
     price_after_1h = Column(Float, nullable=True)
     price_after_4h = Column(Float, nullable=True)
+    price_after_24h = Column(Float, nullable=True)
     max_price_1h = Column(Float, nullable=True)
     min_price_1h = Column(Float, nullable=True)
+    max_price_after_signal = Column(Float, nullable=True)
+    min_price_after_signal = Column(Float, nullable=True)
     outcome_pct_5m = Column(Float, nullable=True)
     outcome_pct_15m = Column(Float, nullable=True)
     outcome_pct_1h = Column(Float, nullable=True)
     outcome_pct_4h = Column(Float, nullable=True)
+    outcome_pct_24h = Column(Float, nullable=True)
+    max_favorable_excursion_pct = Column(Float, nullable=True)
+    max_adverse_excursion_pct = Column(Float, nullable=True)
+    volume_after_signal = Column(Float, nullable=True)
+    movement_continued = Column(Boolean, nullable=True)
+    breakout_confirmed = Column(Boolean, nullable=True)
+    late_signal_detected = Column(Boolean, nullable=True)
+    outcome_label = Column(String, nullable=True)
     evaluated_at = Column(DateTime, nullable=True)
     signal_detected_at = Column(DateTime, nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, default=utcnow)
+
+
+class SignalFeedbackRecord(Base):
+    __tablename__ = "signal_feedback"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    signal_id = Column(String, nullable=True, index=True)
+    opportunity_id = Column(String, nullable=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    workspace_id = Column(String, nullable=True, index=True)
+    feedback_label = Column(String, nullable=False, index=True)
+    feedback_note = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow, index=True)
 
 
 class RepetitionCountRecord(Base):
@@ -471,6 +555,25 @@ async def ensure_schema_compatibility() -> None:
         "fillable_notional_within_slippage_cap": "FLOAT",
         "baseline_order_notional_brl": "FLOAT",
         "movement_regime": "VARCHAR",
+        "movement_phase": "VARCHAR",
+        "phase_confidence_score": "FLOAT",
+        "phase_reason": "VARCHAR",
+        "is_late_entry_risk": "BOOLEAN DEFAULT FALSE",
+        "is_profit_zone_candidate": "BOOLEAN DEFAULT FALSE",
+        "distance_from_accumulation_zone_pct": "FLOAT",
+        "distance_from_breakout_pct": "FLOAT",
+        "operational_buy_zone_low": "FLOAT",
+        "operational_buy_zone_high": "FLOAT",
+        "operational_sell_zone_low": "FLOAT",
+        "operational_sell_zone_high": "FLOAT",
+        "operational_range_margin_pct": "FLOAT",
+        "range_reuse_count": "INTEGER DEFAULT 0",
+        "range_reliability_score": "FLOAT",
+        "zone_liquidity_score": "FLOAT",
+        "capital_capacity_estimate_brl": "FLOAT",
+        "operational_range_quality": "VARCHAR",
+        "alert_moment_type": "VARCHAR",
+        "alert_reason": "VARCHAR",
         "movement_persistence_score": "FLOAT",
     }
 
@@ -506,6 +609,25 @@ async def ensure_schema_compatibility() -> None:
         "fillable_notional_within_slippage_cap": "FLOAT",
         "baseline_order_notional_brl": "FLOAT",
         "movement_regime": "VARCHAR",
+        "movement_phase": "VARCHAR",
+        "phase_confidence_score": "FLOAT",
+        "phase_reason": "VARCHAR",
+        "is_late_entry_risk": "BOOLEAN DEFAULT FALSE",
+        "is_profit_zone_candidate": "BOOLEAN DEFAULT FALSE",
+        "distance_from_accumulation_zone_pct": "FLOAT",
+        "distance_from_breakout_pct": "FLOAT",
+        "operational_buy_zone_low": "FLOAT",
+        "operational_buy_zone_high": "FLOAT",
+        "operational_sell_zone_low": "FLOAT",
+        "operational_sell_zone_high": "FLOAT",
+        "operational_range_margin_pct": "FLOAT",
+        "range_reuse_count": "INTEGER DEFAULT 0",
+        "range_reliability_score": "FLOAT",
+        "zone_liquidity_score": "FLOAT",
+        "capital_capacity_estimate_brl": "FLOAT",
+        "operational_range_quality": "VARCHAR",
+        "alert_moment_type": "VARCHAR",
+        "alert_reason": "VARCHAR",
         "movement_persistence_score": "FLOAT",
     }
 
@@ -516,7 +638,46 @@ async def ensure_schema_compatibility() -> None:
         "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "reweighting_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "movement_regime": "VARCHAR",
+        "movement_phase": "VARCHAR",
+        "phase_confidence_score": "FLOAT",
+        "phase_reason": "VARCHAR",
+        "is_late_entry_risk": "BOOLEAN DEFAULT FALSE",
+        "is_profit_zone_candidate": "BOOLEAN DEFAULT FALSE",
+        "distance_from_accumulation_zone_pct": "FLOAT",
+        "distance_from_breakout_pct": "FLOAT",
+        "operational_range_margin_pct": "FLOAT",
+        "operational_range_quality": "VARCHAR",
+        "alert_moment_type": "VARCHAR",
+        "alert_reason": "VARCHAR",
         "semantic_signal_key": "VARCHAR",
+    }
+
+    raw_market_observation_columns = {
+        "movement_phase": "VARCHAR",
+        "phase_confidence_score": "FLOAT",
+        "phase_reason": "VARCHAR",
+        "is_late_entry_risk": "BOOLEAN DEFAULT FALSE",
+        "is_profit_zone_candidate": "BOOLEAN DEFAULT FALSE",
+        "distance_from_accumulation_zone_pct": "FLOAT",
+        "distance_from_breakout_pct": "FLOAT",
+        "operational_range_margin_pct": "FLOAT",
+        "operational_range_quality": "VARCHAR",
+        "alert_moment_type": "VARCHAR",
+        "alert_reason": "VARCHAR",
+    }
+
+    signal_outcome_columns = {
+        "price_after_24h": "FLOAT",
+        "max_price_after_signal": "FLOAT",
+        "min_price_after_signal": "FLOAT",
+        "outcome_pct_24h": "FLOAT",
+        "max_favorable_excursion_pct": "FLOAT",
+        "max_adverse_excursion_pct": "FLOAT",
+        "volume_after_signal": "FLOAT",
+        "movement_continued": "BOOLEAN",
+        "breakout_confirmed": "BOOLEAN",
+        "late_signal_detected": "BOOLEAN",
+        "outcome_label": "VARCHAR",
     }
 
     workspace_projection_columns = {
@@ -572,6 +733,7 @@ async def ensure_schema_compatibility() -> None:
             "workspace_signal_projections",
             "raw_market_observations",
             "signal_outcomes",
+            "signal_feedback",
             "repetition_counts",
         ):
             if table_name in existing_tables:
@@ -584,6 +746,8 @@ async def ensure_schema_compatibility() -> None:
             ("opportunity_snapshots", snapshot_columns),
             ("technical_signals", technical_signal_columns),
             ("workspace_signal_projections", workspace_projection_columns),
+            ("raw_market_observations", raw_market_observation_columns),
+            ("signal_outcomes", signal_outcome_columns),
         ):
             existing_columns = await conn.run_sync(
                 lambda sync_conn, current_table=table_name: {

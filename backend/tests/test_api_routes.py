@@ -205,6 +205,53 @@ def test_opportunities_shortlist_excludes_avoid_signals(monkeypatch):
     assert [item["id"] for item in body] == ["trade-1"]
 
 
+def test_submit_signal_feedback_persists_workspace_context(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+    captured = []
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(id="workspace-1", role="owner"), AppConfig(enabled_pairs=["BTC_BRL"])
+
+    async def fake_create_signal_feedback(**kwargs):
+        captured.append(kwargs)
+        return {
+            "id": "feedback-1",
+            **kwargs,
+            "created_at": "2026-05-07T00:00:00",
+        }
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    monkeypatch.setattr(routes, "create_signal_feedback", fake_create_signal_feedback)
+
+    client = create_test_client()
+    response = client.post(
+        "/api/signals/feedback",
+        headers={"X-Admin-Token": "secret-token"},
+        json={
+            "signal_id": "signal-1",
+            "opportunity_id": "opp-1",
+            "feedback_label": "good_margin",
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["id"] == "feedback-1"
+    assert captured[0]["user_id"] == "user-1"
+    assert captured[0]["workspace_id"] == "workspace-1"
+    assert captured[0]["feedback_label"] == "good_margin"
+
+
 def test_history_requires_authenticated_session(monkeypatch):
     monkeypatch.setattr(routes.settings, "auth_secret_key", "signing-key")
 
@@ -676,6 +723,35 @@ def test_available_pairs_endpoint_forwards_enabled_exchanges(monkeypatch):
     assert response.status_code == 200
     assert captured["enabled_exchanges"] == [Exchange.NOVADAX, Exchange.BINANCE]
     assert captured["force_refresh"] is True
+
+
+def test_pair_diagnostic_endpoint_returns_exchange_diagnostic(monkeypatch):
+    async def fake_diagnostic(exchange, pair):
+        return {
+            "exchange": exchange,
+            "pair": "LAB_BRL",
+            "display_name": "LAB/BRL",
+            "raw_symbol": "LAB_BRL",
+            "exists_in_catalog": True,
+            "overall_status": "ok",
+            "checked_at": "2026-05-06T12:00:00",
+            "checks": [
+                {"name": "catalog", "status": "ok", "message": None, "details": {"returned_pairs": 10}},
+                {"name": "ticker", "status": "ok", "message": None, "details": {}},
+            ],
+        }
+
+    monkeypatch.setattr(routes, "get_pair_exchange_diagnostic", fake_diagnostic)
+
+    client = create_test_client()
+    response = client.get("/api/pairs/diagnostics/novadax/LAB_BRL")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["exchange"] == "novadax"
+    assert body["pair"] == "LAB_BRL"
+    assert body["overall_status"] == "ok"
+    assert body["checks"][0]["name"] == "catalog"
 
 
 def test_telegram_test_endpoint_uses_workspace_config_fallback(monkeypatch):

@@ -87,3 +87,60 @@ def test_signal_outcomes_preserve_first_window_and_finish_at_4h(monkeypatch):
             db_path.unlink()
 
     asyncio.run(run_test())
+
+
+def test_signal_outcomes_track_24h_excursions_and_label(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"signal-outcomes-24h-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(shared_state, "async_session", session_factory)
+
+        detected_at = datetime.now(timezone.utc) - timedelta(hours=24, minutes=5)
+        await shared_state.create_pending_outcomes(
+            [
+                {
+                    "technical_signal_id": "sig-24h",
+                    "exchange": "novadax",
+                    "pair": "TON_BRL",
+                    "entry_price": 100.0,
+                    "late_signal_detected": False,
+                    "signal_detected_at": detected_at,
+                }
+            ]
+        )
+
+        async with session_factory() as session:
+            outcome = (await session.execute(select(SignalOutcomeRecord))).scalar_one()
+            outcome_id = outcome.id
+
+        await shared_state.update_outcome(
+            outcome_id,
+            price_after_24h=107.0,
+            max_price_after_signal=112.0,
+            min_price_after_signal=96.0,
+            volume_after_signal=250000.0,
+        )
+
+        async with session_factory() as session:
+            row = await session.get(SignalOutcomeRecord, outcome_id)
+            assert row is not None
+            assert row.outcome_pct_24h == 7.0
+            assert row.max_favorable_excursion_pct == 12.0
+            assert row.max_adverse_excursion_pct == -4.0
+            assert row.volume_after_signal == 250000.0
+            assert row.breakout_confirmed is True
+            assert row.outcome_label == "excellent"
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())

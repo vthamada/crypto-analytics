@@ -12,6 +12,7 @@ from app.models.database import (
     OpportunityRecord,
     ConfigRecord,
     RawMarketObservationRecord,
+    SignalFeedbackRecord,
     SignalOutcomeRecord,
     TechnicalSignalRecord,
     WorkspaceSignalProjectionRecord,
@@ -253,6 +254,25 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "baseline_order_notional_brl": workspace_operability.get("baseline_order_notional_brl", getattr(record, "baseline_order_notional_brl", None)),
         "movement_type": record.movement_type,
         "movement_regime": movement_regime,
+        "movement_phase": getattr(record, "movement_phase", None) or "neutral",
+        "phase_confidence_score": getattr(record, "phase_confidence_score", None),
+        "phase_reason": getattr(record, "phase_reason", None),
+        "is_late_entry_risk": getattr(record, "is_late_entry_risk", False),
+        "is_profit_zone_candidate": getattr(record, "is_profit_zone_candidate", False),
+        "distance_from_accumulation_zone_pct": getattr(record, "distance_from_accumulation_zone_pct", None),
+        "distance_from_breakout_pct": getattr(record, "distance_from_breakout_pct", None),
+        "operational_buy_zone_low": getattr(record, "operational_buy_zone_low", None),
+        "operational_buy_zone_high": getattr(record, "operational_buy_zone_high", None),
+        "operational_sell_zone_low": getattr(record, "operational_sell_zone_low", None),
+        "operational_sell_zone_high": getattr(record, "operational_sell_zone_high", None),
+        "operational_range_margin_pct": getattr(record, "operational_range_margin_pct", None),
+        "range_reuse_count": getattr(record, "range_reuse_count", 0),
+        "range_reliability_score": getattr(record, "range_reliability_score", None),
+        "zone_liquidity_score": getattr(record, "zone_liquidity_score", None),
+        "capital_capacity_estimate_brl": getattr(record, "capital_capacity_estimate_brl", None),
+        "operational_range_quality": getattr(record, "operational_range_quality", None) or "none",
+        "alert_moment_type": getattr(record, "alert_moment_type", None) or "neutral",
+        "alert_reason": getattr(record, "alert_reason", None),
         "movement_persistence_score": getattr(record, "movement_persistence_score", None),
         "last_price": record.last_price,
         "change_pct": record.change_pct,
@@ -429,6 +449,25 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
                 fillable_notional_within_slippage_cap=opp.fillable_notional_within_slippage_cap,
                 baseline_order_notional_brl=opp.baseline_order_notional_brl,
                 movement_regime=opp.movement_regime.value if opp.movement_regime else None,
+                movement_phase=opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase,
+                phase_confidence_score=opp.phase_confidence_score,
+                phase_reason=opp.phase_reason,
+                is_late_entry_risk=opp.is_late_entry_risk,
+                is_profit_zone_candidate=opp.is_profit_zone_candidate,
+                distance_from_accumulation_zone_pct=opp.distance_from_accumulation_zone_pct,
+                distance_from_breakout_pct=opp.distance_from_breakout_pct,
+                operational_buy_zone_low=opp.operational_buy_zone_low,
+                operational_buy_zone_high=opp.operational_buy_zone_high,
+                operational_sell_zone_low=opp.operational_sell_zone_low,
+                operational_sell_zone_high=opp.operational_sell_zone_high,
+                operational_range_margin_pct=opp.operational_range_margin_pct,
+                range_reuse_count=opp.range_reuse_count,
+                range_reliability_score=opp.range_reliability_score,
+                zone_liquidity_score=opp.zone_liquidity_score,
+                capital_capacity_estimate_brl=opp.capital_capacity_estimate_brl,
+                operational_range_quality=opp.operational_range_quality,
+                alert_moment_type=opp.alert_moment_type,
+                alert_reason=opp.alert_reason,
                 movement_persistence_score=opp.movement_persistence_score,
             )
             session.add(record)
@@ -618,6 +657,12 @@ async def get_history_summary(
             OpportunityRecord.last_price,
             OpportunityRecord.change_pct,
             OpportunityRecord.movement_type,
+            OpportunityRecord.movement_phase,
+            OpportunityRecord.is_late_entry_risk,
+            OpportunityRecord.operational_range_margin_pct,
+            OpportunityRecord.operational_range_quality,
+            OpportunityRecord.alert_moment_type,
+            OpportunityRecord.alert_reason,
             OpportunityRecord.detected_at,
             OpportunityRecord.volatility_score,
             OpportunityRecord.volume_score,
@@ -654,6 +699,12 @@ async def get_history_summary(
                 "last_price": row["last_price"],
                 "change_pct": row["change_pct"],
                 "movement_type": row["movement_type"],
+                "movement_phase": row["movement_phase"] or "neutral",
+                "is_late_entry_risk": row["is_late_entry_risk"] or False,
+                "operational_range_margin_pct": row["operational_range_margin_pct"],
+                "operational_range_quality": row["operational_range_quality"] or "none",
+                "alert_moment_type": row["alert_moment_type"] or "neutral",
+                "alert_reason": row["alert_reason"],
                 "detected_at": detected_at.isoformat(),
             }
         )
@@ -675,6 +726,9 @@ async def get_filtered_analytics(
             OpportunityRecord.score,
             OpportunityRecord.movement_type,
             OpportunityRecord.movement_regime,
+            OpportunityRecord.movement_phase,
+            OpportunityRecord.operational_range_quality,
+            OpportunityRecord.alert_moment_type,
             OpportunityRecord.detected_at,
             OpportunityRecord.arbitrage_available,
             OpportunityRecord.cross_exchange_gap_pct,
@@ -694,6 +748,17 @@ async def get_filtered_analytics(
         result = await session.execute(query)
         history_rows = [dict(row) for row in result.mappings().all()]
 
+        feedback_query = select(SignalFeedbackRecord.feedback_label, func.count()).group_by(
+            SignalFeedbackRecord.feedback_label
+        )
+        if hours:
+            feedback_query = feedback_query.where(SignalFeedbackRecord.created_at >= utcnow() - timedelta(hours=hours))
+        feedback_result = await session.execute(feedback_query)
+        feedback_distribution = {
+            label: int(count)
+            for label, count in feedback_result.all()
+        }
+
     if workspace_config is not None or min_score is not None:
         adjusted_rows = []
         for row in history_rows:
@@ -710,6 +775,9 @@ async def get_filtered_analytics(
     scores = [row["score"] for row in history_rows]
     movement_distribution: dict[str, int] = {}
     movement_regime_distribution: dict[str, int] = {}
+    movement_phase_distribution: dict[str, int] = {}
+    operational_range_distribution: dict[str, int] = {}
+    alert_moment_distribution: dict[str, int] = {}
     hourly_distribution = {str(hour): 0 for hour in range(24)}
     arbitrage_count = 0
     gap_values: list[float] = []
@@ -723,6 +791,12 @@ async def get_filtered_analytics(
         movement_distribution[row["movement_type"]] = movement_distribution.get(row["movement_type"], 0) + 1
         if row.get("movement_regime"):
             movement_regime_distribution[row["movement_regime"]] = movement_regime_distribution.get(row["movement_regime"], 0) + 1
+        if row.get("movement_phase"):
+            movement_phase_distribution[row["movement_phase"]] = movement_phase_distribution.get(row["movement_phase"], 0) + 1
+        if row.get("operational_range_quality"):
+            operational_range_distribution[row["operational_range_quality"]] = operational_range_distribution.get(row["operational_range_quality"], 0) + 1
+        if row.get("alert_moment_type"):
+            alert_moment_distribution[row["alert_moment_type"]] = alert_moment_distribution.get(row["alert_moment_type"], 0) + 1
         detected_at_value = row["detected_at"]
         detected_at = ensure_utc_datetime(
             datetime.fromisoformat(detected_at_value)
@@ -782,6 +856,10 @@ async def get_filtered_analytics(
         "executability_distribution": executability_buckets,
         "movement_distribution": movement_distribution,
         "movement_regime_distribution": movement_regime_distribution,
+        "movement_phase_distribution": movement_phase_distribution,
+        "operational_range_distribution": operational_range_distribution,
+        "alert_moment_distribution": alert_moment_distribution,
+        "feedback_distribution": feedback_distribution,
         "opportunity_type_distribution": opportunity_type_distribution,
         "avg_net_trade_edge_by_type": {
             opportunity_type: round(sum(values) / len(values), 4)
@@ -817,11 +895,18 @@ async def get_historical_pair_calibration(hours: int = 168) -> dict[str, dict[st
             usable_outcomes = [
                 value
                 for row in rows
-                for value in (row.outcome_pct_15m, row.outcome_pct_1h)
+                for value in (row.outcome_pct_15m, row.outcome_pct_1h, row.outcome_pct_4h, row.outcome_pct_24h)
                 if value is not None
             ]
             avg_outcome = sum(usable_outcomes) / len(usable_outcomes) if usable_outcomes else 0.0
-            success_count = sum(1 for row in rows if (row.outcome_pct_15m or 0) > 0 or (row.outcome_pct_1h or 0) > 0)
+            success_count = sum(
+                1
+                for row in rows
+                if any(
+                    (value or 0) > 0
+                    for value in (row.outcome_pct_15m, row.outcome_pct_1h, row.outcome_pct_4h, row.outcome_pct_24h)
+                )
+            )
             success_rate = success_count / count
             factor = 1.0 + min(max(avg_outcome / 10.0, -0.06), 0.06) + min(max((success_rate - 0.5) * 0.12, -0.06), 0.06)
             calibration[pair_name] = {

@@ -29,6 +29,7 @@ _WINDOW_5M = timedelta(minutes=5)
 _WINDOW_15M = timedelta(minutes=15)
 _WINDOW_1H = timedelta(hours=1)
 _WINDOW_4H = timedelta(hours=4)
+_WINDOW_24H = timedelta(hours=24)
 
 
 def _window_ready(signal_detected_at: datetime, window: timedelta, now: datetime) -> bool:
@@ -44,7 +45,7 @@ async def evaluate_pending_outcomes(*, limit: int = 50) -> int:
     for outcomes whose time window has actually elapsed and that haven't
     been evaluated yet.
     """
-    outcomes = await get_pending_outcomes(min_age_minutes=5, max_age_hours=5, limit=limit)
+    outcomes = await get_pending_outcomes(min_age_minutes=5, max_age_hours=25, limit=limit)
     if not outcomes:
         return 0
 
@@ -71,7 +72,7 @@ async def evaluate_pending_outcomes(*, limit: int = 50) -> int:
                 providers[exchange_key] = provider
 
             # Deduplicate pairs — fetch ticker once per pair per exchange
-            pairs_needed: dict[str, float | None] = {}
+            pairs_needed: dict[str, object | None] = {}
             for outcome in exchange_outcomes:
                 pair = outcome["pair"]
                 if pair not in pairs_needed:
@@ -81,7 +82,7 @@ async def evaluate_pending_outcomes(*, limit: int = 50) -> int:
             for pair in pairs_needed:
                 try:
                     ticker = await provider.get_ticker(pair)
-                    pairs_needed[pair] = ticker.last_price
+                    pairs_needed[pair] = ticker
                 except Exception:
                     logger.warning(
                         "outcome_evaluator_ticker_failed exchange=%s pair=%s",
@@ -90,9 +91,10 @@ async def evaluate_pending_outcomes(*, limit: int = 50) -> int:
 
             # Update each outcome with the current price for the appropriate windows
             for outcome in exchange_outcomes:
-                current_price = pairs_needed.get(outcome["pair"])
-                if current_price is None:
+                ticker = pairs_needed.get(outcome["pair"])
+                if ticker is None:
                     continue
+                current_price = ticker.last_price
 
                 detected_at = outcome["signal_detected_at"]
                 if isinstance(detected_at, str):
@@ -111,11 +113,18 @@ async def evaluate_pending_outcomes(*, limit: int = 50) -> int:
                     kwargs["price_after_1h"] = current_price
                 if _window_ready(detected_at, _WINDOW_4H, now):
                     kwargs["price_after_4h"] = current_price
+                if _window_ready(detected_at, _WINDOW_24H, now):
+                    kwargs["price_after_24h"] = current_price
 
                 # Track the observed range while the signal is still inside the first hour.
                 if within_1h_window:
                     kwargs["max_price_1h"] = current_price
                     kwargs["min_price_1h"] = current_price
+
+                kwargs["max_price_after_signal"] = current_price
+                kwargs["min_price_after_signal"] = current_price
+                kwargs["volume_after_signal"] = getattr(ticker, "quote_volume_24h", None) or getattr(ticker, "volume_24h", None)
+                kwargs["late_signal_detected"] = bool(outcome.get("late_signal_detected", False))
 
                 if kwargs:
                     await update_outcome(outcome["id"], **kwargs)
