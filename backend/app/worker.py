@@ -19,8 +19,11 @@ from app.services.shared_state import (
     create_pending_outcomes,
     decay_stale_repetitions,
     load_repetition_counts,
+    run_audit_retention_if_due,
     save_raw_market_observations,
     save_repetition_counts,
+    save_scanner_cycle_audit,
+    save_signal_pipeline_events,
     save_technical_signals,
     save_workspace_projections_batch,
     update_scanner_runtime_state,
@@ -49,9 +52,9 @@ async def run_worker() -> None:
     while True:
         cycle_started = time.perf_counter()
         cycle_id = f"cycle-{int(time.time())}"
-        now = utcnow()
+        cycle_started_at = utcnow()
         scan_monitor.begin_cycle()
-        await update_scanner_runtime_state(started_at=now)
+        await update_scanner_runtime_state(started_at=cycle_started_at)
 
         try:
             workspace_configs = await load_all_workspace_configs()
@@ -66,6 +69,7 @@ async def run_worker() -> None:
             scanner.set_historical_calibration(await get_historical_pair_calibration())
             opportunities = await scanner.scan_all()
             scan_monitor.record_scan_diagnostics(scanner.scan_diagnostics)
+            await save_signal_pipeline_events(cycle_id, scanner.pipeline_events)
             now = utcnow()
             update_state(opportunities, now)
 
@@ -88,9 +92,14 @@ async def run_worker() -> None:
                 await save_opportunities(opportunities)
 
             await run_history_retention_if_due(now=now)
+            await run_audit_retention_if_due(now=now)
 
             # Workspace projections and Telegram alerts
             all_projections: list[dict] = []
+            alerts_created = 0
+            alerts_sent = 0
+            alert_block_reasons: dict[str, int] = {}
+            alert_events: list[dict] = []
             for workspace_id, workspace_config in workspace_configs.items():
                 if not (
                     workspace_config.telegram_enabled
@@ -99,6 +108,8 @@ async def run_worker() -> None:
                         chat_id=workspace_config.telegram_chat_id,
                     )
                 ):
+                    reason = "telegram_disabled" if not workspace_config.telegram_enabled else "telegram_not_configured"
+                    alert_block_reasons[reason] = alert_block_reasons.get(reason, 0) + len(opportunities)
                     continue
 
                 projected_opportunities = [
@@ -131,6 +142,7 @@ async def run_worker() -> None:
                 eligible = []
                 for opp in projected_opportunities:
                     if not opportunity_matches_alert_scope(opp, workspace_config):
+                        alert_block_reasons["workspace_alert_scope_mismatch"] = alert_block_reasons.get("workspace_alert_scope_mismatch", 0) + 1
                         continue
                     matches_alert_type = (
                         ("operable" in alert_types and bool(opp.operable_signal))
@@ -138,19 +150,37 @@ async def run_worker() -> None:
                         or ("arbitrage" in alert_types and opp.arbitrage_available)
                     )
                     if not matches_alert_type:
+                        alert_block_reasons["below_alert_threshold"] = alert_block_reasons.get("below_alert_threshold", 0) + 1
                         continue
                     eligible.append(opp)
 
                 if eligible:
-                    await send_telegram_alert(
+                    alerts_created += len(eligible)
+                    sent = await send_telegram_alert(
                         eligible,
                         token=workspace_config.telegram_bot_token,
                         chat_id=workspace_config.telegram_chat_id,
                         cooldown_seconds=workspace_config.telegram_alert_cooldown_seconds,
                     )
+                    alerts_sent += len(eligible) if sent else 0
+                    for opp in eligible:
+                        alert_events.append({
+                            "exchange": opp.exchange,
+                            "pair": opp.pair,
+                            "stage": "alert",
+                            "status": "sent" if sent else "blocked",
+                            "reason": "telegram_sent" if sent else "cooldown_active",
+                            "event_type": "alert",
+                            "workspace_id": workspace_id,
+                            "technical_signal_id": opp.technical_signal_id,
+                            "opportunity_id": opp.id,
+                            "details": {"score": opp.score, "opportunity_type": opp.opportunity_type},
+                        })
 
             if all_projections:
                 await save_workspace_projections_batch(all_projections)
+            if alert_events:
+                await save_signal_pipeline_events(cycle_id, alert_events)
 
             # Create pending outcomes for new technical signals
             outcome_entries = []
@@ -182,6 +212,19 @@ async def run_worker() -> None:
                 opportunities_count=len(opportunities),
                 scan_diagnostics=scanner.scan_diagnostics,
             )
+            await save_scanner_cycle_audit(
+                cycle_id=cycle_id,
+                started_at=cycle_started_at,
+                completed_at=utcnow(),
+                duration_ms=duration_ms,
+                status="completed",
+                diagnostics=scanner.scan_diagnostics,
+                signals_created=len(signal_map),
+                shortlist_count=len(opportunities),
+                alerts_created=alerts_created,
+                alerts_sent=alerts_sent,
+                block_reasons=alert_block_reasons,
+            )
         except Exception as exc:
             duration_ms = (time.perf_counter() - cycle_started) * 1000
             scan_monitor.fail_cycle(str(exc), duration_ms=duration_ms)
@@ -189,6 +232,15 @@ async def run_worker() -> None:
             await update_scanner_runtime_state(
                 completed_at=utcnow(),
                 duration_ms=duration_ms,
+                error=str(exc),
+            )
+            await save_scanner_cycle_audit(
+                cycle_id=cycle_id,
+                started_at=cycle_started_at,
+                completed_at=utcnow(),
+                duration_ms=duration_ms,
+                status="failed",
+                diagnostics=scanner.scan_diagnostics if scanner else {},
                 error=str(exc),
             )
 

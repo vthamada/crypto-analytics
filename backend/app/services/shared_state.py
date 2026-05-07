@@ -19,7 +19,9 @@ from app.models.database import (
     OpportunitySnapshotRecord,
     RawMarketObservationRecord,
     RepetitionCountRecord,
+    ScannerCycleAuditRecord,
     ScannerRuntimeStateRecord,
+    SignalPipelineEventRecord,
     SignalFeedbackRecord,
     SignalOutcomeRecord,
     TechnicalSignalRecord,
@@ -37,6 +39,8 @@ MOVEMENT_VERSION = "v1"
 PROFILE_VERSION = "v1"
 REWEIGHTING_VERSION = "v1"
 _DEDUP_SIGNAL_WINDOW_MINUTES = 5
+_PIPELINE_EVENT_RETENTION_DAYS = 14
+_SCANNER_CYCLE_AUDIT_RETENTION_DAYS = 90
 
 
 def utcnow() -> datetime:
@@ -135,6 +139,228 @@ async def get_scanner_runtime_state() -> dict | None:
             "movement_version": getattr(record, "movement_version", MOVEMENT_VERSION),
             "profile_version": getattr(record, "profile_version", PROFILE_VERSION),
         }
+
+
+# ---------------------------------------------------------------------------
+# Scanner cycle and signal pipeline audit
+# ---------------------------------------------------------------------------
+
+def _safe_json_dumps(payload: object) -> str:
+    return json.dumps(payload, default=str, ensure_ascii=False)
+
+
+def _safe_json_loads(payload: str | None, fallback):
+    if not payload:
+        return fallback
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        return fallback
+
+
+def _count_provider_errors(diagnostics: dict) -> int:
+    light_errors = sum(
+        count
+        for reason, count in diagnostics.get("light_discard_reasons", {}).items()
+        if "provider" in reason or "timeout" in reason or "ticker" in reason or "missing" in reason
+    )
+    deep_errors = sum(
+        count
+        for reason, count in diagnostics.get("deep_discard_reasons", {}).items()
+        if "provider" in reason or "timeout" in reason or "failed" in reason or "missing" in reason
+    )
+    return int(light_errors + deep_errors)
+
+
+async def save_signal_pipeline_events(cycle_id: str, events: list[dict]) -> int:
+    """Persist compact per-pair/per-workspace audit events for missed-signal diagnosis."""
+    if not events:
+        return 0
+
+    async with async_session() as session:
+        for event in events:
+            exchange = event.get("exchange")
+            if hasattr(exchange, "value"):
+                exchange = exchange.value
+            created_at = event.get("created_at") or utcnow()
+            session.add(
+                SignalPipelineEventRecord(
+                    cycle_id=event.get("cycle_id") or cycle_id,
+                    exchange=exchange,
+                    pair=event.get("pair"),
+                    stage=event["stage"],
+                    status=event["status"],
+                    reason=event.get("reason"),
+                    event_type=event.get("event_type", "scanner"),
+                    workspace_id=event.get("workspace_id"),
+                    technical_signal_id=event.get("technical_signal_id"),
+                    opportunity_id=event.get("opportunity_id"),
+                    details=_safe_json_dumps(event.get("details", {})),
+                    created_at=normalize_db_datetime(created_at),
+                )
+            )
+        await session.commit()
+    return len(events)
+
+
+async def save_scanner_cycle_audit(
+    *,
+    cycle_id: str,
+    started_at: datetime,
+    completed_at: datetime | None = None,
+    duration_ms: float | None = None,
+    status: str = "completed",
+    diagnostics: dict | None = None,
+    signals_created: int = 0,
+    shortlist_count: int = 0,
+    alerts_created: int = 0,
+    alerts_sent: int = 0,
+    block_reasons: dict | None = None,
+    error: str | None = None,
+) -> None:
+    diagnostics = diagnostics or {}
+    discard_reasons = {
+        **diagnostics.get("light_discard_reasons", {}),
+        **diagnostics.get("deep_discard_reasons", {}),
+        **diagnostics.get("skip_reasons", {}),
+    }
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(ScannerCycleAuditRecord).where(ScannerCycleAuditRecord.cycle_id == cycle_id)
+        )
+        record = result.scalar_one_or_none()
+        if record is None:
+            record = ScannerCycleAuditRecord(cycle_id=cycle_id, started_at=normalize_db_datetime(started_at))
+            session.add(record)
+
+        record.status = status
+        record.started_at = normalize_db_datetime(started_at) or utcnow()
+        record.completed_at = normalize_db_datetime(completed_at)
+        record.duration_ms = duration_ms
+        record.total_pairs = int(diagnostics.get("total_pairs", 0) or 0)
+        record.brl_pairs = int(diagnostics.get("brl_pairs", diagnostics.get("total_pairs", 0)) or 0)
+        record.light_candidates = int(diagnostics.get("light_candidates", 0) or 0)
+        record.deep_candidates = int(diagnostics.get("deep_candidates", 0) or 0)
+        record.deep_completed = int(diagnostics.get("deep_completed", 0) or 0)
+        record.signals_created = signals_created
+        record.shortlist_count = shortlist_count
+        record.alerts_created = alerts_created
+        record.alerts_sent = alerts_sent
+        record.provider_errors = _count_provider_errors(diagnostics)
+        record.discard_reasons = _safe_json_dumps(discard_reasons)
+        record.block_reasons = _safe_json_dumps(block_reasons or {})
+        record.diagnostics = _safe_json_dumps(diagnostics)
+        record.error = error
+        record.created_at = record.created_at or utcnow()
+        await session.commit()
+
+
+async def get_missed_signal_diagnostic(
+    *,
+    exchange: str,
+    pair: str,
+    from_time: datetime,
+    to_time: datetime,
+) -> dict:
+    normalized_exchange = exchange.value if hasattr(exchange, "value") else str(exchange)
+    normalized_pair = pair.upper().replace("/", "_")
+
+    async with async_session() as session:
+        events_result = await session.execute(
+            select(SignalPipelineEventRecord)
+            .where(
+                SignalPipelineEventRecord.exchange == normalized_exchange,
+                SignalPipelineEventRecord.pair == normalized_pair,
+                SignalPipelineEventRecord.created_at >= normalize_db_datetime(from_time),
+                SignalPipelineEventRecord.created_at <= normalize_db_datetime(to_time),
+            )
+            .order_by(SignalPipelineEventRecord.created_at.asc())
+            .limit(500)
+        )
+        events = events_result.scalars().all()
+
+        cycles = []
+        if events:
+            cycle_ids = sorted({event.cycle_id for event in events})
+            cycles_result = await session.execute(
+                select(ScannerCycleAuditRecord)
+                .where(ScannerCycleAuditRecord.cycle_id.in_(cycle_ids))
+                .order_by(ScannerCycleAuditRecord.started_at.asc())
+            )
+            cycles = cycles_result.scalars().all()
+
+    timeline = [
+        {
+            "cycle_id": event.cycle_id,
+            "exchange": event.exchange,
+            "pair": event.pair,
+            "stage": event.stage,
+            "status": event.status,
+            "reason": event.reason,
+            "event_type": event.event_type,
+            "workspace_id": event.workspace_id,
+            "technical_signal_id": event.technical_signal_id,
+            "opportunity_id": event.opportunity_id,
+            "details": _safe_json_loads(event.details, {}),
+            "created_at": event.created_at.isoformat() if event.created_at else None,
+        }
+        for event in events
+    ]
+    cycle_summaries = [
+        {
+            "cycle_id": cycle.cycle_id,
+            "status": cycle.status,
+            "started_at": cycle.started_at.isoformat() if cycle.started_at else None,
+            "completed_at": cycle.completed_at.isoformat() if cycle.completed_at else None,
+            "duration_ms": cycle.duration_ms,
+            "total_pairs": cycle.total_pairs,
+            "brl_pairs": cycle.brl_pairs,
+            "light_candidates": cycle.light_candidates,
+            "deep_candidates": cycle.deep_candidates,
+            "deep_completed": cycle.deep_completed,
+            "signals_created": cycle.signals_created,
+            "shortlist_count": cycle.shortlist_count,
+            "alerts_created": cycle.alerts_created,
+            "alerts_sent": cycle.alerts_sent,
+            "provider_errors": cycle.provider_errors,
+            "discard_reasons": _safe_json_loads(cycle.discard_reasons, {}),
+            "block_reasons": _safe_json_loads(cycle.block_reasons, {}),
+            "error": cycle.error,
+        }
+        for cycle in cycles
+    ]
+
+    if timeline:
+        status = "events_found"
+    else:
+        status = "insufficient_audit_data"
+
+    return {
+        "exchange": normalized_exchange,
+        "pair": normalized_pair,
+        "from": normalize_db_datetime(from_time).isoformat(),
+        "to": normalize_db_datetime(to_time).isoformat(),
+        "status": status,
+        "message": (
+            "Linha do tempo encontrada para o par no intervalo."
+            if timeline
+            else "Nenhum evento auditável encontrado; o intervalo pode ser anterior à auditoria ou o par não foi relevante no ciclo."
+        ),
+        "timeline": timeline,
+        "cycle_summaries": cycle_summaries,
+    }
+
+
+async def run_audit_retention_if_due(now: datetime | None = None) -> None:
+    """Keep audit useful for diagnostics without turning it into raw market storage."""
+    now = normalize_db_datetime(now or utcnow()) or utcnow()
+    event_cutoff = now - timedelta(days=_PIPELINE_EVENT_RETENTION_DAYS)
+    cycle_cutoff = now - timedelta(days=_SCANNER_CYCLE_AUDIT_RETENTION_DAYS)
+    async with async_session() as session:
+        await session.execute(delete(SignalPipelineEventRecord).where(SignalPipelineEventRecord.created_at < event_cutoff))
+        await session.execute(delete(ScannerCycleAuditRecord).where(ScannerCycleAuditRecord.created_at < cycle_cutoff))
+        await session.commit()
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ import type {
   HistorySummaryRecord,
   InvitePreview,
   InviteRecord,
+  MissedSignalDiagnostic,
   Opportunity,
   OpportunitySummary,
   PairExchangeDiagnostic,
@@ -441,6 +442,21 @@ export function getOperationalAnalytics(params?: {
 
 export function getPairDiagnostic(exchange: Exchange, pair: string): Promise<PairExchangeDiagnostic> {
   return fetchJSON(`/pairs/diagnostics/${exchange}/${encodeURIComponent(pair)}`, { headers: sessionHeaders() });
+}
+
+export function getMissedSignalDiagnostic(params: {
+  exchange: Exchange;
+  pair: string;
+  from: string;
+  to: string;
+}): Promise<MissedSignalDiagnostic> {
+  const query = new URLSearchParams({
+    exchange: params.exchange,
+    pair: params.pair,
+    from: params.from,
+    to: params.to,
+  });
+  return fetchJSON(`/diagnostics/missed-signal?${query.toString()}`, { headers: sessionHeaders() });
 }
 
 // Config

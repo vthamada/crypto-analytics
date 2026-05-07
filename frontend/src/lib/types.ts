@@ -471,6 +471,53 @@ export interface PairExchangeDiagnostic {
   checks: PairDiagnosticCheck[];
 }
 
+export interface MissedSignalTimelineEvent {
+  cycle_id: string;
+  exchange?: Exchange | string | null;
+  pair?: string | null;
+  stage: string;
+  status: string;
+  reason?: string | null;
+  event_type?: string;
+  workspace_id?: string | null;
+  technical_signal_id?: string | null;
+  opportunity_id?: string | null;
+  details: Record<string, unknown>;
+  created_at?: string | null;
+}
+
+export interface MissedSignalCycleSummary {
+  cycle_id: string;
+  status: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  duration_ms?: number | null;
+  total_pairs: number;
+  brl_pairs: number;
+  light_candidates: number;
+  deep_candidates: number;
+  deep_completed: number;
+  signals_created: number;
+  shortlist_count: number;
+  alerts_created: number;
+  alerts_sent: number;
+  provider_errors: number;
+  discard_reasons: Record<string, number>;
+  block_reasons: Record<string, number>;
+  error?: string | null;
+}
+
+export interface MissedSignalDiagnostic {
+  exchange: Exchange | string;
+  pair: string;
+  from: string;
+  to: string;
+  status: "events_found" | "insufficient_audit_data" | string;
+  message: string;
+  timeline: MissedSignalTimelineEvent[];
+  cycle_summaries: MissedSignalCycleSummary[];
+}
+
 export interface AuditLogEntry {
   id: string;
   actor_user_id?: string | null;

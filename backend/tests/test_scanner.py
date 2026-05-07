@@ -307,9 +307,22 @@ def test_scan_all_uses_light_triage_before_expensive_requests(monkeypatch, sampl
     assert scanner.scan_diagnostics["light_requests"] == 2
     assert scanner.scan_diagnostics["light_candidates"] == 1
     assert scanner.scan_diagnostics["light_discards"] == 1
-    assert scanner.scan_diagnostics["light_discard_reasons"]["volume_below_threshold"] == 1
+    assert scanner.scan_diagnostics["light_discard_reasons"]["volume_below_minimum"] == 1
     assert scanner.scan_diagnostics["deep_candidates"] == 1
     assert scanner.scan_diagnostics["opportunities"] == 1
+    assert any(
+        event["pair"] == "DEAD_BRL"
+        and event["stage"] == "light_scan"
+        and event["status"] == "discarded"
+        and event["reason"] == "volume_below_minimum"
+        for event in scanner.pipeline_events
+    )
+    assert any(
+        event["pair"] == "BTC_BRL"
+        and event["stage"] == "ranking"
+        and event["status"] == "ranked"
+        for event in scanner.pipeline_events
+    )
 
 
 def test_scan_all_skips_cold_pair_until_temperature_interval(monkeypatch, sample_order_book, sample_klines):
@@ -403,7 +416,7 @@ def test_scan_all_applies_cooldown_after_ticker_failure(monkeypatch):
 
     assert provider.light_calls == 1
     assert scanner.scan_diagnostics["skipped_pairs"] == 1
-    assert scanner.scan_diagnostics["skip_reasons"]["cooldown"] == 1
+    assert scanner.scan_diagnostics["skip_reasons"]["cooldown_active"] == 1
     state = scanner._pair_scan_state["binance:FAIL_BRL"]
     assert state.failure_count == 1
     assert state.cooldown_until is not None

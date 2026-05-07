@@ -65,6 +65,7 @@ Visao por modulo:
 - `backend/app/services/scanner.py`: executa a coleta nas exchanges, aplica filtros, classifica o movimento, calcula score tecnico, calcula executabilidade e enriquece arbitragem cross-exchange.
 - `backend/app/services/persistence.py`: persiste historico, le configuracoes por workspace, agrega configuracoes para o scanner global e recalcula score por workspace na leitura.
 - `backend/app/services/shared_state.py`: persiste estado compartilhado entre worker e API, incluindo `scanner_runtime_state`, `opportunity_snapshots`, `technical_signals`, `workspace_signal_projections`, `signal_outcomes` e `repetition_counts`.
+- `backend/app/services/shared_state.py`: tambem persiste a auditoria operacional compacta em `scanner_cycle_audits` e `signal_pipeline_events`, usada para diagnosticar sinais perdidos sem armazenar dataset bruto de mercado.
 - `backend/app/worker.py`: processo dedicado de scan usado no fluxo padrao do `docker-compose.yml`.
 - `backend/app/services/auth.py`: cuida de login, tokens, bootstrap do admin, organizacoes, workspaces, memberships, usuarios, invites e auditoria.
 - `backend/app/services/pairs.py`: constroi o catalogo de pares disponiveis por exchange e filtra os pares realmente escaneaveis.
@@ -73,6 +74,7 @@ Visao por modulo:
 - `frontend/src/lib/websocket.ts`: cliente WebSocket com reconexao e troca automatica quando a sessao ou o workspace mudam.
 - `frontend/src/hooks/use-opportunities.ts`: carrega oportunidades e stats, assina o canal em tempo real e mantem polling de fallback.
 - `frontend/src/app/settings/page.tsx`: area administrativa e operacional do workspace.
+- `frontend/src/app/settings/page.tsx`: tambem expõe a busca de sinal perdido, consultando a auditoria compacta por exchange/par/janela para mostrar resumo por ciclo e timeline do funil.
 - `frontend/src/app/page.tsx`: dashboard em tempo real.
 - `frontend/src/app/history/page.tsx`: historico e analytics.
 

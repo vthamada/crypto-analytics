@@ -38,6 +38,8 @@ Organization  ← unidade de cobranca (tem plano, Stripe customer)
 ### Plano de executabilidade operacional
 - [x] Refinamento final 2026-05 - fase do movimento, faixa operacional reaproveitavel, ranking comparativo por ciclo, outcomes 24h/enriquecidos e feedback manual de sinais
 - [x] Release I parcial - scanner em dois estagios com triagem leve, temperatura/cooldown em memoria, telemetria agregada em health, dashboard consumindo payload resumido, detalhe sob demanda e catalogo observavel por provider
+- [x] Auditoria P0 do funil de sinais - eventos compactos por ciclo/par, resumo persistente do scanner e endpoint de diagnostico de sinal perdido
+- [x] UI inicial de auditoria operacional - busca de sinal perdido na tela de configuracoes com timeline do funil e resumo por ciclo
 - [x] Refinamento de escopo BRL 2026-05 - Binance desativada por padrao, Mercado Bitcoin/NovaDAX como nucleo, catalogo com providers desativados isolados e ativacao manual por workspace
 - [x] Especificacao BRL 2026-05 - margem operacional, classificacao `trade/hold/observe/avoid`, descoberta ampla BRL, resumo de historico e reducao de egress do dashboard/analytics
 - [x] Release E â€” trading profile por workspace, thresholds operacionais e filtros de alerta

@@ -10,7 +10,14 @@ Convencao deste repositorio:
 
 ## [Unreleased]
 
-- Nenhuma entrada em aberto.
+### Added
+- Auditoria persistente do funil de sinais com `scanner_cycle_audits` e `signal_pipeline_events`, incluindo migration `0012_signal_pipeline_audit`.
+- Endpoint `GET /api/diagnostics/missed-signal` para investigar por exchange/par/janela onde um sinal foi candidato, descartado, bloqueado, ranqueado ou alertado.
+- Eventos compactos do scanner para scan leve, promocao, analise profunda, ranking e entrega/bloqueio de alertas Telegram.
+- Tela de configuracoes passou a ter busca de diagnostico de sinal perdido, com resumo por ciclo e linha do tempo do funil.
+
+### Fixed
+- Provider NovaDAX passou a calcular `change_pct_24h` a partir de `open24h` quando a API nao retorna `change24h`, evitando descarte total dos pares por erro de ticker no scan leve.
 
 ## [2026-05-07]
 

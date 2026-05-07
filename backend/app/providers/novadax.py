@@ -45,15 +45,22 @@ class NovaDaxProvider(ExchangeProvider):
         symbol = self.normalize_pair(pair)
         data = await self._request("GET", "/market/ticker", params={"symbol": symbol})
         d = data["data"]
+        last_price = float(d["lastPrice"])
+        open_24h = float(d.get("open24h") or 0)
+        change_pct_24h = (
+            float(d["change24h"] or 0) * 100
+            if "change24h" in d
+            else ((last_price - open_24h) / open_24h * 100 if open_24h > 0 else 0.0)
+        )
         return Ticker(
             exchange=self.exchange,
             pair=pair,
-            last_price=float(d["lastPrice"]),
+            last_price=last_price,
             high_24h=float(d["high24h"]),
             low_24h=float(d["low24h"]),
             volume_24h=float(d["baseVolume24h"]),
             quote_volume_24h=float(d["quoteVolume24h"]),
-            change_pct_24h=float(d["change24h"] or 0) * 100,
+            change_pct_24h=change_pct_24h,
             timestamp=datetime.now(timezone.utc),
         )
 

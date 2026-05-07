@@ -11,7 +11,9 @@ from app.models.database import (
     Base,
     OpportunityRecord,
     OpportunitySnapshotRecord,
+    ScannerCycleAuditRecord,
     ScannerRuntimeStateRecord,
+    SignalPipelineEventRecord,
     TechnicalSignalRecord,
     WorkspaceSignalProjectionRecord,
 )
@@ -240,3 +242,85 @@ def test_runtime_writers_strip_timezone_before_persisting(monkeypatch):
     assert history_session.added[0].executability_version == "v1"
     assert snapshot_session.added[0].executability_version == "v1"
     assert signal_session.added[0].executability_version == "v1"
+
+
+def test_pipeline_audit_persists_cycle_and_missed_signal_timeline(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"pipeline-audit-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(shared_state, "async_session", session_factory)
+        started_at = datetime.now(timezone.utc)
+        await shared_state.save_signal_pipeline_events(
+            "cycle-audit",
+            [
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "SOL_BRL",
+                    "stage": "light_scan",
+                    "status": "candidate",
+                    "reason": "candidate",
+                    "details": {"preliminary_score": 81.2},
+                    "created_at": started_at,
+                },
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "SOL_BRL",
+                    "stage": "alert",
+                    "status": "blocked",
+                    "reason": "below_alert_threshold",
+                    "details": {"score": 58.0},
+                    "created_at": started_at,
+                },
+            ],
+        )
+        await shared_state.save_scanner_cycle_audit(
+            cycle_id="cycle-audit",
+            started_at=started_at,
+            completed_at=started_at,
+            duration_ms=123.0,
+            diagnostics={
+                "total_pairs": 10,
+                "brl_pairs": 10,
+                "light_candidates": 2,
+                "deep_candidates": 1,
+                "deep_completed": 1,
+                "light_discard_reasons": {"volume_below_minimum": 3},
+            },
+            signals_created=1,
+            shortlist_count=1,
+            alerts_created=1,
+            alerts_sent=0,
+            block_reasons={"below_alert_threshold": 1},
+        )
+
+        diagnostic = await shared_state.get_missed_signal_diagnostic(
+            exchange="novadax",
+            pair="SOL_BRL",
+            from_time=started_at.replace(tzinfo=timezone.utc),
+            to_time=started_at.replace(tzinfo=timezone.utc),
+        )
+
+        async with session_factory() as session:
+            event_result = await session.execute(SignalPipelineEventRecord.__table__.select())
+            cycle_result = await session.execute(ScannerCycleAuditRecord.__table__.select())
+
+        assert len(event_result.fetchall()) == 2
+        assert len(cycle_result.fetchall()) == 1
+        assert diagnostic["status"] == "events_found"
+        assert [event["stage"] for event in diagnostic["timeline"]] == ["light_scan", "alert"]
+        assert diagnostic["cycle_summaries"][0]["alerts_sent"] == 0
+        assert diagnostic["cycle_summaries"][0]["block_reasons"] == {"below_alert_threshold": 1}
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())

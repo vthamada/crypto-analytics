@@ -2447,3 +2447,408 @@ A definição final consolidada é:
 > **Um assistente operacional de oportunidades em cripto BRL, focado inicialmente em Mercado Bitcoin e NovaDAX, que monitora dinamicamente pares relevantes, identifica zonas de compra e venda, detecta lateralização, rompimento e continuação, avalia liquidez, margem e risco de atraso, entrega apenas shortlist qualificada e aprende com outcomes e feedbacks do usuário.**
 
 Essa definição deve orientar as próximas implementações.
+
+---
+
+## 69. Confiabilidade do funil de sinais
+
+### 69.1 Objetivo
+
+O sistema deve explicar por que uma oportunidade foi detectada, promovida, ranqueada, exibida, alertada, descartada, bloqueada ou perdida por erro técnico.
+
+A dor operacional observada é:
+
+> **houve um movimento bom no mercado e o sistema não avisou.**
+
+Portanto, o problema não deve ser tratado como prioridade fixa de uma moeda específica. A regra correta é:
+
+> **Todo movimento operacionalmente relevante, em qualquer par BRL monitorável, deve deixar rastro no pipeline.**
+
+Nenhum movimento relevante deve desaparecer sem explicação.
+
+---
+
+## 70. Rastreabilidade ponta a ponta
+
+Para cada par monitorável em cada ciclo relevante, o sistema deve conseguir responder:
+
+- o par estava no catálogo?
+- a exchange estava habilitada?
+- o par estava ativo e negociável?
+- houve coleta de ticker, candles e/ou livro de ofertas?
+- houve erro de API, timeout, cache vazio ou cache desatualizado?
+- o par passou no scan leve?
+- se não passou, qual foi o motivo?
+- o par foi promovido para análise profunda?
+- se não foi, qual foi o motivo?
+- houve cálculo de score?
+- houve classificação como `trade`, `hold`, `observe` ou `avoid`?
+- qual foi o score operacional?
+- qual foi a fase do movimento?
+- qual foi a liquidez estimada?
+- qual foi a margem operacional estimada?
+- entrou no ranking comparativo do ciclo?
+- se não entrou, por quê?
+- entrou na shortlist?
+- se não entrou, por quê?
+- o alerta foi criado?
+- o alerta foi bloqueado por threshold, cooldown, limite diário ou ranking?
+- o Telegram estava habilitado?
+- o Telegram enviou ou falhou?
+
+### 70.1 Situações finais permitidas
+
+Todo movimento relevante deve terminar em uma destas situações:
+
+- `alerted`: alertado com sucesso
+- `visible_shortlist`: visível na shortlist
+- `visible_observe`: visível como oportunidade observável
+- `discarded_with_reason`: descartado com motivo claro
+- `blocked_with_reason`: bloqueado por regra clara
+- `provider_error`: falha técnica registrada
+- `insufficient_data`: dados insuficientes registrados
+- `not_monitorable`: par não monitorável com motivo explícito
+
+Nenhum par relevante deve terminar em estado implícito ou desconhecido.
+
+---
+
+## 71. Diagnóstico de sinal perdido
+
+### 71.1 Conceito
+
+O sistema deve possuir diagnóstico para investigar casos em que o usuário afirma:
+
+> “teve movimento bom e o sistema não avisou.”
+
+A busca deve aceitar:
+
+- exchange
+- par
+- intervalo de tempo
+- tipo de movimento
+- status do pipeline
+
+### 71.2 Endpoint recomendado
+
+Criar endpoint semelhante a:
+
+- `GET /api/diagnostics/missed-signal?exchange=...&pair=...&from=...&to=...`
+
+Esse endpoint deve retornar uma linha do tempo do pipeline para o par no período pesquisado.
+
+### 71.3 Conteúdo da resposta
+
+A resposta deve conter:
+
+- status do par no catálogo
+- status da exchange
+- eventos de coleta
+- erros de provider
+- dados de ticker, volume e liquidez disponíveis
+- resultado do scan leve
+- motivo de descarte, se houver
+- resultado da análise profunda, se houver
+- scores calculados
+- ranking do ciclo
+- posição na shortlist
+- regras de bloqueio aplicadas
+- status de alerta
+- status de entrega no Telegram
+
+### 71.4 Critério de aceitação
+
+Deve ser possível identificar se a falha ocorreu em:
+
+- catálogo
+- provider
+- coleta
+- cache
+- normalização
+- filtro
+- threshold
+- análise profunda
+- ranking
+- cooldown
+- limite de alerta
+- Telegram
+- configuração do workspace
+
+---
+
+## 72. Motivos padronizados de descarte e bloqueio
+
+### 72.1 Motivos de descarte no scan leve
+
+Exemplos de `scan_discard_reason`:
+
+- `exchange_disabled`
+- `pair_not_in_catalog`
+- `pair_inactive`
+- `pair_not_tradable`
+- `not_brl_pair`
+- `provider_error`
+- `provider_timeout`
+- `invalid_price`
+- `missing_ticker`
+- `missing_volume`
+- `volume_below_minimum`
+- `movement_below_minimum`
+- `spread_too_high`
+- `cache_empty`
+- `cache_stale`
+- `cooldown_active`
+- `blacklisted_pair`
+
+### 72.2 Motivos de não promoção para análise profunda
+
+Exemplos de `promotion_block_reason`:
+
+- `weak_preliminary_score`
+- `insufficient_liquidity`
+- `insufficient_movement`
+- `insufficient_volume`
+- `spread_unfavorable`
+- `provider_unstable`
+- `candidate_limit_lower_priority`
+- `missing_required_market_data`
+
+### 72.3 Motivos de não alerta
+
+Exemplos de `alert_block_reason`:
+
+- `below_alert_threshold`
+- `not_in_top_shortlist`
+- `lower_than_competing_signals`
+- `cooldown_active`
+- `daily_alert_limit_reached`
+- `opportunity_type_not_alertable`
+- `movement_too_late`
+- `high_late_entry_risk`
+- `insufficient_operational_margin`
+- `telegram_disabled`
+- `telegram_send_failed`
+- `workspace_alerts_disabled`
+
+### 72.4 Critério de aceitação
+
+Todo descarte ou bloqueio relevante deve possuir:
+
+- motivo padronizado
+- timestamp
+- exchange
+- par
+- etapa do pipeline
+- dados mínimos que justificam a decisão
+
+---
+
+## 73. Auditoria por ciclo de scanner
+
+### 73.1 Objetivo
+
+Cada ciclo do scanner deve gerar um resumo auditável.
+
+O resumo deve permitir entender:
+
+- quantos pares foram vistos
+- quantos passaram no scan leve
+- quantos foram descartados
+- quantos foram promovidos
+- quantos viraram sinais
+- quantos entraram na shortlist
+- quantos geraram alerta
+- quantos falharam por provider
+- quais foram os principais motivos de descarte
+
+### 73.2 Campos sugeridos
+
+Campos sugeridos para `scanner_cycle_audit` ou estrutura equivalente:
+
+- `cycle_id`
+- `started_at`
+- `finished_at`
+- `duration_ms`
+- `exchanges_enabled`
+- `pairs_seen_count`
+- `brl_pairs_seen_count`
+- `pairs_scan_passed_count`
+- `pairs_discarded_count`
+- `pairs_promoted_count`
+- `deep_analysis_count`
+- `signals_created_count`
+- `shortlist_count`
+- `alerts_created_count`
+- `alerts_sent_count`
+- `provider_errors_count`
+- `top_discard_reasons`
+- `top_block_reasons`
+
+### 73.3 Retenção
+
+Para evitar aumento de custo:
+
+- manter auditoria detalhada por curto período
+- manter agregados por mais tempo
+- não persistir dados brutos grandes de todos os pares
+- armazenar apenas amostras úteis para debugging
+
+---
+
+## 74. Tratamento de movimentos em ativos de alta liquidez
+
+### 74.1 Regra correta
+
+O sistema não deve favorecer uma moeda específica de forma fixa.
+
+Porém, deve tratar corretamente ativos com alta liquidez.
+
+Movimentos menores em ativos muito líquidos podem ser operacionalmente relevantes.
+
+### 74.2 Requisito
+
+A lógica de thresholds deve ser sensível ao contexto.
+
+O sistema deve considerar:
+
+- liquidez absoluta
+- volume recente
+- book disponível
+- capacidade de entrada e saída
+- variação relativa ao próprio histórico do ativo
+- movimento atípico em relação ao comportamento normal do par
+
+### 74.3 Regra de promoção
+
+Um par com alta liquidez e movimento atípico em relação ao próprio histórico deve ser promovido para análise profunda mesmo que a variação percentual absoluta seja menor do que em moedas pequenas.
+
+### 74.4 Não confundir com prioridade fixa
+
+Essa regra não significa que USDT, BTC, SOL ou qualquer outro ativo deve ser sempre alertado.
+
+Significa apenas que:
+
+> **o sistema deve ajustar a régua de relevância conforme liquidez e comportamento histórico do próprio ativo.**
+
+---
+
+## 75. Tela ou seção de auditoria operacional
+
+### 75.1 Objetivo
+
+O painel deve permitir entender rapidamente se o sistema está fazendo o papel dele.
+
+### 75.2 Funcionalidades recomendadas
+
+Criar seção de auditoria com:
+
+- status das exchanges
+- status dos catálogos
+- últimos ciclos do scanner
+- pares vistos por exchange
+- pares descartados por motivo
+- sinais gerados
+- sinais bloqueados
+- alertas enviados
+- alertas bloqueados
+- falhas de Telegram
+- busca por par e período
+- diagnóstico de movimento perdido
+
+### 75.3 Perguntas que a UI deve responder
+
+A interface deve responder:
+
+- a NovaDAX está funcionando?
+- quantos pares BRL a NovaDAX retornou?
+- o par pesquisado foi monitorado?
+- por que o par não apareceu?
+- por que o par não alertou?
+- o Telegram falhou?
+- o alerta foi bloqueado por regra?
+- o sinal foi considerado atrasado?
+- havia sinais melhores no ciclo?
+
+---
+
+## 76. Atualização do backlog com auditoria do funil
+
+### 76.1 P0 — Confiabilidade imediata
+
+Adicionar ao P0:
+
+- registrar motivo de descarte no scan leve
+- registrar motivo de não promoção para análise profunda
+- registrar motivo de não entrada na shortlist
+- registrar bloqueios de alerta
+- registrar status de envio Telegram
+- criar endpoint de diagnóstico por par/período
+- criar auditoria resumida por ciclo de scanner
+- garantir que falhas de provider apareçam no painel
+- impedir cache vazio como catálogo válido
+- diagnosticar NovaDAX ponta a ponta
+
+### 76.2 P1 — Auditoria operacional no painel
+
+Adicionar ao P1:
+
+- tela de auditoria operacional
+- busca de movimento perdido por par/período
+- visualização de funil por ciclo
+- indicadores de falsos negativos
+- agregados de motivos de descarte
+- histórico de alertas bloqueados
+
+### 76.3 P2 — Aprendizado com falsos negativos
+
+Adicionar ao P2:
+
+- registrar eventos que o usuário marcou como “sistema deveria ter avisado”
+- comparar esses eventos com os dados do pipeline
+- ajustar thresholds com base em falsos negativos
+- criar relatório de oportunidades perdidas
+- usar feedback para reduzir perdas futuras
+
+---
+
+## 77. Critério final de confiança operacional
+
+O sistema só deve ser considerado confiável quando cumprir esta regra:
+
+> **Se uma oportunidade boa aparecer dentro do universo monitorável, o sistema deve alertar, mostrar na shortlist, registrar como observável, descartar com motivo claro ou registrar erro técnico. Nunca deve simplesmente não acontecer nada.**
+
+Esse critério deve ser tratado como requisito central do produto.
+
+---
+
+## 78. Definição final revisada
+
+A definição final do sistema passa a ser:
+
+> **Um assistente operacional de oportunidades em cripto BRL, focado inicialmente em Mercado Bitcoin e NovaDAX, que monitora dinamicamente pares relevantes, identifica zonas de compra e venda, detecta lateralização, rompimento e continuação, avalia liquidez, margem e risco de atraso, entrega apenas shortlist qualificada, aprende com outcomes e feedbacks do usuário e mantém auditoria ponta a ponta para explicar por que cada oportunidade foi alertada, descartada ou perdida.**
+
+Essa definição deve orientar as próximas implementações.
+
+---
+
+## 79. Status de implementacao da auditoria P0
+
+### 79.1 Implementado
+
+- NovaDAX: `get_ticker()` passou a derivar `change_pct_24h` a partir de `open24h` quando `change24h` nao vem na API publica.
+- Scanner: o funil passou a emitir eventos compactos para scan leve, promocao, analise profunda, ranking e alertas.
+- Persistencia: foram adicionadas as tabelas `scanner_cycle_audits` e `signal_pipeline_events`.
+- API: foi criado `GET /api/diagnostics/missed-signal?exchange=...&pair=...&from=...&to=...`.
+- Frontend: a tela de configuracoes passou a ter uma busca de sinal perdido com janela movel, resumo por ciclo e linha do tempo do funil.
+- Worker/API local: cada ciclo salva resumo auditavel com pares vistos, candidatos, analises profundas, sinais, alertas e principais motivos.
+- Custo: a auditoria salva payload resumido, nao persiste candles/order book brutos e possui retencao separada para eventos e ciclos.
+
+### 79.2 Ainda pendente
+
+- Filtros avancados de periodo customizado na tela de auditoria; a primeira versao usa janelas moveis de 1h, 4h, 24h e 72h.
+- Explicabilidade mais rica para bloqueios por workspace quando o sinal existe globalmente, mas nao entra na configuracao daquele workspace.
+- Evolucao P1 de fase, lateralizacao, zonas operacionais e alertas por momento com apoio da auditoria.
+
+### 79.3 Decisao tecnica
+
+A auditoria deve continuar compacta. O sistema nao deve gravar todos os dados brutos de mercado por par/ciclo. Quando houver muitos pares no universo monitoravel, os agregados por ciclo continuam obrigatorios e os eventos detalhados devem priorizar candidatos, erros, descartes relevantes, pares de watchlist e alertas.

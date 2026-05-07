@@ -29,6 +29,7 @@ import {
   getAdminSession,
   getAvailablePairs,
   getConfig,
+  getMissedSignalDiagnostic,
   getPairDiagnostic,
   getStoredAuthToken,
   getStoredWorkspaceId,
@@ -52,6 +53,7 @@ import type {
   ExchangeCredentialValidationResult,
   Exchange,
   InviteRecord,
+  MissedSignalDiagnostic,
   PairExchangeDiagnostic,
   UserRecord,
   WorkspaceSummary,
@@ -156,6 +158,7 @@ type DisplayAuditLogEntry = AuditLogEntry & {
   aggregatedCount: number;
   groupedOldestCreatedAt?: string;
 };
+type MissedSignalWindow = "1" | "4" | "24" | "72";
 
 const TRADING_PROFILE_OPTIONS: { value: TradingProfile; label: string; description: string }[] = [
   {
@@ -394,6 +397,12 @@ export default function SettingsPage() {
   const [pairDiagnostic, setPairDiagnostic] = useState<PairExchangeDiagnostic | null>(null);
   const [pairDiagnosticLoading, setPairDiagnosticLoading] = useState(false);
   const [pairDiagnosticError, setPairDiagnosticError] = useState<string | null>(null);
+  const [missedSignalPairInput, setMissedSignalPairInput] = useState("");
+  const [missedSignalExchange, setMissedSignalExchange] = useState<Exchange>("novadax");
+  const [missedSignalWindowHours, setMissedSignalWindowHours] = useState<MissedSignalWindow>("24");
+  const [missedSignalDiagnostic, setMissedSignalDiagnostic] = useState<MissedSignalDiagnostic | null>(null);
+  const [missedSignalLoading, setMissedSignalLoading] = useState(false);
+  const [missedSignalError, setMissedSignalError] = useState<string | null>(null);
   const [pairCatalogLoading, setPairCatalogLoading] = useState(false);
   const [pairCatalogError, setPairCatalogError] = useState<string | null>(null);
   const [pairCatalogView, setPairCatalogView] = useState<PairCatalogView>("active");
@@ -429,6 +438,8 @@ export default function SettingsPage() {
     setCredentialValidationResults([]);
     setCredentialNotice(null);
     setTelegramTestFeedback(null);
+    setMissedSignalDiagnostic(null);
+    setMissedSignalError(null);
     setUsersLoading(false);
     lastSavedOperationalConfigRef.current = "";
     setAutoSaveStatus("idle");
@@ -586,6 +597,9 @@ export default function SettingsPage() {
     setPairSearch("");
     setManualPairInput("");
     setManualPairFeedback(null);
+    setMissedSignalPairInput("");
+    setMissedSignalDiagnostic(null);
+    setMissedSignalError(null);
     setPairCatalogView("active");
     setPairAvailabilityFilter("active_exchanges");
     setPairResultsLimit(40);
@@ -1001,6 +1015,36 @@ export default function SettingsPage() {
       setPairDiagnosticError(error instanceof Error ? error.message : "Falha ao diagnosticar o par.");
     } finally {
       setPairDiagnosticLoading(false);
+    }
+  }
+
+  async function diagnoseMissedSignal() {
+    const pair = normalizeManualPair(missedSignalPairInput || diagnosticPairInput || manualPairInput);
+    if (!/^[A-Z0-9]{2,20}_[A-Z0-9]{2,10}$/.test(pair)) {
+      setMissedSignalError("Informe um par no formato BASE_COTACAO, por exemplo SOL_BRL ou WBTC_BRL.");
+      return;
+    }
+
+    const windowHours = Number(missedSignalWindowHours) || 24;
+    const to = new Date();
+    const from = new Date(to.getTime() - windowHours * 60 * 60 * 1000);
+
+    setMissedSignalLoading(true);
+    setMissedSignalError(null);
+    try {
+      const diagnostic = await getMissedSignalDiagnostic({
+        exchange: missedSignalExchange,
+        pair,
+        from: from.toISOString(),
+        to: to.toISOString(),
+      });
+      setMissedSignalDiagnostic(diagnostic);
+      setMissedSignalPairInput(pair);
+    } catch (error) {
+      setMissedSignalDiagnostic(null);
+      setMissedSignalError(error instanceof Error ? error.message : "Falha ao buscar auditoria do sinal.");
+    } finally {
+      setMissedSignalLoading(false);
     }
   }
 
@@ -2889,6 +2933,169 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="rounded-xl border bg-muted/20 p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">Diagnosticar sinal perdido</p>
+                  <p className="text-xs text-muted-foreground">
+                    Use quando um ativo mexeu e o sistema nao avisou. A busca mostra se o par foi coletado, descartado, ranqueado, bloqueado ou alertado.
+                  </p>
+                </div>
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-[180px,minmax(0,1fr),150px,auto] lg:items-end">
+                  <div className="space-y-1">
+                    <span className="text-xs font-medium text-muted-foreground">Exchange</span>
+                    <select
+                      value={missedSignalExchange}
+                      onChange={(event) => setMissedSignalExchange(event.target.value as Exchange)}
+                      className="h-9 w-full rounded-lg border bg-background px-3 text-sm"
+                    >
+                      {ALL_EXCHANGES.map(({ id, label }) => (
+                        <option key={id} value={id}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs font-medium text-muted-foreground">Par</span>
+                    <Input
+                      value={missedSignalPairInput}
+                      onChange={(event) => {
+                        setMissedSignalPairInput(event.target.value);
+                        setMissedSignalError(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void diagnoseMissedSignal();
+                        }
+                      }}
+                      placeholder="Ex: SOL_BRL, WBTC_BRL"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs font-medium text-muted-foreground">Janela</span>
+                    <select
+                      value={missedSignalWindowHours}
+                      onChange={(event) => setMissedSignalWindowHours(event.target.value as MissedSignalWindow)}
+                      className="h-9 w-full rounded-lg border bg-background px-3 text-sm"
+                    >
+                      <option value="1">Ultima 1h</option>
+                      <option value="4">Ultimas 4h</option>
+                      <option value="24">Ultimas 24h</option>
+                      <option value="72">Ultimos 3 dias</option>
+                    </select>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void diagnoseMissedSignal()}
+                    disabled={missedSignalLoading}
+                    className="gap-2"
+                  >
+                    {missedSignalLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Info className="h-3.5 w-3.5" />}
+                    Investigar
+                  </Button>
+                </div>
+
+                {missedSignalError ? (
+                  <p className="mt-3 text-xs text-amber-600 dark:text-amber-300">{missedSignalError}</p>
+                ) : null}
+
+                {missedSignalDiagnostic ? (
+                  <div className="mt-4 space-y-3">
+                    <div
+                      className={cn(
+                        "rounded-lg border p-3 text-xs",
+                        missedSignalDiagnostic.status === "events_found"
+                          ? "border-emerald-500/20 bg-emerald-500/5"
+                          : "border-amber-500/20 bg-amber-500/5",
+                      )}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">
+                            {missedSignalDiagnostic.pair.replace("_", "/")} em {formatExchangeDisplay(missedSignalDiagnostic.exchange)}
+                          </p>
+                          <p className="mt-1 text-muted-foreground">{missedSignalDiagnostic.message}</p>
+                        </div>
+                        <Badge variant={missedSignalDiagnostic.status === "events_found" ? "default" : "outline"}>
+                          {missedSignalDiagnostic.status === "events_found" ? "eventos encontrados" : "sem trilha"}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {missedSignalDiagnostic.cycle_summaries.length > 0 ? (
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {missedSignalDiagnostic.cycle_summaries.slice(0, 4).map((cycle) => (
+                          <div key={cycle.cycle_id} className="rounded-lg border bg-background p-3 text-xs">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="font-semibold">{cycle.cycle_id}</p>
+                              <Badge variant={cycle.status === "completed" ? "default" : "outline"}>{cycle.status}</Badge>
+                            </div>
+                            <div className="mt-2 grid grid-cols-2 gap-2 text-muted-foreground">
+                              <span>Pares BRL: {cycle.brl_pairs}</span>
+                              <span>Candidatos: {cycle.light_candidates}</span>
+                              <span>Deep scan: {cycle.deep_completed}/{cycle.deep_candidates}</span>
+                              <span>Alertas: {cycle.alerts_sent}/{cycle.alerts_created}</span>
+                            </div>
+                            {Object.keys(cycle.discard_reasons).length > 0 ? (
+                              <p className="mt-2 text-muted-foreground">
+                                Descartes: {formatReasonCounts(cycle.discard_reasons)}
+                              </p>
+                            ) : null}
+                            {Object.keys(cycle.block_reasons).length > 0 ? (
+                              <p className="mt-1 text-muted-foreground">
+                                Bloqueios: {formatReasonCounts(cycle.block_reasons)}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {missedSignalDiagnostic.timeline.length > 0 ? (
+                      <div className="overflow-hidden rounded-xl border">
+                        <ScrollArea className="max-h-80">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Horario</TableHead>
+                                <TableHead>Etapa</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Motivo</TableHead>
+                                <TableHead>Detalhes</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {missedSignalDiagnostic.timeline.map((event, index) => (
+                                <TableRow key={`${event.cycle_id}-${event.stage}-${index}`}>
+                                  <TableCell className="whitespace-nowrap text-xs">
+                                    {event.created_at ? new Date(event.created_at).toLocaleString("pt-BR") : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-xs font-medium">{formatPipelineStage(event.stage)}</TableCell>
+                                  <TableCell>
+                                    <Badge variant={event.status === "error" || event.status === "blocked" ? "outline" : "default"}>
+                                      {formatPipelineStatus(event.status)}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-xs text-muted-foreground">
+                                    {formatPipelineReason(event.reason)}
+                                  </TableCell>
+                                  <TableCell className="max-w-[18rem] truncate text-xs text-muted-foreground">
+                                    {formatEventDetails(event.details)}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
               {visibleAuditLog.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nenhum evento registrado ainda.</p>
               ) : (
@@ -3035,6 +3242,77 @@ function CredentialField({
 
 function formatExchangeLabel(exchange: ExchangeCredentialValidationResult["exchange"]) {
   return EXCHANGE_CRED_FIELDS.find((item) => item.exchange === exchange)?.label ?? exchange;
+}
+
+function formatExchangeDisplay(exchange: Exchange | string | null | undefined) {
+  return ALL_EXCHANGES.find((item) => item.id === exchange)?.label ?? exchange ?? "-";
+}
+
+function formatReasonCounts(reasons: Record<string, number>): string {
+  return Object.entries(reasons)
+    .slice(0, 4)
+    .map(([reason, count]) => `${formatPipelineReason(reason)} (${count})`)
+    .join(", ");
+}
+
+function formatPipelineStage(stage: string): string {
+  const labels: Record<string, string> = {
+    light_scan: "Scan leve",
+    promotion: "Promocao",
+    deep_scan: "Analise profunda",
+    ranking: "Ranking",
+    alert: "Alerta",
+  };
+  return labels[stage] ?? stage;
+}
+
+function formatPipelineStatus(status: string): string {
+  const labels: Record<string, string> = {
+    candidate: "candidato",
+    promoted: "promovido",
+    discarded: "descartado",
+    blocked: "bloqueado",
+    ranked: "ranqueado",
+    opportunity: "sinal",
+    sent: "enviado",
+    error: "erro",
+  };
+  return labels[status] ?? status;
+}
+
+function formatPipelineReason(reason?: string | null): string {
+  if (!reason) return "-";
+  const labels: Record<string, string> = {
+    below_alert_threshold: "abaixo do limite de alerta",
+    candidate: "candidato",
+    candidate_limit_lower_priority: "prioridade menor no limite de candidatos",
+    cooldown_active: "cooldown ativo",
+    entered_cycle_ranking: "entrou no ranking do ciclo",
+    insufficient_liquidity: "liquidez insuficiente",
+    insufficient_movement: "movimento insuficiente",
+    insufficient_volume: "volume insuficiente",
+    missing_candles: "candles ausentes",
+    missing_order_book: "book ausente",
+    missing_ticker: "ticker ausente",
+    selected_for_deep_scan: "selecionado para analise profunda",
+    spread_unfavorable: "spread desfavoravel",
+    telegram_sent: "Telegram enviado",
+    volume_below_minimum: "volume abaixo do minimo",
+    workspace_alert_scope_mismatch: "fora do escopo de alerta",
+  };
+  return labels[reason] ?? reason.replaceAll("_", " ");
+}
+
+function formatEventDetails(details: Record<string, unknown>): string {
+  const compactEntries = Object.entries(details)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .slice(0, 4);
+
+  if (!compactEntries.length) return "-";
+
+  return compactEntries
+    .map(([key, value]) => `${key.replaceAll("_", " ")}: ${typeof value === "number" ? Number(value.toFixed(4)) : String(value)}`)
+    .join(" · ");
 }
 
 function isSecretConfigured(

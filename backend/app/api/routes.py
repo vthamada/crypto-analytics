@@ -64,7 +64,12 @@ from app.services.auth import (
 from app.services.monitoring import scan_monitor
 from app.services.pairs import get_available_pairs_catalog, get_pair_exchange_diagnostic
 from app.services.exchange_credentials import validate_exchange_credentials
-from app.services.shared_state import create_signal_feedback, get_scanner_runtime_state, read_opportunity_snapshots
+from app.services.shared_state import (
+    create_signal_feedback,
+    get_missed_signal_diagnostic,
+    get_scanner_runtime_state,
+    read_opportunity_snapshots,
+)
 from app.services.persistence import (
     DEFAULT_WORKSPACE_ID,
     get_filtered_analytics,
@@ -1080,6 +1085,22 @@ async def available_pairs(
 @router.get("/pairs/diagnostics/{exchange}/{pair:path}", response_model=PairExchangeDiagnosticResponse)
 async def pair_diagnostic(exchange: Exchange, pair: str):
     return await get_pair_exchange_diagnostic(exchange, pair)
+
+
+@router.get("/diagnostics/missed-signal")
+async def missed_signal_diagnostic(
+    exchange: Exchange,
+    pair: str,
+    from_time: datetime = Query(alias="from"),
+    to_time: datetime = Query(alias="to"),
+    session_info: UserSession = Depends(require_user_session),
+):
+    return await get_missed_signal_diagnostic(
+        exchange=exchange.value,
+        pair=pair,
+        from_time=from_time,
+        to_time=to_time,
+    )
 
 
 @router.get("/config", response_model=ConfigResponse)

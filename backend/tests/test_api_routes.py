@@ -754,6 +754,54 @@ def test_pair_diagnostic_endpoint_returns_exchange_diagnostic(monkeypatch):
     assert body["checks"][0]["name"] == "catalog"
 
 
+def test_missed_signal_diagnostic_endpoint_returns_timeline(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_diagnostic(*, exchange, pair, from_time, to_time):
+        assert exchange == "novadax"
+        assert pair == "SOL_BRL"
+        return {
+            "exchange": exchange,
+            "pair": pair,
+            "from": from_time.isoformat(),
+            "to": to_time.isoformat(),
+            "status": "events_found",
+            "message": "Linha do tempo encontrada para o par no intervalo.",
+            "timeline": [
+                {
+                    "cycle_id": "cycle-1",
+                    "stage": "light_scan",
+                    "status": "candidate",
+                    "reason": "candidate",
+                    "created_at": from_time.isoformat(),
+                }
+            ],
+            "cycle_summaries": [],
+        }
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "get_missed_signal_diagnostic", fake_diagnostic)
+
+    client = create_test_client()
+    response = client.get(
+        "/api/diagnostics/missed-signal?exchange=novadax&pair=SOL_BRL&from=2026-05-07T10:00:00Z&to=2026-05-07T11:00:00Z",
+        headers={"X-Admin-Token": "secret-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "events_found"
+    assert response.json()["timeline"][0]["stage"] == "light_scan"
+
+
 def test_telegram_test_endpoint_uses_workspace_config_fallback(monkeypatch):
     monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
 

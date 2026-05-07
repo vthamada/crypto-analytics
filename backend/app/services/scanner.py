@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_OPERABLE_EXECUTABILITY_SCORE = 60.0
 DEFAULT_STAGE2_CANDIDATES_PER_EXCHANGE = 24
+MAX_PIPELINE_EVENTS_PER_CYCLE = 500
 PAIR_TEMPERATURE_INTERVAL_SECONDS = {
     "hot": 0,
     "warm": 60,
@@ -101,6 +102,7 @@ class Scanner:
         self._historical_calibration: dict[str, dict[str, float]] = {}
         self._pair_scan_state: dict[str, PairScanState] = {}
         self._scan_diagnostics: dict = {}
+        self._pipeline_events: list[dict] = []
         self._running = False
 
         self._init_providers()
@@ -130,6 +132,10 @@ class Scanner:
     @property
     def scan_diagnostics(self) -> dict:
         return deepcopy(self._scan_diagnostics)
+
+    @property
+    def pipeline_events(self) -> list[dict]:
+        return deepcopy(self._pipeline_events)
 
     def set_historical_calibration(self, calibration: dict[str, dict[str, float]]) -> None:
         self._historical_calibration = calibration
@@ -195,6 +201,7 @@ class Scanner:
     def _reset_scan_diagnostics(self, scannable_pairs: dict[Exchange, list[str]]) -> None:
         self._scan_diagnostics = {
             "total_pairs": sum(len(pairs) for pairs in scannable_pairs.values()),
+            "brl_pairs": sum(1 for pairs in scannable_pairs.values() for pair in pairs if pair.upper().endswith("_BRL")),
             "light_requests": 0,
             "light_candidates": 0,
             "light_discards": 0,
@@ -206,8 +213,53 @@ class Scanner:
             "deep_discards": 0,
             "deep_discard_reasons": {},
             "opportunities": 0,
+            "pipeline_events_dropped": 0,
             "temperatures": {"hot": 0, "warm": 0, "cold": 0},
         }
+        self._pipeline_events = []
+
+    def _normalize_reason(self, reason: str | None) -> str | None:
+        if reason is None:
+            return None
+        return {
+            "volume_below_threshold": "volume_below_minimum",
+            "movement_below_light_threshold": "movement_below_minimum",
+            "ticker_failed": "missing_ticker",
+            "order_book_failed": "missing_order_book",
+            "klines_failed": "missing_candles",
+            "volatility_filter": "insufficient_movement",
+            "volume_filter": "insufficient_volume",
+            "liquidity_filter": "insufficient_liquidity",
+            "spread_filter": "spread_unfavorable",
+            "scan_pair_exception": "provider_error",
+            "cooldown": "cooldown_active",
+        }.get(reason, reason)
+
+    def _record_pipeline_event(
+        self,
+        *,
+        exchange: Exchange,
+        pair: str,
+        stage: str,
+        status: str,
+        reason: str | None = None,
+        details: dict | None = None,
+    ) -> None:
+        if len(self._pipeline_events) >= MAX_PIPELINE_EVENTS_PER_CYCLE:
+            self._scan_diagnostics["pipeline_events_dropped"] = self._scan_diagnostics.get("pipeline_events_dropped", 0) + 1
+            return
+        self._pipeline_events.append(
+            {
+                "exchange": exchange,
+                "pair": pair.upper(),
+                "stage": stage,
+                "status": status,
+                "reason": self._normalize_reason(reason),
+                "event_type": "scanner",
+                "details": details or {},
+                "created_at": datetime.now(timezone.utc),
+            }
+        )
 
     def _increment_scan_counter(self, section: str, key: str | None = None, amount: int = 1) -> None:
         if not self._scan_diagnostics:
@@ -215,6 +267,8 @@ class Scanner:
         if key is None:
             self._scan_diagnostics[section] = self._scan_diagnostics.get(section, 0) + amount
             return
+        if section.endswith("_reasons"):
+            key = self._normalize_reason(key) or key
         bucket = self._scan_diagnostics.setdefault(section, {})
         bucket[key] = bucket.get(key, 0) + amount
 
@@ -315,6 +369,14 @@ class Scanner:
             self._record_provider_pair_failure(provider.exchange, pair, "ticker_failed", now)
             self._increment_scan_counter("light_discards")
             self._increment_scan_counter("light_discard_reasons", "ticker_failed")
+            self._record_pipeline_event(
+                exchange=provider.exchange,
+                pair=pair,
+                stage="light_scan",
+                status="error",
+                reason="ticker_failed",
+                details={"message": str(exc)[:240]},
+            )
             logger.debug(
                 "light_scan_ticker_failed exchange=%s pair=%s error=%s",
                 provider.exchange.value,
@@ -343,6 +405,19 @@ class Scanner:
                 ticker.quote_volume_24h,
                 self._preliminary_movement_pct(ticker),
             )
+            self._record_pipeline_event(
+                exchange=provider.exchange,
+                pair=pair,
+                stage="light_scan",
+                status="discarded",
+                reason=reason,
+                details={
+                    "preliminary_score": preliminary_score,
+                    "quote_volume_24h": round(ticker.quote_volume_24h, 2),
+                    "movement_pct": round(self._preliminary_movement_pct(ticker), 4),
+                    "last_price": ticker.last_price,
+                },
+            )
             return None
 
         self._record_light_scan_success(
@@ -352,6 +427,19 @@ class Scanner:
             preliminary_score=preliminary_score,
         )
         self._increment_scan_counter("light_candidates")
+        self._record_pipeline_event(
+            exchange=provider.exchange,
+            pair=pair,
+            stage="light_scan",
+            status="candidate",
+            reason="candidate",
+            details={
+                "preliminary_score": preliminary_score,
+                "quote_volume_24h": round(ticker.quote_volume_24h, 2),
+                "movement_pct": round(self._preliminary_movement_pct(ticker), 4),
+                "last_price": ticker.last_price,
+            },
+        )
         return LightScanCandidate(
             provider=provider,
             pair=pair,
@@ -413,12 +501,28 @@ class Scanner:
                 self._record_provider_pair_failure(provider.exchange, pair, "order_book_failed", now)
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "order_book_failed")
+                self._record_pipeline_event(
+                    exchange=provider.exchange,
+                    pair=pair,
+                    stage="deep_scan",
+                    status="error",
+                    reason="order_book_failed",
+                    details={"message": str(order_book)[:240]},
+                )
                 logger.debug(f"[{provider.exchange}] OrderBook failed for {pair}: {order_book}")
                 return None
             if isinstance(klines, Exception):
                 self._record_provider_pair_failure(provider.exchange, pair, "klines_failed", now)
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "klines_failed")
+                self._record_pipeline_event(
+                    exchange=provider.exchange,
+                    pair=pair,
+                    stage="deep_scan",
+                    status="error",
+                    reason="klines_failed",
+                    details={"message": str(klines)[:240]},
+                )
                 logger.debug(f"[{provider.exchange}] Klines failed for {pair}: {klines}")
                 return None
 
@@ -430,24 +534,56 @@ class Scanner:
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "volatility_filter")
                 self._record_deep_scan_success(provider.exchange, pair, now, None)
+                self._record_pipeline_event(
+                    exchange=provider.exchange,
+                    pair=pair,
+                    stage="deep_scan",
+                    status="discarded",
+                    reason="volatility_filter",
+                    details={"volatility_pct": round(calculate_volatility(klines), 4)},
+                )
                 return None
 
             if not passes_volume_filter(ticker, thresholds.min_volume_brl, thresholds.min_volume_brl_small):
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "volume_filter")
                 self._record_deep_scan_success(provider.exchange, pair, now, None)
+                self._record_pipeline_event(
+                    exchange=provider.exchange,
+                    pair=pair,
+                    stage="deep_scan",
+                    status="discarded",
+                    reason="volume_filter",
+                    details={"quote_volume_24h": round(ticker.quote_volume_24h, 2)},
+                )
                 return None
 
             if not passes_liquidity_filter(order_book, thresholds.min_liquidity_units):
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "liquidity_filter")
                 self._record_deep_scan_success(provider.exchange, pair, now, None)
+                self._record_pipeline_event(
+                    exchange=provider.exchange,
+                    pair=pair,
+                    stage="deep_scan",
+                    status="discarded",
+                    reason="liquidity_filter",
+                    details={"liquidity_units": round(calculate_liquidity(order_book), 2)},
+                )
                 return None
 
             if not passes_spread_filter(order_book, thresholds.max_spread_pct):
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "spread_filter")
                 self._record_deep_scan_success(provider.exchange, pair, now, None)
+                self._record_pipeline_event(
+                    exchange=provider.exchange,
+                    pair=pair,
+                    stage="deep_scan",
+                    status="discarded",
+                    reason="spread_filter",
+                    details={"spread_pct": round(calculate_spread(order_book), 4)},
+                )
                 return None
 
             # Classify movement
@@ -662,12 +798,41 @@ class Scanner:
             )
             self._record_deep_scan_success(provider.exchange, pair, now, opportunity)
             self._increment_scan_counter("deep_completed")
+            self._record_pipeline_event(
+                exchange=provider.exchange,
+                pair=pair,
+                stage="deep_scan",
+                status="opportunity",
+                reason=opportunity.opportunity_type or "observe",
+                details={
+                    "score": opportunity.score,
+                    "technical_score": opportunity.technical_score,
+                    "executability_score": opportunity.executability_score,
+                    "opportunity_type": opportunity.opportunity_type,
+                    "movement_phase": (
+                        opportunity.movement_phase.value
+                        if hasattr(opportunity.movement_phase, "value")
+                        else opportunity.movement_phase
+                    ),
+                    "alert_moment_type": opportunity.alert_moment_type,
+                    "operable_signal": opportunity.operable_signal,
+                    "interesting_signal": opportunity.interesting_signal,
+                },
+            )
             return opportunity
 
         except Exception as e:
             self._record_provider_pair_failure(provider.exchange, pair, "scan_pair_exception", now)
             self._increment_scan_counter("deep_discards")
             self._increment_scan_counter("deep_discard_reasons", "scan_pair_exception")
+            self._record_pipeline_event(
+                exchange=provider.exchange,
+                pair=pair,
+                stage="deep_scan",
+                status="error",
+                reason="scan_pair_exception",
+                details={"message": str(e)[:240]},
+            )
             logger.error(f"[{provider.exchange}] Error scanning {pair}: {e}")
             return None
 
@@ -684,6 +849,14 @@ class Scanner:
                 if not should_run:
                     self._increment_scan_counter("skipped_pairs")
                     self._increment_scan_counter("skip_reasons", skip_reason or "unknown")
+                    self._record_pipeline_event(
+                        exchange=exchange,
+                        pair=pair,
+                        stage="light_scan",
+                        status="blocked",
+                        reason=skip_reason or "unknown",
+                        details={"temperature": self._get_pair_state(exchange, pair).temperature},
+                    )
                     continue
                 light_scan_tasks.append(self._scan_light_candidate(provider, pair))
 
@@ -701,6 +874,26 @@ class Scanner:
                 :DEFAULT_STAGE2_CANDIDATES_PER_EXCHANGE
             ]
             deep_candidates.extend(selected)
+            selected_pairs = {candidate.pair for candidate in selected}
+            for candidate in candidates:
+                if candidate.pair in selected_pairs:
+                    self._record_pipeline_event(
+                        exchange=exchange,
+                        pair=candidate.pair,
+                        stage="promotion",
+                        status="promoted",
+                        reason="selected_for_deep_scan",
+                        details={"preliminary_score": candidate.preliminary_score},
+                    )
+                else:
+                    self._record_pipeline_event(
+                        exchange=exchange,
+                        pair=candidate.pair,
+                        stage="promotion",
+                        status="blocked",
+                        reason="candidate_limit_lower_priority",
+                        details={"preliminary_score": candidate.preliminary_score},
+                    )
             logger.info(
                 "light_scan_selected exchange=%s candidates=%s selected=%s",
                 exchange.value,
@@ -726,6 +919,21 @@ class Scanner:
         self._opportunities = self._rank_cycle_opportunities(
             self._enrich_cross_exchange_context(new_opportunities)
         )
+        ranked_ids = {opportunity.id: index + 1 for index, opportunity in enumerate(self._opportunities)}
+        for opportunity in self._opportunities:
+            self._record_pipeline_event(
+                exchange=opportunity.exchange,
+                pair=opportunity.pair,
+                stage="ranking",
+                status="ranked",
+                reason="entered_cycle_ranking",
+                details={
+                    "rank": ranked_ids[opportunity.id],
+                    "score": opportunity.score,
+                    "executability_score": opportunity.executability_score,
+                    "opportunity_type": opportunity.opportunity_type,
+                },
+            )
         self._scan_diagnostics["opportunities"] = len(new_opportunities)
         self._refresh_temperature_diagnostics()
         logger.info(

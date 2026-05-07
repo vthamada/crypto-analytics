@@ -62,3 +62,26 @@ def test_novadax_get_available_pairs_propagates_request_failures(monkeypatch):
 
     with pytest.raises(RuntimeError, match="connect failed"):
         asyncio.run(provider.get_available_pairs())
+
+
+def test_novadax_get_ticker_derives_change_pct_from_open24h_when_change24h_missing(monkeypatch):
+    provider = NovaDaxProvider()
+
+    async def fake_request(method: str, path: str, **kwargs):
+        return {
+            "data": {
+                "lastPrice": "110.00",
+                "high24h": "120.00",
+                "low24h": "90.00",
+                "open24h": "100.00",
+                "baseVolume24h": "42.00",
+                "quoteVolume24h": "4200.00",
+            }
+        }
+
+    monkeypatch.setattr(provider, "_request", fake_request)
+
+    ticker = asyncio.run(provider.get_ticker("SOL_BRL"))
+
+    assert ticker.last_price == 110.0
+    assert ticker.change_pct_24h == 10.0

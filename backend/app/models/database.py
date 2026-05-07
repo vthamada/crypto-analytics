@@ -240,6 +240,50 @@ class ScannerRuntimeStateRecord(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
+class ScannerCycleAuditRecord(Base):
+    __tablename__ = "scanner_cycle_audits"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    cycle_id = Column(String, nullable=False, unique=True, index=True)
+    status = Column(String, nullable=False, default="completed", index=True)
+    started_at = Column(DateTime, nullable=False, index=True)
+    completed_at = Column(DateTime, nullable=True, index=True)
+    duration_ms = Column(Float, nullable=True)
+    total_pairs = Column(Integer, nullable=False, default=0)
+    brl_pairs = Column(Integer, nullable=False, default=0)
+    light_candidates = Column(Integer, nullable=False, default=0)
+    deep_candidates = Column(Integer, nullable=False, default=0)
+    deep_completed = Column(Integer, nullable=False, default=0)
+    signals_created = Column(Integer, nullable=False, default=0)
+    shortlist_count = Column(Integer, nullable=False, default=0)
+    alerts_created = Column(Integer, nullable=False, default=0)
+    alerts_sent = Column(Integer, nullable=False, default=0)
+    provider_errors = Column(Integer, nullable=False, default=0)
+    discard_reasons = Column(Text, nullable=True)
+    block_reasons = Column(Text, nullable=True)
+    diagnostics = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+
+
+class SignalPipelineEventRecord(Base):
+    __tablename__ = "signal_pipeline_events"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    cycle_id = Column(String, nullable=False, index=True)
+    exchange = Column(String, nullable=True, index=True)
+    pair = Column(String, nullable=True, index=True)
+    stage = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False, index=True)
+    reason = Column(String, nullable=True, index=True)
+    event_type = Column(String, nullable=False, default="scanner")
+    workspace_id = Column(String, nullable=True, index=True)
+    technical_signal_id = Column(String, nullable=True, index=True)
+    opportunity_id = Column(String, nullable=True, index=True)
+    details = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+
+
 class OpportunitySnapshotRecord(Base):
     __tablename__ = "opportunity_snapshots"
 
@@ -728,6 +772,8 @@ async def ensure_schema_compatibility() -> None:
             "workspace_configs",
             "invites",
             "scanner_runtime_state",
+            "scanner_cycle_audits",
+            "signal_pipeline_events",
             "opportunity_snapshots",
             "technical_signals",
             "workspace_signal_projections",
