@@ -11,18 +11,27 @@ Convencao deste repositorio:
 ## [Unreleased]
 
 ### Added
+- Estado derivado do pipeline em oportunidades (`pipeline_status`, `visibility_reason`, `operationally_visible`) para separar oportunidade operacional de registro tecnico.
+- Servico central de visibilidade operacional para bloquear `avoid`, margem negativa, movimento fraco, baixa liquidez e sinal atrasado fora das superficies principais.
 - Auditoria persistente do funil de sinais com `scanner_cycle_audits` e `signal_pipeline_events`, incluindo migration `0012_signal_pipeline_audit`.
 - Endpoint `GET /api/diagnostics/missed-signal` para investigar por exchange/par/janela onde um sinal foi candidato, descartado, bloqueado, ranqueado ou alertado.
 - Eventos compactos do scanner para scan leve, promocao, analise profunda, ranking e entrega/bloqueio de alertas Telegram.
 - Tela de configuracoes passou a ter busca de diagnostico de sinal perdido, com resumo por ciclo e linha do tempo do funil.
 - Diagnostico de sinal perdido agora inclui causa final, motivo raiz, status do catalogo e contexto do workspace ativo.
 - Eventos por workspace registram se cada sinal ficou visivel ou foi bloqueado por exchange/par/threshold/perfil operacional.
+- Historico passou a separar visao operacional, auditoria tecnica e visao completa por `visibility=operational|technical|all`.
+- Scanner passou a registrar near misses compactos (`event_type=near_miss`) para descartes proximos de threshold e candidatos bloqueados por limite de promocao.
+- Endpoint `GET /api/diagnostics/near-misses` lista near misses por periodo, exchange e par sem expor o dataset bruto do scanner.
 - Bloqueios de Telegram passaram a registrar motivos especificos, incluindo escopo de exchange/par, operabilidade, executabilidade, limite de score, Telegram desativado/nao configurado, cooldown e menor prioridade no top 5.
 - Configuracao de limite diario de alertas Telegram por workspace, com bloqueio auditado como `daily_alert_limit_reached`.
 - Diagnostico de sinal perdido passou a aceitar periodo customizado na UI e a explicar pares nao monitoraveis por catalogo, provider ou par nao BRL.
 - Migration `0013_supabase_rls_hardening` revoga execucao publica da funcao `public.rls_auto_enable()` quando existente no Supabase.
 
 ### Fixed
+- Dashboard, shortlist, WebSocket e `/api/opportunities` passaram a ocultar ruido tecnico por padrao; registros tecnicos podem ser incluidos explicitamente com `include_technical=true`.
+- `/api/history` e `/api/history/summary` retornam historico operacional por padrao, mantendo descartes e bloqueios acessiveis apenas na visao tecnica/auditoria.
+- Telegram agora possui uma defesa final para nao enviar sinais nao operacionais, mesmo quando configuracoes de `high_score` ou arbitragem estiverem ativas.
+- Badges do frontend evitam mostrar combinacoes contraditorias como `Operavel` junto com `Evitar` ou margem negativa.
 - Provider NovaDAX passou a calcular `change_pct_24h` a partir de `open24h` quando a API nao retorna `change24h`, evitando descarte total dos pares por erro de ticker no scan leve.
 - Watchlist de pares deixou de limitar dashboard, historico e universo de scan; o scanner agora avalia o catalogo BRL descoberto e usa pares selecionados apenas como destaque/diagnostico.
 - Configuracao `pair_universe_mode` permite escolher entre monitorar todos os pares BRL das exchanges habilitadas ou restringir scan/dashboard/historico apenas a watchlist.

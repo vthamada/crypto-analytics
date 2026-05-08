@@ -213,6 +213,8 @@ class Scanner:
             "deep_discards": 0,
             "deep_discard_reasons": {},
             "opportunities": 0,
+            "near_misses": 0,
+            "near_miss_reasons": {},
             "pipeline_events_dropped": 0,
             "temperatures": {"hot": 0, "warm": 0, "cold": 0},
         }
@@ -244,6 +246,7 @@ class Scanner:
         status: str,
         reason: str | None = None,
         details: dict | None = None,
+        event_type: str = "scanner",
     ) -> None:
         if len(self._pipeline_events) >= MAX_PIPELINE_EVENTS_PER_CYCLE:
             self._scan_diagnostics["pipeline_events_dropped"] = self._scan_diagnostics.get("pipeline_events_dropped", 0) + 1
@@ -255,11 +258,113 @@ class Scanner:
                 "stage": stage,
                 "status": status,
                 "reason": self._normalize_reason(reason),
-                "event_type": "scanner",
+                "event_type": event_type,
                 "details": details or {},
                 "created_at": datetime.now(timezone.utc),
             }
         )
+
+    def _volume_threshold_for_pair(self, pair: str) -> float:
+        base = pair.split("_")[0].upper()
+        return (
+            self.config.thresholds.min_volume_brl
+            if base in {"BTC", "ETH"}
+            else self.config.thresholds.min_volume_brl_small
+        )
+
+    @staticmethod
+    def _distance_pct_to_threshold(value: float, threshold: float, *, direction: str = "min") -> float:
+        if threshold <= 0:
+            return 0.0
+        if direction == "max":
+            return max(0.0, round((value - threshold) / threshold * 100, 2))
+        return max(0.0, round((threshold - value) / threshold * 100, 2))
+
+    def _record_near_miss_event(
+        self,
+        *,
+        exchange: Exchange,
+        pair: str,
+        stage: str,
+        reason: str,
+        failed_metric: str,
+        value: float,
+        threshold: float,
+        preliminary_score: float | None = None,
+        direction: str = "min",
+        details: dict | None = None,
+    ) -> None:
+        self._increment_scan_counter("near_misses")
+        self._increment_scan_counter("near_miss_reasons", reason)
+        payload = {
+            "failed_metric": failed_metric,
+            "value": round(value, 6),
+            "threshold": round(threshold, 6),
+            "distance_to_threshold_pct": self._distance_pct_to_threshold(value, threshold, direction=direction),
+        }
+        if preliminary_score is not None:
+            payload["preliminary_score"] = preliminary_score
+        if details:
+            payload.update(details)
+        self._record_pipeline_event(
+            exchange=exchange,
+            pair=pair,
+            stage=stage,
+            status="near_miss",
+            reason=reason,
+            event_type="near_miss",
+            details=payload,
+        )
+
+    def _maybe_record_light_near_miss(
+        self,
+        *,
+        exchange: Exchange,
+        pair: str,
+        ticker: Ticker,
+        reason: str,
+        preliminary_score: float,
+    ) -> None:
+        movement_pct = self._preliminary_movement_pct(ticker)
+        min_movement_pct = self._light_triage_min_movement_pct()
+        volume_threshold = self._volume_threshold_for_pair(pair)
+
+        if reason == "volume_below_threshold" and ticker.quote_volume_24h >= volume_threshold * 0.75:
+            self._record_near_miss_event(
+                exchange=exchange,
+                pair=pair,
+                stage="light_scan",
+                reason=reason,
+                failed_metric="quote_volume_24h",
+                value=ticker.quote_volume_24h,
+                threshold=volume_threshold,
+                preliminary_score=preliminary_score,
+                details={
+                    "movement_pct": round(movement_pct, 4),
+                    "last_price": ticker.last_price,
+                },
+            )
+            return
+
+        if (
+            reason == "movement_below_light_threshold"
+            and movement_pct >= min_movement_pct * 0.6
+            and ticker.quote_volume_24h >= volume_threshold * 0.75
+        ):
+            self._record_near_miss_event(
+                exchange=exchange,
+                pair=pair,
+                stage="light_scan",
+                reason=reason,
+                failed_metric="movement_pct",
+                value=movement_pct,
+                threshold=min_movement_pct,
+                preliminary_score=preliminary_score,
+                details={
+                    "quote_volume_24h": round(ticker.quote_volume_24h, 2),
+                    "last_price": ticker.last_price,
+                },
+            )
 
     def _increment_scan_counter(self, section: str, key: str | None = None, amount: int = 1) -> None:
         if not self._scan_diagnostics:
@@ -417,6 +522,13 @@ class Scanner:
                     "movement_pct": round(self._preliminary_movement_pct(ticker), 4),
                     "last_price": ticker.last_price,
                 },
+            )
+            self._maybe_record_light_near_miss(
+                exchange=provider.exchange,
+                pair=pair,
+                ticker=ticker,
+                reason=reason,
+                preliminary_score=preliminary_score,
             )
             return None
 
@@ -578,6 +690,7 @@ class Scanner:
             trading_profile = resolve_trading_profile(self.config)
 
             # Apply filters
+            volatility_pct = calculate_volatility(klines)
             if not passes_volatility_filter(klines, thresholds.min_volatility_pct):
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "volatility_filter")
@@ -588,11 +701,23 @@ class Scanner:
                     stage="deep_scan",
                     status="discarded",
                     reason="volatility_filter",
-                    details={"volatility_pct": round(calculate_volatility(klines), 4)},
+                    details={"volatility_pct": round(volatility_pct, 4)},
                 )
+                if volatility_pct >= thresholds.min_volatility_pct * 0.75:
+                    self._record_near_miss_event(
+                        exchange=provider.exchange,
+                        pair=pair,
+                        stage="deep_scan",
+                        reason="volatility_filter",
+                        failed_metric="volatility_pct",
+                        value=volatility_pct,
+                        threshold=thresholds.min_volatility_pct,
+                        details={"quote_volume_24h": round(ticker.quote_volume_24h, 2)},
+                    )
                 return None
 
             if not passes_volume_filter(ticker, thresholds.min_volume_brl, thresholds.min_volume_brl_small):
+                volume_threshold = self._volume_threshold_for_pair(pair)
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "volume_filter")
                 self._record_deep_scan_success(provider.exchange, pair, now, None)
@@ -604,8 +729,20 @@ class Scanner:
                     reason="volume_filter",
                     details={"quote_volume_24h": round(ticker.quote_volume_24h, 2)},
                 )
+                if ticker.quote_volume_24h >= volume_threshold * 0.75:
+                    self._record_near_miss_event(
+                        exchange=provider.exchange,
+                        pair=pair,
+                        stage="deep_scan",
+                        reason="volume_filter",
+                        failed_metric="quote_volume_24h",
+                        value=ticker.quote_volume_24h,
+                        threshold=volume_threshold,
+                        details={"volatility_pct": round(volatility_pct, 4)},
+                    )
                 return None
 
+            liquidity_units = calculate_liquidity(order_book)
             if not passes_liquidity_filter(order_book, thresholds.min_liquidity_units):
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "liquidity_filter")
@@ -616,10 +753,25 @@ class Scanner:
                     stage="deep_scan",
                     status="discarded",
                     reason="liquidity_filter",
-                    details={"liquidity_units": round(calculate_liquidity(order_book), 2)},
+                    details={"liquidity_units": round(liquidity_units, 2)},
                 )
+                if liquidity_units >= thresholds.min_liquidity_units * 0.75:
+                    self._record_near_miss_event(
+                        exchange=provider.exchange,
+                        pair=pair,
+                        stage="deep_scan",
+                        reason="liquidity_filter",
+                        failed_metric="liquidity_units",
+                        value=liquidity_units,
+                        threshold=thresholds.min_liquidity_units,
+                        details={
+                            "volatility_pct": round(volatility_pct, 4),
+                            "quote_volume_24h": round(ticker.quote_volume_24h, 2),
+                        },
+                    )
                 return None
 
+            spread_pct_for_filter = calculate_spread(order_book)
             if not passes_spread_filter(order_book, thresholds.max_spread_pct):
                 self._increment_scan_counter("deep_discards")
                 self._increment_scan_counter("deep_discard_reasons", "spread_filter")
@@ -630,8 +782,24 @@ class Scanner:
                     stage="deep_scan",
                     status="discarded",
                     reason="spread_filter",
-                    details={"spread_pct": round(calculate_spread(order_book), 4)},
+                    details={"spread_pct": round(spread_pct_for_filter, 4)},
                 )
+                if spread_pct_for_filter <= thresholds.max_spread_pct * 1.25:
+                    self._record_near_miss_event(
+                        exchange=provider.exchange,
+                        pair=pair,
+                        stage="deep_scan",
+                        reason="spread_filter",
+                        failed_metric="spread_pct",
+                        value=spread_pct_for_filter,
+                        threshold=thresholds.max_spread_pct,
+                        direction="max",
+                        details={
+                            "volatility_pct": round(volatility_pct, 4),
+                            "quote_volume_24h": round(ticker.quote_volume_24h, 2),
+                            "liquidity_units": round(liquidity_units, 2),
+                        },
+                    )
                 return None
 
             # Classify movement
@@ -919,12 +1087,14 @@ class Scanner:
 
         deep_candidates: list[LightScanCandidate] = []
         for exchange, candidates in candidates_by_exchange.items():
-            selected = sorted(candidates, key=lambda candidate: candidate.preliminary_score, reverse=True)[
+            ranked_candidates = sorted(candidates, key=lambda candidate: candidate.preliminary_score, reverse=True)
+            selected = ranked_candidates[
                 :DEFAULT_STAGE2_CANDIDATES_PER_EXCHANGE
             ]
             deep_candidates.extend(selected)
             selected_pairs = {candidate.pair for candidate in selected}
-            for candidate in candidates:
+            selected_min_score = min((candidate.preliminary_score for candidate in selected), default=0.0)
+            for rank, candidate in enumerate(ranked_candidates, start=1):
                 if candidate.pair in selected_pairs:
                     self._record_pipeline_event(
                         exchange=exchange,
@@ -932,17 +1102,42 @@ class Scanner:
                         stage="promotion",
                         status="promoted",
                         reason="selected_for_deep_scan",
-                        details={"preliminary_score": candidate.preliminary_score},
+                        details={"preliminary_score": candidate.preliminary_score, "candidate_rank": rank},
                     )
                 else:
+                    distance_to_selected_score = round(max(selected_min_score - candidate.preliminary_score, 0.0), 2)
                     self._record_pipeline_event(
                         exchange=exchange,
                         pair=candidate.pair,
                         stage="promotion",
                         status="blocked",
                         reason="candidate_limit_lower_priority",
-                        details={"preliminary_score": candidate.preliminary_score},
+                        details={
+                            "preliminary_score": candidate.preliminary_score,
+                            "candidate_rank": rank,
+                            "selected_limit": DEFAULT_STAGE2_CANDIDATES_PER_EXCHANGE,
+                            "selected_min_score": selected_min_score,
+                            "distance_to_selected_score": distance_to_selected_score,
+                        },
                     )
+                    if candidate.preliminary_score >= max(45.0, selected_min_score * 0.85):
+                        self._record_near_miss_event(
+                            exchange=exchange,
+                            pair=candidate.pair,
+                            stage="promotion",
+                            reason="candidate_limit_lower_priority",
+                            failed_metric="preliminary_score",
+                            value=candidate.preliminary_score,
+                            threshold=selected_min_score,
+                            preliminary_score=candidate.preliminary_score,
+                            details={
+                                "candidate_rank": rank,
+                                "selected_limit": DEFAULT_STAGE2_CANDIDATES_PER_EXCHANGE,
+                                "selected_min_score": selected_min_score,
+                                "distance_to_selected_score": distance_to_selected_score,
+                                "competing_candidates": len(ranked_candidates),
+                            },
+                        )
             logger.info(
                 "light_scan_selected exchange=%s candidates=%s selected=%s",
                 exchange.value,

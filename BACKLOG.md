@@ -10,7 +10,7 @@ Legenda: `[x]` concluido, `[~]` parcialmente feito, `[ ]` pendente.
 
 ## Direcao Do Produto
 
-O sistema deve ser um assistente operacional de oportunidades em cripto BRL, focado inicialmente em Mercado Bitcoin e NovaDAX, que monitora pares relevantes, identifica zonas de compra e venda, detecta lateralizacao, rompimento e continuacao, avalia liquidez, margem e risco de atraso, entrega shortlist qualificada, aprende com outcomes/feedbacks e explica por que cada oportunidade foi alertada, descartada ou perdida.
+O sistema deve ser um assistente operacional de oportunidades em cripto BRL, focado inicialmente em Mercado Bitcoin e NovaDAX, que monitora pares relevantes, separa observacoes fracas de oportunidades reais, identifica zonas de compra e venda, detecta lateralizacao, rompimento e continuacao, avalia liquidez, margem e risco de atraso, entrega shortlist qualificada, registra descartes/bloqueios de forma controlada, aprende com outcomes/feedbacks e explica por que cada oportunidade foi alertada, descartada ou perdida.
 
 Decisoes ja tomadas:
 
@@ -22,6 +22,8 @@ Decisoes ja tomadas:
 | Watchlist | Prioridade/filtro pessoal, nao limite do universo |
 | Trading | Monitoramento primeiro; paper trading depois; execucao real apenas futuramente |
 | Multiusuario | Organization como unidade de cobranca; Workspace como unidade operacional |
+| UX principal | Usuario ve oportunidades; auditoria explica decisoes tecnicas |
+| Ruido tecnico | Movimentos fracos, `avoid`, margem negativa e baixa liquidez nao aparecem por padrao |
 
 ---
 
@@ -48,6 +50,43 @@ Decisoes ja tomadas:
 ---
 
 ## P0 - Confiabilidade Operacional Imediata
+
+### Separacao Entre Oportunidade E Registro Tecnico
+
+- [x] **Estado explicito do pipeline**
+  Adicionar campo ou derivacao consistente para `observed_pair`, `discarded_observation`, `candidate`, `evaluated_signal`, `operational_opportunity`, `published_opportunity`, `alerted_opportunity`, `blocked_signal`, `technical_audit_event` e `signal_outcome`.
+  Criterio de aceite: cada item exibido ou auditado tem estado claro e nao depende apenas de `opportunity_type`.
+
+- [x] **Portao de oportunidade operacional**
+  Criar regra centralizada no backend para decidir se um sinal pode virar oportunidade visivel.
+  Criterio de aceite: `avoid`, margem negativa, baixa liquidez, variacao irrelevante e movimento fraco ficam fora da tela principal por padrao.
+
+- [~] **Remover combinacoes contraditorias da UI**
+  Ajustar cards, tabela e badges para impedir combinacoes como `Operavel` + `Evitar`, `Trade` + margem negativa ou `Oportunidade` + movimento fraco.
+  Criterio de aceite: quando houver motivo negativo forte, o item aparece apenas como bloqueado/auditoria, nao como oportunidade.
+  Status: badges negativas fortes agora prevalecem no helper de UI; ainda falta revisar visualmente todas as telas com browser.
+
+- [x] **API de oportunidades com visibilidade operacional por padrao**
+  Fazer endpoints consumidos pelo dashboard retornarem apenas oportunidades operacionais por padrao, com filtro explicito para incluir tecnicos quando necessario.
+  Criterio de aceite: frontend principal nao precisa filtrar lixo tecnico depois de receber payload grande.
+
+- [x] **Telegram protegido contra ruido tecnico**
+  Garantir que Telegram nunca envie movimento fraco, `avoid`, margem negativa, baixa liquidez ou descarte tecnico.
+  Criterio de aceite: todo alerta enviado e `trade` ou `hold` qualificado, ou observavel forte explicitamente permitido.
+
+- [x] **Historico operacional separado da auditoria tecnica**
+  Separar historico em visao operacional e visao tecnica/auditoria.
+  Criterio de aceite: oportunidades publicadas, alertas e outcomes nao ficam misturados com descartes, bloqueios e falhas de provider.
+  Status: `/api/history` e `/api/history/summary` aceitam `visibility=operational|technical|all`; o frontend de historico permite alternar entre historico operacional, auditoria tecnica e todos os registros.
+
+- [x] **Near misses compactos**
+  Registrar sinais quase bons com motivo, distancia para threshold e concorrentes melhores no ciclo, sem exibir na tela principal.
+  Criterio de aceite: falso negativo pode ser investigado sem persistir todos os dados brutos do mercado.
+  Status: o scanner registra `event_type=near_miss` em `signal_pipeline_events` para descartes proximos de threshold e candidatos bloqueados por limite; `GET /api/diagnostics/near-misses` retorna esses eventos de forma compacta.
+
+- [ ] **Metricas de qualidade do funil**
+  Medir pares vistos, candidatos, oportunidades publicadas, alertas enviados, alertas uteis, alertas atrasados, bloqueios corretos, falsos positivos e falsos negativos reportados.
+  Criterio de aceite: produto consegue acompanhar reducao de ruido e qualidade real dos sinais.
 
 ### Auditoria e Diagnostico
 
@@ -208,6 +247,14 @@ Decisoes ja tomadas:
 
 ## P1 - Produto E UX Operacional
 
+- [ ] **Dashboard como lista de oportunidades operacionais**
+  Redesenhar a tela principal para responder "o que merece atencao agora?", nao "tudo que o scanner viu".
+  Criterio de aceite: a primeira tela mostra shortlist limpa, motivo resumido, score operacional, liquidez, margem, fase e risco.
+
+- [ ] **Filtros de visibilidade operacional**
+  Adicionar filtros: Oportunidades, Candidatos, Observaveis, Alertados, Descartados, Bloqueados e Auditoria.
+  Criterio de aceite: padrao seleciona apenas oportunidades, alertados e observaveis fortes.
+
 - [ ] **Painel de mercado BRL**
   Mostrar universo elegivel por exchange, principais pares, pares quentes/mornos/frios, volume agregado e estado do mercado.
   Criterio de aceite: usuario entende o mercado monitorado alem da shortlist.
@@ -227,6 +274,10 @@ Decisoes ja tomadas:
 - [ ] **Historico operacional melhorado**
   Filtros por fase, faixa operacional, momento do alerta, outcome label, feedback e motivo de bloqueio.
   Criterio de aceite: historico vira ferramenta de analise operacional, nao apenas lista de sinais.
+
+- [ ] **Tela de calibragem de near misses**
+  Criar visualizacao tecnica para sinais quase bons e sua distancia dos thresholds.
+  Criterio de aceite: near misses ajudam a ajustar filtros sem poluir dashboard principal.
 
 ---
 
@@ -314,6 +365,10 @@ Decisoes ja tomadas:
 
 Nao implementar antes de validar o produto de monitoramento com usuarios reais.
 
+- [ ] **Camada de risco futura**
+  Planejar limites maximos por operacao, perda diaria, exposicao diaria, ativo, exchange, kill switch e pausas automaticas.
+  Criterio de aceite: paper trading e execucao futura so usam sinais apos passar por regras de risco versionadas.
+
 - [ ] **Governanca de historico para trading**
   Separar claramente observacao, sinal, projecao, outcome, decisao e execucao.
   Criterio de aceite: nenhuma decisao de trading usa `opportunities` diretamente.
@@ -354,6 +409,7 @@ Nao implementar antes de validar o produto de monitoramento com usuarios reais.
 
 ## Itens Que Nao Devem Ser Priorizados Agora
 
+- [ ] Exibir movimentos fracos, `avoid`, baixa liquidez ou margem negativa como oportunidade principal.
 - [ ] `raw_market_events` detalhado para todos os pares/ciclos.
 - [ ] Machine learning antes de outcomes confiaveis.
 - [ ] Trading automatico antes de paper trading e gestao de risco.
@@ -364,16 +420,20 @@ Nao implementar antes de validar o produto de monitoramento com usuarios reais.
 
 ## Ordem Recomendada De Execucao
 
-1. Periodo customizado e enriquecimento do diagnostico de sinal perdido.
-2. Explicabilidade por workspace e motivos completos de bloqueio de alerta.
-3. Persistencia de cooldown/temperatura por provider/par.
-4. Tela dedicada de auditoria operacional com funil por ciclo.
-5. Refinamento de lateralizacao/rompimento e scores de fase/faixa.
-6. Analytics de outcomes/feedback/falsos positivos.
-7. Fluxo de falso negativo marcado pelo usuario.
-8. Governanca de retencao por camada e benchmark de egress.
-9. Feature gates por plano e Stripe.
-10. Paper trading somente depois que outcomes e auditoria estiverem maduros.
+1. Criar estado explicito do pipeline e portao central de oportunidade operacional.
+2. Fazer dashboard/API/Telegram ocultarem ruido tecnico por padrao.
+3. Separar historico operacional de auditoria tecnica.
+4. Implementar near misses compactos e metricas de qualidade do funil.
+5. Periodo customizado e enriquecimento do diagnostico de sinal perdido.
+6. Explicabilidade por workspace e motivos completos de bloqueio de alerta.
+7. Persistencia de cooldown/temperatura por provider/par.
+8. Tela dedicada de auditoria operacional com funil por ciclo.
+9. Refinamento de lateralizacao/rompimento e scores de fase/faixa.
+10. Analytics de outcomes/feedback/falsos positivos.
+11. Fluxo de falso negativo marcado pelo usuario.
+12. Governanca de retencao por camada e benchmark de egress.
+13. Feature gates por plano e Stripe.
+14. Paper trading somente depois que outcomes e auditoria estiverem maduros.
 
 ---
 

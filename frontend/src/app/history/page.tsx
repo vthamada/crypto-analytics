@@ -34,7 +34,7 @@ import { SessionRequiredState } from "@/components/session-required-state";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getHistorySummary, getOperationalAnalytics } from "@/lib/api";
 import { useHasAuthenticatedWorkspace } from "@/hooks/use-has-authenticated-workspace";
-import type { Analytics, HistorySummaryRecord } from "@/lib/types";
+import type { Analytics, HistorySummaryRecord, HistoryVisibility } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const CHART_COLORS = [
@@ -119,12 +119,18 @@ function HistoryContent() {
   const [analyticsLoaded, setAnalyticsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hours, setHours] = useState<string>("24");
+  const [visibility, setVisibility] = useState<HistoryVisibility>("operational");
   const [page, setPage] = useState(0);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const hist = await getHistorySummary({ hours: parseInt(hours, 10), limit: 100, offset: page * 100 });
+      const hist = await getHistorySummary({
+        hours: parseInt(hours, 10),
+        limit: 100,
+        offset: page * 100,
+        visibility,
+      });
       setRecords(hist);
       setError(null);
     } catch (fetchError) {
@@ -132,7 +138,7 @@ function HistoryContent() {
     } finally {
       setLoading(false);
     }
-  }, [hours, page]);
+  }, [hours, page, visibility]);
 
   const fetchAnalytics = useCallback(async () => {
     setAnalyticsLoading(true);
@@ -146,7 +152,7 @@ function HistoryContent() {
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [hours]);
+  }, [hours, visibility]);
 
   useEffect(() => {
     fetchData();
@@ -179,15 +185,32 @@ function HistoryContent() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 pt-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Histórico & Analytics</h1>
           <p className="text-sm text-muted-foreground">
-            {records.length} sinais nesta pagina
+            {records.length} registros nesta pagina
           </p>
         </div>
-        <Select value={hours} onValueChange={(value) => setHours(value ?? "24")}>
-          <SelectTrigger className="h-9 w-40">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Select
+            value={visibility}
+            onValueChange={(value) => {
+              setVisibility((value ?? "operational") as HistoryVisibility);
+              setPage(0);
+            }}
+          >
+            <SelectTrigger className="h-9 w-full sm:w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="operational">Historico operacional</SelectItem>
+              <SelectItem value="technical">Auditoria tecnica</SelectItem>
+              <SelectItem value="all">Todos os registros</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={hours} onValueChange={(value) => setHours(value ?? "24")}>
+          <SelectTrigger className="h-9 w-full sm:w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -197,8 +220,19 @@ function HistoryContent() {
             <SelectItem value="72">Últimos 3 dias</SelectItem>
             <SelectItem value="168">Última semana</SelectItem>
           </SelectContent>
-        </Select>
+          </Select>
+        </div>
       </div>
+
+      <Card className="rounded-2xl border-dashed">
+        <CardContent className="p-4 text-sm text-muted-foreground">
+          {visibility === "operational"
+            ? "Mostrando apenas oportunidades operacionais publicaveis. Descartes, bloqueios e sinais fracos ficam fora desta visao."
+            : visibility === "technical"
+              ? "Mostrando registros tecnicos bloqueados ou descartados para auditoria e calibragem."
+              : "Mostrando oportunidades e registros tecnicos juntos. Use com cuidado para nao confundir ruido com oportunidade."}
+        </CardContent>
+      </Card>
 
       {error ? <InlineErrorState message={error} onRetry={() => void fetchData()} /> : null}
 
@@ -400,6 +434,7 @@ function HistoryContent() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Data/Hora</TableHead>
+                  <TableHead>Estado</TableHead>
                   <TableHead>Score</TableHead>
                   <TableHead>Par</TableHead>
                   <TableHead>Exchange</TableHead>
@@ -412,7 +447,7 @@ function HistoryContent() {
                 {loading ? (
                   Array.from({ length: 5 }).map((_, i) => (
                     <TableRow key={i}>
-                      {Array.from({ length: 7 }).map((_, j) => (
+                      {Array.from({ length: 8 }).map((_, j) => (
                         <TableCell key={j}>
                           <div className="h-4 w-full animate-pulse rounded bg-muted" />
                         </TableCell>
@@ -421,7 +456,7 @@ function HistoryContent() {
                   ))
                 ) : records.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
                       Nenhum registro encontrado
                     </TableCell>
                   </TableRow>
@@ -430,6 +465,19 @@ function HistoryContent() {
                     <TableRow key={record.id}>
                       <TableCell className="text-xs text-muted-foreground">
                         {parseUtcDate(record.detected_at).toLocaleString("pt-BR")}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "capitalize",
+                            record.operationally_visible
+                              ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-500"
+                              : "border-muted bg-muted/30 text-muted-foreground"
+                          )}
+                        >
+                          {(record.pipeline_status ?? "evaluated_signal").replace(/_/g, " ")}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <Badge

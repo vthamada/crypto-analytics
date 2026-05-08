@@ -53,6 +53,7 @@ from app.services.logging_handlers import HTTPLogHandler
 from app.services.auth import ensure_admin_bootstrap
 from app.services.scan_runtime import wait_for_refresh_or_timeout
 from app.services.telegram import send_telegram_alert, telegram_destination_configured
+from app.services.operational_visibility import is_telegram_alertable
 from app.services.outcome_evaluator import evaluate_pending_outcomes
 
 try:
@@ -222,7 +223,11 @@ async def scan_loop() -> None:
                             "profile_version": projected.profile_version,
                             "reweighting_version": projected.reweighting_version,
                             "visible": True,
-                            "alert_eligible": projected.score >= alert_threshold and opportunity_matches_alert_scope(projected, workspace_config),
+                            "alert_eligible": (
+                                projected.score >= alert_threshold
+                                and opportunity_matches_alert_scope(projected, workspace_config)
+                                and is_telegram_alertable(projected)
+                            ),
                             "projection_reason": "config_match",
                         })
 
@@ -233,9 +238,10 @@ async def scan_loop() -> None:
                         "data": [
                             opportunity.model_dump(exclude={"klines"}, mode="json")
                             for opportunity in projected_opportunities
+                            if opportunity.operationally_visible
                         ],
                         "timestamp": now.isoformat(),
-                        "count": len(projected_opportunities),
+                        "count": len([opportunity for opportunity in projected_opportunities if opportunity.operationally_visible]),
                     },
                 )
 
@@ -293,6 +299,26 @@ async def scan_loop() -> None:
                 alert_types = set(getattr(workspace_config, "telegram_alert_types", ["operable", "high_score", "arbitrage"]))
                 eligible = []
                 for opp in projected_opportunities:
+                    if not is_telegram_alertable(opp):
+                        reason = opp.visibility_reason or "opportunity_type_not_alertable"
+                        alert_block_reasons[reason] = alert_block_reasons.get(reason, 0) + 1
+                        alert_events.append(
+                            build_signal_pipeline_event(
+                                opp,
+                                stage="alert",
+                                status="blocked",
+                                reason=reason,
+                                event_type="alert",
+                                workspace_id=workspace_id,
+                                details={
+                                    "score": opp.score,
+                                    "opportunity_type": opp.opportunity_type,
+                                    "pipeline_status": opp.pipeline_status,
+                                    "operationally_visible": opp.operationally_visible,
+                                },
+                            )
+                        )
+                        continue
                     in_scope, scope_reason, scope_details = explain_alert_scope(opp, workspace_config)
                     if not in_scope:
                         reason = scope_reason or "workspace_alert_scope_mismatch"
@@ -501,7 +527,7 @@ async def _build_workspace_broadcast_payloads(*, timestamp: str) -> int:
                 project_workspace_opportunity(opportunity, config)
                 for opportunity in opportunities
             )
-            if projected is not None
+            if projected is not None and projected.operationally_visible
         ]
 
         await manager.broadcast_workspace(

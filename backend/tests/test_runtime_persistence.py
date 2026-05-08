@@ -142,6 +142,68 @@ def test_runtime_persistence_normalizes_aware_detected_at(monkeypatch):
     asyncio.run(run_test())
 
 
+def test_get_near_misses_returns_compact_audit_events(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"near-misses-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(shared_state, "async_session", session_factory)
+        created_at = datetime.now(timezone.utc)
+        await shared_state.save_signal_pipeline_events(
+            "cycle-near-miss",
+            [
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "SOL_BRL",
+                    "stage": "promotion",
+                    "status": "near_miss",
+                    "reason": "candidate_limit_lower_priority",
+                    "event_type": "near_miss",
+                    "details": {
+                        "preliminary_score": 58.0,
+                        "distance_to_selected_score": 3.0,
+                        "failed_metric": "preliminary_score",
+                    },
+                    "created_at": created_at,
+                },
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "BTC_BRL",
+                    "stage": "ranking",
+                    "status": "ranked",
+                    "reason": "entered_cycle_ranking",
+                    "details": {"score": 80.0},
+                    "created_at": created_at,
+                },
+            ],
+        )
+
+        near_misses = await shared_state.get_near_misses(
+            exchange="novadax",
+            pair="SOL_BRL",
+            from_time=created_at.replace(tzinfo=timezone.utc),
+            to_time=created_at.replace(tzinfo=timezone.utc),
+        )
+
+        assert len(near_misses) == 1
+        assert near_misses[0]["pair"] == "SOL_BRL"
+        assert near_misses[0]["reason"] == "candidate_limit_lower_priority"
+        assert near_misses[0]["details"]["failed_metric"] == "preliminary_score"
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
+
+
 def test_runtime_writers_strip_timezone_before_persisting(monkeypatch):
     opportunity = Opportunity(
         id="opp-runtime-aware",

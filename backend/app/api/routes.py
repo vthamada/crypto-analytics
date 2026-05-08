@@ -63,11 +63,13 @@ from app.services.auth import (
     verify_refresh_token,
 )
 from app.services.monitoring import scan_monitor
+from app.services.operational_visibility import enrich_operational_visibility, is_operationally_visible
 from app.services.pairs import get_available_pairs_catalog, get_pair_exchange_diagnostic
 from app.services.exchange_credentials import validate_exchange_credentials
 from app.services.shared_state import (
     create_signal_feedback,
     get_missed_signal_diagnostic,
+    get_near_misses,
     get_scanner_runtime_state,
     read_opportunity_snapshots,
 )
@@ -248,7 +250,12 @@ def project_workspace_opportunity(opportunity: Opportunity, config: AppConfig) -
         config=config,
     )
     data.update(operability)
-    if data.get("trade_margin_score") is not None and data.get("estimated_net_trade_edge_pct") is not None:
+    if (
+        data.get("opportunity_type") != "avoid"
+        and data.get("executability_score") is not None
+        and data.get("trade_margin_score") is not None
+        and data.get("estimated_net_trade_edge_pct") is not None
+    ):
         data["opportunity_type"] = classify_opportunity_type(
             operable_signal=data.get("operable_signal"),
             interesting_signal=data.get("interesting_signal"),
@@ -261,7 +268,7 @@ def project_workspace_opportunity(opportunity: Opportunity, config: AppConfig) -
                 else data.get("movement_regime")
             ),
         )
-    return Opportunity(**data)
+    return enrich_operational_visibility(Opportunity(**data))
 
 
 def build_dashboard_stats(
@@ -796,6 +803,9 @@ def _summarize_opportunity(opportunity: Opportunity) -> OpportunitySummary:
         executability_band=opportunity.executability_band,
         trade_margin_score=opportunity.trade_margin_score,
         estimated_net_trade_edge_pct=opportunity.estimated_net_trade_edge_pct,
+        pipeline_status=opportunity.pipeline_status,
+        visibility_reason=opportunity.visibility_reason,
+        operationally_visible=opportunity.operationally_visible,
         opportunity_type=opportunity.opportunity_type,
         interesting_signal=opportunity.interesting_signal,
         operable_signal=opportunity.operable_signal,
@@ -843,7 +853,11 @@ async def dashboard_stats(
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     base_opportunities = await _effective_opportunities()
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
-    filtered_opportunities = [opportunity for opportunity in opps if opportunity is not None]
+    filtered_opportunities = [
+        opportunity
+        for opportunity in opps
+        if opportunity is not None and is_operationally_visible(opportunity)
+    ]
     monitored_pairs = await get_monitored_pair_count(config)
     return build_dashboard_stats(
         opportunities=filtered_opportunities,
@@ -862,7 +876,11 @@ async def dashboard(
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     base_opportunities = await _effective_opportunities()
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
-    visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
+    visible_opportunities = [
+        opportunity
+        for opportunity in opps
+        if opportunity is not None and is_operationally_visible(opportunity)
+    ]
     visible_opportunities = _sort_opportunities(visible_opportunities, sort_by)
     monitored_pairs = await get_monitored_pair_count(config)
     return DashboardResponse(
@@ -884,17 +902,12 @@ async def dashboard_summary(
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     base_opportunities = await _effective_opportunities()
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
-    visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
-    shortlist = _sort_opportunities(
-        [
-            opportunity
-            for opportunity in visible_opportunities
-            if opportunity.opportunity_type in {"trade", "hold"} or opportunity.operable_signal
-        ],
-        "executability",
-    )
-    if not shortlist:
-        shortlist = _sort_opportunities(visible_opportunities, "score")
+    visible_opportunities = [
+        opportunity
+        for opportunity in opps
+        if opportunity is not None and is_operationally_visible(opportunity)
+    ]
+    shortlist = _sort_opportunities(visible_opportunities, "executability")
 
     monitored_pairs = await get_monitored_pair_count(config)
     return DashboardSummaryResponse(
@@ -915,6 +928,7 @@ async def list_opportunities(
     movement_type: str | None = None,
     arbitrage_only: bool = False,
     operable_only: bool = False,
+    include_technical: bool = False,
     sort_by: str = "score",
     limit: int = Query(default=50, le=200),
     x_workspace_id: str | None = Header(default=None),
@@ -925,6 +939,9 @@ async def list_opportunities(
     base_opportunities = await _effective_opportunities()
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
     visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
+
+    if not include_technical:
+        visible_opportunities = [opportunity for opportunity in visible_opportunities if is_operationally_visible(opportunity)]
 
     if exchange:
         visible_opportunities = [opportunity for opportunity in visible_opportunities if opportunity.exchange.value == exchange]
@@ -952,7 +969,11 @@ async def active_opportunities(
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     base_opportunities = await _effective_opportunities()
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
-    visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
+    visible_opportunities = [
+        opportunity
+        for opportunity in opps
+        if opportunity is not None and is_operationally_visible(opportunity)
+    ]
     visible_opportunities = _sort_opportunities(visible_opportunities, "score")
     return [_summarize_opportunity(opportunity) for opportunity in visible_opportunities[:limit]]
 
@@ -966,11 +987,10 @@ async def opportunities_shortlist(
     _, config = await resolve_workspace_context(session_info, x_workspace_id)
     base_opportunities = await _effective_opportunities()
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
-    visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
     shortlisted = [
         opportunity
-        for opportunity in visible_opportunities
-        if opportunity.opportunity_type in {"trade", "hold"} or opportunity.operable_signal
+        for opportunity in opps
+        if opportunity is not None and is_operationally_visible(opportunity)
     ]
     shortlisted = _sort_opportunities(shortlisted, "executability")
     return [_summarize_opportunity(opportunity) for opportunity in shortlisted[:limit]]
@@ -1020,6 +1040,7 @@ async def history(
     pair: str | None = None,
     min_score: float | None = None,
     hours: int | None = None,
+    visibility: Literal["operational", "technical", "all"] = "operational",
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
@@ -1032,6 +1053,7 @@ async def history(
         min_score=min_score,
         hours=hours,
         workspace_config=config,
+        visibility=visibility,
     )
 
 
@@ -1043,6 +1065,7 @@ async def history_summary(
     pair: str | None = None,
     min_score: float | None = None,
     hours: int | None = None,
+    visibility: Literal["operational", "technical", "all"] = "operational",
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
@@ -1055,6 +1078,7 @@ async def history_summary(
         min_score=min_score,
         hours=hours,
         workspace_config=config,
+        visibility=visibility,
     )
 
 
@@ -1153,6 +1177,35 @@ async def missed_signal_diagnostic(
         workspace_config=config,
         catalog_status=catalog_status,
     )
+
+
+@router.get("/diagnostics/near-misses")
+async def near_misses_diagnostic(
+    from_time: datetime = Query(alias="from"),
+    to_time: datetime = Query(alias="to"),
+    exchange: Exchange | None = Query(default=None),
+    pair: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    near_misses = await get_near_misses(
+        from_time=from_time,
+        to_time=to_time,
+        exchange=exchange.value if exchange else None,
+        pair=pair,
+        limit=limit,
+    )
+    return {
+        "workspace_id": workspace.id,
+        "from": from_time.isoformat(),
+        "to": to_time.isoformat(),
+        "exchange": exchange.value if exchange else None,
+        "pair": pair.upper().replace("/", "_") if pair else None,
+        "count": len(near_misses),
+        "near_misses": near_misses,
+    }
 
 
 @router.get("/config", response_model=ConfigResponse)

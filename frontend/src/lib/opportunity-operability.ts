@@ -81,6 +81,14 @@ export function isOperableSignal(opportunity: OpportunityListItem): boolean {
   return opportunity.operable_signal ?? false;
 }
 
+export function isOperationallyVisible(opportunity: OpportunityListItem): boolean {
+  return opportunity.operationally_visible ?? (
+    opportunity.opportunity_type === "trade" ||
+    opportunity.opportunity_type === "hold" ||
+    Boolean(opportunity.operable_signal)
+  );
+}
+
 export function getSortValue(opportunity: OpportunityListItem, sortBy: OpportunitySortMode): number {
   switch (sortBy) {
     case "executability":
@@ -178,6 +186,25 @@ export function formatNotionalOrFallback(opportunity: OpportunityListItem): stri
 
 export function getOperabilityReasons(opportunity: OpportunityListItem): OpportunityReason[] {
   const reasons: OpportunityReason[] = [];
+  const netEdge = opportunity.estimated_net_trade_edge_pct;
+
+  if (
+    opportunity.pipeline_status === "blocked_signal" ||
+    opportunity.opportunity_type === "avoid" ||
+    (netEdge != null && netEdge < 0)
+  ) {
+    if (opportunity.opportunity_type === "avoid") {
+      reasons.push({ label: "Bloqueado: evitar", tone: "negative" });
+    } else if (netEdge != null && netEdge < 0) {
+      reasons.push({ label: "Bloqueado: margem negativa", tone: "negative" });
+    } else {
+      reasons.push({ label: "Bloqueado", tone: "negative" });
+    }
+    if (opportunity.visibility_reason) {
+      reasons.push({ label: opportunity.visibility_reason.replace(/_/g, " "), tone: "neutral" });
+    }
+    return reasons.slice(0, 3);
+  }
 
   if (isOperableSignal(opportunity)) {
     reasons.push({ label: "Operavel", tone: "positive" });
@@ -189,11 +216,8 @@ export function getOperabilityReasons(opportunity: OpportunityListItem): Opportu
     reasons.push({ label: "Trade", tone: "positive" });
   } else if (opportunity.opportunity_type === "hold") {
     reasons.push({ label: "Hold", tone: "warning" });
-  } else if (opportunity.opportunity_type === "avoid") {
-    reasons.push({ label: "Evitar", tone: "negative" });
   }
 
-  const netEdge = opportunity.estimated_net_trade_edge_pct;
   if (netEdge != null) {
     if (netEdge >= 0.3) {
       reasons.push({ label: `Margem +${netEdge.toFixed(2)}%`, tone: "positive" });

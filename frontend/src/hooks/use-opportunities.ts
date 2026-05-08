@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DashboardStats } from "@/lib/types";
 import { getDashboardSummary, getOpportunities, getStats } from "@/lib/api";
-import type { OpportunityListItem, OpportunitySortMode } from "@/lib/opportunity-operability";
+import { isOperationallyVisible, type OpportunityListItem, type OpportunitySortMode } from "@/lib/opportunity-operability";
 import { wsClient } from "@/lib/websocket";
 
 export function useOpportunities(filters?: {
@@ -68,7 +68,7 @@ export function useOpportunities(filters?: {
 
     const unsubscribe = wsClient.subscribe((message) => {
       if (message.type === "opportunities_update" && message.data) {
-        const nextOpportunities = message.data;
+        const nextOpportunities = message.data.filter(isOperationallyVisible);
         setOpportunities(nextOpportunities);
         setStats((previous) => deriveStats(nextOpportunities, previous));
       }

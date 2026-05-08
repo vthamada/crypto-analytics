@@ -325,6 +325,42 @@ def test_scan_all_uses_light_triage_before_expensive_requests(monkeypatch, sampl
     )
 
 
+def test_scan_all_records_compact_near_miss_for_close_light_discard(monkeypatch, sample_order_book, sample_klines):
+    monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+
+    async def fake_scannable_pairs(self):
+        return {Exchange.BINANCE: ["DOGE_BRL"]}
+
+    monkeypatch.setattr(Scanner, "_get_scannable_pairs_by_exchange", fake_scannable_pairs)
+
+    ticker = Ticker(
+        exchange=Exchange.BINANCE,
+        pair="DOGE_BRL",
+        last_price=1.0,
+        high_24h=1.04,
+        low_24h=0.96,
+        volume_24h=2500.0,
+        quote_volume_24h=2500.0,
+        change_pct_24h=2.0,
+    )
+    scanner = Scanner(AppConfig(enabled_exchanges=[Exchange.BINANCE], enabled_pairs=["DOGE_BRL"]))
+    scanner._providers = {Exchange.BINANCE: FakeProvider(ticker, sample_order_book, sample_klines)}
+
+    import asyncio
+
+    opportunities = asyncio.run(scanner.scan_all())
+
+    near_miss_events = [event for event in scanner.pipeline_events if event["event_type"] == "near_miss"]
+    assert opportunities == []
+    assert scanner.scan_diagnostics["near_misses"] == 1
+    assert scanner.scan_diagnostics["near_miss_reasons"]["volume_below_minimum"] == 1
+    assert len(near_miss_events) == 1
+    assert near_miss_events[0]["stage"] == "light_scan"
+    assert near_miss_events[0]["reason"] == "volume_below_minimum"
+    assert near_miss_events[0]["details"]["failed_metric"] == "quote_volume_24h"
+    assert near_miss_events[0]["details"]["threshold"] == 3000.0
+
+
 def test_scan_all_skips_cold_pair_until_temperature_interval(monkeypatch, sample_order_book, sample_klines):
     monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
 

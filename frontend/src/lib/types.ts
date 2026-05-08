@@ -17,6 +17,18 @@ export type MovementPhase =
   | "neutral";
 export type OpportunityType = "trade" | "hold" | "observe" | "avoid";
 export type AlertMomentType = "preparation" | "early_breakout" | "continuation" | "extended" | "profit_zone" | "neutral";
+export type HistoryVisibility = "operational" | "technical" | "all";
+export type PipelineStatus =
+  | "observed_pair"
+  | "discarded_observation"
+  | "candidate"
+  | "evaluated_signal"
+  | "operational_opportunity"
+  | "published_opportunity"
+  | "alerted_opportunity"
+  | "blocked_signal"
+  | "technical_audit_event"
+  | "signal_outcome";
 
 export interface Kline {
   open_time: string;
@@ -41,6 +53,9 @@ export interface Opportunity {
   reweighting_version?: string;
   technical_signal_id?: string | null;
   semantic_signal_key?: string | null;
+  pipeline_status?: PipelineStatus;
+  visibility_reason?: string | null;
+  operationally_visible?: boolean;
   executability_score?: number | null;
   executability_band?: string | null;
   interesting_signal?: boolean | null;
@@ -130,6 +145,9 @@ export type OpportunitySummary = Pick<
   | "pair"
   | "score"
   | "technical_score"
+  | "pipeline_status"
+  | "visibility_reason"
+  | "operationally_visible"
   | "executability_score"
   | "executability_band"
   | "trade_margin_score"
@@ -242,6 +260,9 @@ export interface HistoryRecord {
   reweighting_version?: string;
   technical_signal_id?: string | null;
   semantic_signal_key?: string | null;
+  pipeline_status?: PipelineStatus;
+  visibility_reason?: string | null;
+  operationally_visible?: boolean;
   executability_score?: number | null;
   executability_band?: string | null;
   interesting_signal?: boolean | null;
@@ -305,6 +326,9 @@ export interface HistorySummaryRecord {
   executability_score?: number | null;
   trade_margin_score?: number | null;
   estimated_net_trade_edge_pct?: number | null;
+  pipeline_status?: PipelineStatus;
+  visibility_reason?: string | null;
+  operationally_visible?: boolean;
   opportunity_type?: OpportunityType | null;
   spread_pct: number;
   last_price: number;
@@ -554,6 +578,27 @@ export interface MissedSignalDiagnostic {
   message: string;
   timeline: MissedSignalTimelineEvent[];
   cycle_summaries: MissedSignalCycleSummary[];
+}
+
+export interface NearMissRecord {
+  cycle_id: string;
+  exchange: Exchange | string;
+  pair: string;
+  stage: string;
+  status: "near_miss" | string;
+  reason?: string | null;
+  details: Record<string, unknown>;
+  created_at?: string | null;
+}
+
+export interface NearMissesDiagnostic {
+  workspace_id: string;
+  from: string;
+  to: string;
+  exchange?: Exchange | string | null;
+  pair?: string | null;
+  count: number;
+  near_misses: NearMissRecord[];
 }
 
 export interface AuditLogEntry {

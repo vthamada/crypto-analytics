@@ -98,6 +98,20 @@ class Opportunity(BaseModel):
     reweighting_version: str = "v1"
     technical_signal_id: str | None = None
     semantic_signal_key: str | None = None
+    pipeline_status: Literal[
+        "observed_pair",
+        "discarded_observation",
+        "candidate",
+        "evaluated_signal",
+        "operational_opportunity",
+        "published_opportunity",
+        "alerted_opportunity",
+        "blocked_signal",
+        "technical_audit_event",
+        "signal_outcome",
+    ] = "evaluated_signal"
+    visibility_reason: str | None = None
+    operationally_visible: bool = False
     executability_score: float | None = None
     executability_band: str | None = None
     interesting_signal: bool | None = None
@@ -246,6 +260,20 @@ class OpportunitySummary(BaseModel):
     trade_margin_score: float | None = None
     estimated_net_trade_edge_pct: float | None = None
     executability_band: str | None = None
+    pipeline_status: Literal[
+        "observed_pair",
+        "discarded_observation",
+        "candidate",
+        "evaluated_signal",
+        "operational_opportunity",
+        "published_opportunity",
+        "alerted_opportunity",
+        "blocked_signal",
+        "technical_audit_event",
+        "signal_outcome",
+    ] = "evaluated_signal"
+    visibility_reason: str | None = None
+    operationally_visible: bool = False
     opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
     interesting_signal: bool | None = None
     operable_signal: bool | None = None
@@ -302,6 +330,20 @@ class HistoryRecord(BaseModel):
     reweighting_version: str = "v1"
     technical_signal_id: str | None = None
     semantic_signal_key: str | None = None
+    pipeline_status: Literal[
+        "observed_pair",
+        "discarded_observation",
+        "candidate",
+        "evaluated_signal",
+        "operational_opportunity",
+        "published_opportunity",
+        "alerted_opportunity",
+        "blocked_signal",
+        "technical_audit_event",
+        "signal_outcome",
+    ] = "evaluated_signal"
+    visibility_reason: str | None = None
+    operationally_visible: bool = False
     executability_score: float | None = None
     executability_band: str | None = None
     interesting_signal: bool | None = None
@@ -370,6 +412,20 @@ class HistorySummaryRecord(BaseModel):
     executability_score: float | None = None
     trade_margin_score: float | None = None
     estimated_net_trade_edge_pct: float | None = None
+    pipeline_status: Literal[
+        "observed_pair",
+        "discarded_observation",
+        "candidate",
+        "evaluated_signal",
+        "operational_opportunity",
+        "published_opportunity",
+        "alerted_opportunity",
+        "blocked_signal",
+        "technical_audit_event",
+        "signal_outcome",
+    ] = "evaluated_signal"
+    visibility_reason: str | None = None
+    operationally_visible: bool = False
     opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
     spread_pct: float
     last_price: float

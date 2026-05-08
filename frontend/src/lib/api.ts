@@ -13,9 +13,11 @@ import type {
   ExchangeCredentialValidationResponse,
   HistoryRecord,
   HistorySummaryRecord,
+  HistoryVisibility,
   InvitePreview,
   InviteRecord,
   MissedSignalDiagnostic,
+  NearMissesDiagnostic,
   Opportunity,
   OpportunitySummary,
   PairExchangeDiagnostic,
@@ -319,6 +321,7 @@ export function getOpportunities(params?: {
   movement_type?: string;
   arbitrage_only?: boolean;
   operable_only?: boolean;
+  include_technical?: boolean;
   sort_by?: OpportunitySortMode;
   limit?: number;
 }): Promise<Opportunity[]> {
@@ -379,6 +382,7 @@ export function getHistory(params?: {
   pair?: string;
   min_score?: number;
   hours?: number;
+  visibility?: HistoryVisibility;
 }): Promise<HistoryRecord[]> {
   const query = new URLSearchParams();
   if (params) {
@@ -397,6 +401,7 @@ export function getHistorySummary(params?: {
   pair?: string;
   min_score?: number;
   hours?: number;
+  visibility?: HistoryVisibility;
 }): Promise<HistorySummaryRecord[]> {
   const query = new URLSearchParams();
   if (params) {
@@ -457,6 +462,23 @@ export function getMissedSignalDiagnostic(params: {
     to: params.to,
   });
   return fetchJSON(`/diagnostics/missed-signal?${query.toString()}`, { headers: sessionHeaders() });
+}
+
+export function getNearMissesDiagnostic(params: {
+  from: string;
+  to: string;
+  exchange?: Exchange;
+  pair?: string;
+  limit?: number;
+}): Promise<NearMissesDiagnostic> {
+  const query = new URLSearchParams({
+    from: params.from,
+    to: params.to,
+  });
+  if (params.exchange) query.set("exchange", params.exchange);
+  if (params.pair) query.set("pair", params.pair);
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  return fetchJSON(`/diagnostics/near-misses?${query.toString()}`, { headers: sessionHeaders() });
 }
 
 // Config

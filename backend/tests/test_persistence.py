@@ -335,9 +335,88 @@ def test_history_summary_returns_reduced_payload(monkeypatch):
                 "alert_moment_type": "neutral",
                 "alert_reason": None,
                 "detected_at": "2026-04-15T18:55:30+00:00",
+                "pipeline_status": "operational_opportunity",
+                "visibility_reason": "trade_qualified",
+                "operationally_visible": True,
             }
         ]
         assert "volume_24h" not in rows[0]
+        assert "quote_volume_24h" not in rows[0]
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
+
+
+def test_history_summary_visibility_filters_operational_and_technical(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"history-visibility-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(persistence, "async_session", session_factory)
+
+        detected_at = datetime(2026, 4, 15, 18, 55, 30, tzinfo=timezone.utc)
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    OpportunityRecord(
+                        id="operational-1",
+                        exchange="binance",
+                        pair="BTC_BRL",
+                        score=82,
+                        executability_score=70,
+                        opportunity_type="trade",
+                        volatility_pct=5,
+                        volume_24h=1000,
+                        quote_volume_24h=100000,
+                        liquidity_units=5000,
+                        spread_pct=0.2,
+                        movement_type="strong_range",
+                        last_price=100,
+                        change_pct=4,
+                        detected_at=detected_at,
+                        duration_minutes=10,
+                    ),
+                    OpportunityRecord(
+                        id="technical-1",
+                        exchange="binance",
+                        pair="DOGE_BRL",
+                        score=30,
+                        executability_score=20,
+                        opportunity_type="avoid",
+                        volatility_pct=8,
+                        volume_24h=100,
+                        quote_volume_24h=500,
+                        liquidity_units=50,
+                        spread_pct=4,
+                        movement_type="weak",
+                        last_price=1,
+                        change_pct=8,
+                        detected_at=detected_at - timedelta(minutes=1),
+                        duration_minutes=10,
+                    ),
+                ]
+            )
+            await session.commit()
+
+        all_rows = await persistence.get_history_summary(limit=10, visibility="all")
+        operational_rows = await persistence.get_history_summary(limit=10, visibility="operational")
+        technical_rows = await persistence.get_history_summary(limit=10, visibility="technical")
+
+        assert [row["id"] for row in all_rows] == ["operational-1", "technical-1"]
+        assert [row["id"] for row in operational_rows] == ["operational-1"]
+        assert [row["id"] for row in technical_rows] == ["technical-1"]
+        assert technical_rows[0]["pipeline_status"] == "blocked_signal"
+        assert technical_rows[0]["visibility_reason"] == "opportunity_type_not_alertable"
 
         await engine.dispose()
         if db_path.exists():

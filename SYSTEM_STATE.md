@@ -1,6 +1,6 @@
 # Estado Atual do Sistema
 
-Ultima revisao: 2026-05-06
+Ultima revisao: 2026-05-08
 
 ## Objetivo deste documento
 
@@ -20,6 +20,9 @@ O ponto mais importante para entender o comportamento atual e este:
 - o scanner e global
 - as oportunidades detectadas sao globais
 - cada oportunidade agora carrega tambem uma camada paralela de executabilidade
+- cada oportunidade projetada tambem recebe `pipeline_status`, `visibility_reason` e `operationally_visible`
+- dashboard, WebSocket e Telegram ocultam por padrao registros tecnicos como `avoid`, margem negativa, movimento fraco e baixa liquidez
+- historico e resumo historico agora possuem visoes separadas: operacional, auditoria tecnica e todos os registros
 - a visibilidade final e recalculada por workspace
 - o historico persistido e global, mas filtrado por workspace na leitura
 - o WebSocket e isolado por workspace
@@ -66,6 +69,7 @@ Visao por modulo:
 - `backend/app/services/persistence.py`: persiste historico, le configuracoes por workspace, agrega configuracoes para o scanner global e recalcula score por workspace na leitura.
 - `backend/app/services/shared_state.py`: persiste estado compartilhado entre worker e API, incluindo `scanner_runtime_state`, `opportunity_snapshots`, `technical_signals`, `workspace_signal_projections`, `signal_outcomes` e `repetition_counts`.
 - `backend/app/services/shared_state.py`: tambem persiste a auditoria operacional compacta em `scanner_cycle_audits` e `signal_pipeline_events`, usada para diagnosticar sinais perdidos sem armazenar dataset bruto de mercado.
+- `backend/app/services/shared_state.py`: tambem consulta near misses compactos registrados em `signal_pipeline_events` com `event_type=near_miss`.
 - `backend/app/worker.py`: processo dedicado de scan usado no fluxo padrao do `docker-compose.yml`.
 - `backend/app/services/auth.py`: cuida de login, tokens, bootstrap do admin, organizacoes, workspaces, memberships, usuarios, invites e auditoria.
 - `backend/app/services/pairs.py`: constroi o catalogo de pares disponiveis por exchange e filtra os pares realmente escaneaveis.

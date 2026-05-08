@@ -52,7 +52,10 @@ def _fake_opportunity(**overrides) -> Opportunity:
         executability_score=None,
         executability_band=None,
         interesting_signal=None,
-        operable_signal=None,
+        operable_signal=True,
+        estimated_net_trade_edge_pct=0.8,
+        trade_margin_score=45.0,
+        opportunity_type="trade",
         bid_notional_top_n=None,
         ask_notional_top_n=None,
         total_notional_top_n=None,
@@ -174,7 +177,7 @@ def test_opportunities_contract_includes_technical_fields(monkeypatch):
     monkeypatch.setattr(routes, "read_opportunity_snapshots", _no_snapshots)
 
     client = _create_client()
-    resp = client.get("/api/opportunities", headers={"X-Admin-Token": "tok"})
+    resp = client.get("/api/opportunities?include_technical=true", headers={"X-Admin-Token": "tok"})
 
     assert resp.status_code == 200
     items = resp.json()
@@ -190,6 +193,8 @@ def test_opportunities_contract_includes_technical_fields(monkeypatch):
     assert "executability_band" in item
     assert "interesting_signal" in item
     assert "operable_signal" in item
+    assert "pipeline_status" in item
+    assert "operationally_visible" in item
     assert "bid_notional_top_n" in item
     assert "ask_notional_top_n" in item
     assert "total_notional_top_n" in item
@@ -422,6 +427,8 @@ def test_opportunity_model_round_trips_technical_fields():
     assert "executability_band" in data
     assert "interesting_signal" in data
     assert "operable_signal" in data
+    assert "pipeline_status" in data
+    assert "operationally_visible" in data
 
     restored = Opportunity(**data)
     assert restored.technical_score == opp.technical_score

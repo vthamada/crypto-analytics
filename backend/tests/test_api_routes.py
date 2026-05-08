@@ -149,9 +149,91 @@ def test_dashboard_summary_returns_lightweight_shortlist(monkeypatch):
 
     body = response.json()
     assert response.status_code == 200
-    assert body["stats"]["total_opportunities"] == 2
+    assert body["stats"]["total_opportunities"] == 1
     assert body["shortlist"][0]["id"] == "trade-1"
     assert "klines" not in body["shortlist"][0]
+
+
+def test_dashboard_excludes_technical_noise_by_default(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(role="owner"), AppConfig(enabled_pairs=["BTC_BRL", "DOGE_BRL"])
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    routes.update_state(
+        [
+            make_opportunity(id="trade-1", pair="BTC_BRL", opportunity_type="trade", operable_signal=True),
+            make_opportunity(
+                id="avoid-1",
+                pair="DOGE_BRL",
+                opportunity_type="avoid",
+                operable_signal=False,
+                score=99.0,
+                estimated_net_trade_edge_pct=1.0,
+            ),
+        ],
+        None,
+    )
+
+    client = create_test_client()
+    response = client.get("/api/dashboard", headers={"X-Admin-Token": "secret-token"})
+
+    body = response.json()
+    assert response.status_code == 200
+    assert [item["id"] for item in body["opportunities"]] == ["trade-1"]
+    assert body["opportunities"][0]["pipeline_status"] == "operational_opportunity"
+
+
+def test_opportunities_can_include_technical_records_explicitly(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(role="owner"), AppConfig(enabled_pairs=["BTC_BRL", "DOGE_BRL"])
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    routes.update_state(
+        [
+            make_opportunity(id="trade-1", pair="BTC_BRL", opportunity_type="trade", operable_signal=True),
+            make_opportunity(
+                id="avoid-1",
+                pair="DOGE_BRL",
+                opportunity_type="avoid",
+                operable_signal=False,
+                score=99.0,
+                estimated_net_trade_edge_pct=1.0,
+            ),
+        ],
+        None,
+    )
+
+    client = create_test_client()
+    default_response = client.get("/api/opportunities", headers={"X-Admin-Token": "secret-token"})
+    technical_response = client.get("/api/opportunities?include_technical=true", headers={"X-Admin-Token": "secret-token"})
+
+    assert [item["id"] for item in default_response.json()] == ["trade-1"]
+    assert {item["id"] for item in technical_response.json()} == {"trade-1", "avoid-1"}
+    assert next(item for item in technical_response.json() if item["id"] == "avoid-1")["pipeline_status"] == "blocked_signal"
 
 
 def test_opportunities_shortlist_excludes_avoid_signals(monkeypatch):
@@ -259,6 +341,87 @@ def test_history_requires_authenticated_session(monkeypatch):
     response = client.get("/api/history")
 
     assert response.status_code == 401
+
+
+def test_history_passes_visibility_filter_to_persistence(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+    captured: list[str] = []
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(role="owner"), AppConfig(enabled_pairs=["BTC_BRL"])
+
+    async def fake_get_history(*args, visibility="all", **kwargs):
+        captured.append(visibility)
+        return []
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    monkeypatch.setattr(routes, "get_history", fake_get_history)
+
+    client = create_test_client()
+    response = client.get("/api/history?visibility=technical", headers={"X-Admin-Token": "secret-token"})
+
+    assert response.status_code == 200
+    assert captured == ["technical"]
+
+
+def test_near_misses_diagnostic_endpoint_returns_compact_events(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+    captured: list[dict] = []
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(role="owner"), AppConfig(enabled_pairs=["SOL_BRL"])
+
+    async def fake_get_near_misses(**kwargs):
+        captured.append(kwargs)
+        return [
+            {
+                "cycle_id": "cycle-1",
+                "exchange": "novadax",
+                "pair": "SOL_BRL",
+                "stage": "promotion",
+                "status": "near_miss",
+                "reason": "candidate_limit_lower_priority",
+                "details": {"distance_to_selected_score": 2.5},
+                "created_at": "2026-05-08T10:00:00",
+            }
+        ]
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    monkeypatch.setattr(routes, "get_near_misses", fake_get_near_misses)
+
+    client = create_test_client()
+    response = client.get(
+        "/api/diagnostics/near-misses?exchange=novadax&pair=SOL_BRL&from=2026-05-08T10:00:00Z&to=2026-05-08T11:00:00Z",
+        headers={"X-Admin-Token": "secret-token"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["workspace_id"] == "workspace-1"
+    assert body["count"] == 1
+    assert body["near_misses"][0]["reason"] == "candidate_limit_lower_priority"
+    assert captured[0]["exchange"] == "novadax"
+    assert captured[0]["pair"] == "SOL_BRL"
 
 
 def test_config_hides_sensitive_fields(monkeypatch):

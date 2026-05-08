@@ -9,6 +9,7 @@ import httpx
 
 from app.config import settings
 from app.models.schemas import Opportunity
+from app.services.operational_visibility import is_telegram_alertable
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,8 @@ async def send_telegram_alert(
     if not effective_token or not effective_chat_id:
         logger.warning("Telegram not configured, skipping alert")
         return False
+
+    opportunities = [opp for opp in opportunities if is_telegram_alertable(opp)]
 
     if not opportunities:
         return False

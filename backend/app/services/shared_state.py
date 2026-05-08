@@ -388,6 +388,54 @@ async def get_missed_signal_diagnostic(
     }
 
 
+async def get_near_misses(
+    *,
+    from_time: datetime,
+    to_time: datetime,
+    exchange: str | None = None,
+    pair: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Return compact near misses without exposing the full technical event stream."""
+    normalized_exchange = None
+    if exchange:
+        normalized_exchange = exchange.value if hasattr(exchange, "value") else str(exchange)
+    normalized_pair = pair.upper().replace("/", "_") if pair else None
+    safe_limit = max(1, min(limit, 500))
+
+    async with async_session() as session:
+        query = (
+            select(SignalPipelineEventRecord)
+            .where(
+                SignalPipelineEventRecord.event_type == "near_miss",
+                SignalPipelineEventRecord.created_at >= normalize_db_datetime(from_time),
+                SignalPipelineEventRecord.created_at <= normalize_db_datetime(to_time),
+            )
+            .order_by(SignalPipelineEventRecord.created_at.desc())
+            .limit(safe_limit)
+        )
+        if normalized_exchange:
+            query = query.where(SignalPipelineEventRecord.exchange == normalized_exchange)
+        if normalized_pair:
+            query = query.where(SignalPipelineEventRecord.pair == normalized_pair)
+        result = await session.execute(query)
+        events = result.scalars().all()
+
+    return [
+        {
+            "cycle_id": event.cycle_id,
+            "exchange": event.exchange,
+            "pair": event.pair,
+            "stage": event.stage,
+            "status": event.status,
+            "reason": event.reason,
+            "details": _safe_json_loads(event.details, {}),
+            "created_at": event.created_at.isoformat() if event.created_at else None,
+        }
+        for event in events
+    ]
+
+
 def _summarize_signal_final_state(
     timeline: list[dict],
     *,
@@ -427,6 +475,9 @@ def _summarize_signal_final_state(
     for event in reversed(events):
         if event.get("status") == "error":
             return "provider_error", event
+    for event in reversed(events):
+        if event.get("status") == "near_miss" or event.get("event_type") == "near_miss":
+            return "near_miss", event
     for event in reversed(events):
         if event.get("status") in {"blocked", "discarded"}:
             return "discarded_before_alert", event

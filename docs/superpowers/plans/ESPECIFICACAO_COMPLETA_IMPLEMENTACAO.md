@@ -2852,3 +2852,686 @@ Essa definição deve orientar as próximas implementações.
 ### 79.3 Decisao tecnica
 
 A auditoria deve continuar compacta. O sistema nao deve gravar todos os dados brutos de mercado por par/ciclo. Quando houver muitos pares no universo monitoravel, os agregados por ciclo continuam obrigatorios e os eventos detalhados devem priorizar candidatos, erros, descartes relevantes, pares de watchlist e alertas.
+
+---
+
+## 80. Separação entre oportunidade operacional e registro técnico
+
+### 80.1 Problema observado
+
+Foi observado que o sistema está exibindo registros como:
+
+- movimento fraco
+- variação zero ou muito pequena
+- margem negativa
+- classificação `avoid`
+- combinações contraditórias como `Operável` junto com `Evitar` ou `Margem negativa`
+
+Isso cria ruído para o usuário final.
+
+A tela principal e os alertas não devem se comportar como um log de tudo que o scanner viu.
+
+A tela principal deve responder:
+
+> **Quais oportunidades operacionais realmente merecem atenção agora?**
+
+Movimentos fracos, descartes e registros técnicos podem existir para auditoria, mas não devem ser tratados como oportunidades.
+
+### 80.2 Regra principal
+
+O sistema deve separar claramente:
+
+- dado observado
+- candidato
+- sinal avaliado
+- oportunidade operacional
+- alerta
+- descarte técnico
+- evento de auditoria
+
+A regra é:
+
+> **Movimento fraco pode ser registrado para auditoria, mas não deve aparecer como oportunidade operacional.**
+
+### 80.3 Definição de oportunidade operacional
+
+Uma oportunidade operacional visível deve atender critérios mínimos de:
+
+- força de movimento ou padrão relevante
+- liquidez suficiente
+- volume suficiente
+- margem operacional aceitável
+- fase útil do movimento
+- risco aceitável de entrada tardia
+- capacidade mínima de entrada e saída
+
+Se um registro não atende esses critérios, ele não deve aparecer na lista principal de oportunidades.
+
+---
+
+## 81. Nova taxonomia do pipeline
+
+### 81.1 Estados recomendados
+
+O sistema deve usar uma taxonomia clara para evitar chamar tudo de “oportunidade”.
+
+Estados sugeridos:
+
+- `observed_pair`
+- `discarded_observation`
+- `candidate`
+- `evaluated_signal`
+- `operational_opportunity`
+- `published_opportunity`
+- `alerted_opportunity`
+- `blocked_signal`
+- `technical_audit_event`
+- `signal_outcome`
+
+### 81.2 Significado dos estados
+
+#### `observed_pair`
+
+O par foi visto pelo scanner.
+
+Não significa oportunidade.
+
+#### `discarded_observation`
+
+O par foi analisado no scan leve e descartado com motivo.
+
+Não deve aparecer para o usuário final como oportunidade.
+
+#### `candidate`
+
+O par passou na triagem leve e merece análise mais profunda.
+
+Ainda não é oportunidade.
+
+#### `evaluated_signal`
+
+O sistema calculou scores, liquidez, margem, fase e classificação.
+
+Pode virar oportunidade ou ser descartado.
+
+#### `operational_opportunity`
+
+O sinal passou nos critérios operacionais mínimos.
+
+Pode aparecer no dashboard principal.
+
+#### `published_opportunity`
+
+A oportunidade foi publicada na shortlist ou em seção visível.
+
+#### `alerted_opportunity`
+
+A oportunidade foi enviada por Telegram.
+
+#### `blocked_signal`
+
+O sinal foi bloqueado por regra, ranking, cooldown, limite ou risco.
+
+#### `technical_audit_event`
+
+Evento técnico usado para auditoria, diagnóstico ou calibração.
+
+#### `signal_outcome`
+
+Resultado posterior do sinal.
+
+### 81.3 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- a tela principal não misturar observações fracas com oportunidades reais
+- cada item tiver um estado claro no pipeline
+- o histórico distinguir oportunidade publicada de observação técnica
+- os nomes usados na UI não induzirem o usuário a achar que todo registro é uma oportunidade
+
+---
+
+## 82. Regras de visibilidade no produto
+
+### 82.1 Tela principal
+
+A tela principal deve exibir somente:
+
+- `operational_opportunity`
+- `published_opportunity`
+- oportunidades `trade`
+- oportunidades `hold`
+- oportunidades `observe` somente se forem fortes e operacionalmente relevantes
+
+A tela principal não deve exibir por padrão:
+
+- movimento fraco
+- `avoid`
+- margem negativa
+- baixa liquidez
+- sinal atrasado sem utilidade
+- variação irrelevante
+- par visto sem sinal
+- descarte técnico
+
+### 82.2 Histórico
+
+O histórico deve ser separado em abas ou filtros claros:
+
+#### Histórico operacional
+
+Mostra:
+
+- oportunidades publicadas
+- alertas enviados
+- sinais relevantes avaliados
+- outcomes
+
+#### Auditoria técnica
+
+Mostra:
+
+- descartes
+- bloqueios
+- falhas de provider
+- motivos de não alerta
+- eventos de diagnóstico
+
+### 82.3 Telegram
+
+O Telegram deve receber apenas:
+
+- oportunidades `trade` ou `hold` qualificadas
+- alertas de rompimento/início/continuação relevantes
+- alertas de zona de realização, quando fizer sentido
+- resumos compactos, se configurado
+
+O Telegram não deve enviar:
+
+- movimento fraco
+- `avoid`
+- margem negativa
+- baixa liquidez
+- descarte técnico
+- observação sem valor operacional
+
+### 82.4 Critério de aceitação
+
+O usuário final deve conseguir usar o dashboard e o Telegram sem ser exposto ao ruído técnico.
+
+A auditoria deve existir, mas ficar em área própria.
+
+---
+
+## 83. Regras para movimentos fracos, negativos e descartes
+
+### 83.1 Movimento fraco
+
+Movimentos fracos devem ser tratados como:
+
+- não acionáveis
+- não alertáveis
+- não visíveis na tela principal
+- registráveis apenas como auditoria curta ou agregado estatístico
+
+### 83.2 Margem negativa
+
+Sinais com margem operacional negativa devem ser:
+
+- excluídos da tela principal
+- classificados como `avoid` ou `blocked_signal`
+- registrados com motivo claro
+- usados apenas para auditoria e calibração
+
+### 83.3 Baixa liquidez
+
+Sinais com baixa liquidez devem ser:
+
+- descartados ou rebaixados
+- impedidos de virar alerta
+- registrados com motivo de baixa liquidez
+- usados para calibrar filtros futuros
+
+### 83.4 Variação irrelevante
+
+Pares com variação irrelevante podem ser vistos no scan leve, mas não devem gerar sinal operacional.
+
+### 83.5 Combinações contraditórias
+
+O sistema deve impedir combinações contraditórias no dashboard principal.
+
+Exemplos proibidos na lista principal:
+
+- `Operável` + `Evitar`
+- `Operável` + `Margem negativa`
+- `Trade` + `Margem negativa`
+- `Hold` + `Volume insuficiente`
+- `Oportunidade` + `Movimento fraco`, salvo se houver outro padrão forte explícito e justificado
+
+### 83.6 Critério de aceitação
+
+O sistema estará adequado quando movimentos fracos forem tratados como descarte/auditoria, e não como oportunidade.
+
+---
+
+## 84. O que registrar e por quanto tempo
+
+### 84.1 Princípio
+
+Não mostrar não significa apagar.
+
+O sistema precisa registrar o suficiente para:
+
+- auditoria
+- calibração
+- diagnóstico de sinal perdido
+- análise de falsos positivos
+- análise de falsos negativos
+- evolução para paper trading e automação futura
+
+Mas não deve persistir dados irrelevantes em alto volume.
+
+### 84.2 Camada A — Memória ou cache curto
+
+Usar para observações fracas e descartes comuns.
+
+Exemplos:
+
+- par visto
+- score preliminar
+- motivo de descarte
+- timestamp
+- exchange
+- volume resumido
+- variação resumida
+
+Retenção sugerida:
+
+- minutos a poucas horas
+
+### 84.3 Camada B — Agregados
+
+Usar para estatísticas de descarte e saúde do scanner.
+
+Exemplos:
+
+- quantidade descartada por volume baixo
+- quantidade descartada por margem negativa
+- quantidade descartada por spread alto
+- falhas de provider
+- quantidade de pares vistos por exchange
+- quantidade de pares promovidos
+
+Retenção sugerida:
+
+- dias a semanas
+
+### 84.4 Camada C — Detalhado
+
+Usar apenas para casos importantes.
+
+Exemplos:
+
+- oportunidade operacional
+- alerta enviado
+- sinal candidato próximo do corte
+- erro técnico relevante
+- movimento perdido reportado
+- sinal com outcome relevante
+- sinal marcado manualmente pelo usuário
+
+Retenção sugerida:
+
+- maior, conforme custo e necessidade analítica
+
+### 84.5 Critério de aceitação
+
+O sistema deve preservar explicabilidade sem transformar o banco em depósito de ruído.
+
+---
+
+## 85. Near misses: candidatos quase bons
+
+### 85.1 Conceito
+
+Além de oportunidades e descartes comuns, o sistema deve identificar `near_misses`.
+
+Um `near_miss` é um sinal que quase virou oportunidade, mas falhou por um ou poucos critérios.
+
+Exemplos:
+
+- bom movimento, mas liquidez um pouco insuficiente
+- boa liquidez, mas margem insuficiente
+- bom rompimento, mas entrada já atrasada
+- bom volume, mas spread alto
+- sinal forte, mas ficou fora da shortlist por haver sinais melhores
+
+### 85.2 Por que registrar
+
+Near misses são importantes para:
+
+- calibrar thresholds
+- identificar oportunidades que o sistema pode estar perdendo
+- entender falsos negativos
+- melhorar ranking
+- preparar paper trading
+
+### 85.3 Requisitos
+
+O sistema deve registrar `near_misses` de forma resumida, com:
+
+- exchange
+- par
+- timestamp
+- score preliminar
+- critério que falhou
+- distância para o threshold
+- motivo de bloqueio
+- se havia sinais melhores no ciclo
+
+### 85.4 Visibilidade
+
+Near misses não devem aparecer na tela principal por padrão.
+
+Devem aparecer apenas em:
+
+- auditoria
+- analytics técnico
+- diagnóstico de sinal perdido
+- tela de calibragem
+
+---
+
+## 86. Impacto na evolução para trading automatizado
+
+### 86.1 Princípio
+
+A separação entre oportunidades reais, descartes e auditoria é essencial para futura automação.
+
+Um robô de trading não pode aprender apenas com sinais bons.
+
+Ele também precisa saber:
+
+- o que foi ignorado
+- por que foi ignorado
+- o que parecia bom e falhou
+- o que foi bloqueado corretamente
+- o que foi perdido indevidamente
+- onde houve erro técnico
+
+### 86.2 Evitar viés de sobrevivência
+
+Se o sistema salvar apenas oportunidades publicadas, o histórico ficará enviesado.
+
+Isso gera risco em backtests e paper trading, pois o sistema só enxerga os sinais que sobreviveram aos filtros.
+
+Para automação futura, é necessário manter amostras e agregados de:
+
+- descartes
+- bloqueios
+- near misses
+- falsos positivos
+- falsos negativos
+- sinais atrasados
+- falhas técnicas
+
+### 86.3 Regras de bloqueio futuras
+
+Os registros de descartes e bloqueios serão a base para regras futuras como:
+
+- não comprar se liquidez for baixa
+- não comprar se margem líquida for negativa
+- não comprar se movimento estiver esticado
+- não comprar se spread estiver alto
+- não comprar se a exchange estiver instável
+- não comprar se o par falhou no order book
+- não comprar se o sinal estiver atrasado
+- não comprar se houver falha de catálogo
+- não comprar se houver alta chance de aprisionamento
+
+### 86.4 Explicabilidade obrigatória
+
+Antes de qualquer automação real, o sistema deve explicar:
+
+- por que entraria
+- por que não entraria
+- por que sairia
+- por que ignorou um movimento
+- por que bloqueou uma operação
+- qual dado sustentou a decisão
+
+Sem essa explicabilidade, a automação não deve avançar.
+
+### 86.5 Paper trading
+
+Antes de trading real automatizado, o sistema deve evoluir para paper trading.
+
+O paper trading deve usar:
+
+- oportunidades publicadas
+- sinais bloqueados
+- near misses
+- outcomes
+- feedback do usuário
+- custos estimados
+- slippage estimado
+- liquidez estimada
+
+### 86.6 Critério de aceitação para automação futura
+
+Nenhuma automação de ordem deve ser implementada antes de existir:
+
+- auditoria ponta a ponta
+- outcome confiável
+- paper trading
+- regras de bloqueio
+- simulação de slippage
+- controle de risco
+- logs explicáveis
+- kill switch
+- confirmação humana opcional
+- limites de capital
+- tratamento de erro de exchange
+
+---
+
+## 87. Camada futura de risco para trading automatizado
+
+### 87.1 Objetivo
+
+Mesmo não executando ordens agora, a arquitetura deve preparar uma futura camada de risco.
+
+### 87.2 Componentes mínimos futuros
+
+Quando o sistema evoluir para automação, deve existir:
+
+- limite máximo por operação
+- limite diário de perda
+- limite diário de exposição
+- limite por ativo
+- limite por exchange
+- kill switch manual
+- pausa automática por falha de provider
+- pausa automática por slippage anormal
+- pausa automática por liquidez insuficiente
+- modo somente alerta
+- modo paper trading
+- modo semi-automático com confirmação humana
+- modo automático somente após validação
+
+### 87.3 Relação com registros fracos e descartes
+
+Registros de movimentos fracos, descartes e bloqueios ajudam a construir essa camada de risco.
+
+Eles mostram quando o sistema deve **não operar**.
+
+---
+
+## 88. Ajustes obrigatórios na interface
+
+### 88.1 Dashboard principal
+
+O dashboard principal deve ser renomeado conceitualmente para mostrar oportunidades operacionais, não todos os sinais.
+
+Deve ocultar por padrão:
+
+- `fraco`
+- `avoid`
+- margem negativa
+- baixa liquidez
+- variação irrelevante
+- dados meramente técnicos
+
+### 88.2 Filtros recomendados
+
+Adicionar filtros claros:
+
+- Oportunidades
+- Candidatos
+- Observáveis
+- Alertados
+- Descartados
+- Bloqueados
+- Auditoria
+
+Por padrão, selecionar apenas:
+
+- Oportunidades
+- Alertados
+- Observáveis fortes, se aplicável
+
+### 88.3 Histórico
+
+O histórico deve diferenciar:
+
+- histórico operacional
+- histórico técnico
+- auditoria
+- outcomes
+
+### 88.4 Cards e badges
+
+Badges contraditórias devem ser evitadas.
+
+Quando existir motivo negativo forte, o item deve sair da lista principal ou ser marcado claramente como não operacional.
+
+Exemplo:
+
+- em vez de `Operável` + `Evitar`
+- exibir em auditoria: `Bloqueado: margem negativa`
+
+### 88.5 Critério de aceitação
+
+O usuário final deve ver menos ruído e mais clareza.
+
+A equipe técnica deve continuar tendo acesso à auditoria.
+
+---
+
+## 89. Métricas de qualidade do produto
+
+### 89.1 Métricas obrigatórias
+
+O sistema deve acompanhar:
+
+- quantidade de pares vistos
+- quantidade de candidatos
+- quantidade de oportunidades publicadas
+- quantidade de alertas enviados
+- taxa de alertas úteis
+- taxa de alertas atrasados
+- falsos positivos
+- falsos negativos reportados
+- sinais bloqueados corretamente
+- motivos mais comuns de descarte
+- oportunidades perdidas por falha técnica
+- oportunidades perdidas por threshold
+- oportunidades perdidas por ranking
+
+### 89.2 Métricas para validar valor ao usuário
+
+Medir:
+
+- oportunidades úteis por dia
+- alertas úteis por semana
+- tempo economizado
+- redução de ruído
+- sinais que o usuário marcou como úteis
+- sinais que o usuário marcou como fracos
+- sinais em que o usuário disse “deveria ter avisado”
+
+### 89.3 Critério de aceitação
+
+O sistema deve evoluir com base em dados reais, não apenas em opinião pontual.
+
+---
+
+## 90. Regras finais para persistência, custo e UX
+
+### 90.1 Não persistir lixo operacional
+
+Não persistir detalhadamente todos os movimentos fracos.
+
+### 90.2 Persistir o que explica decisão
+
+Persistir ou agregar o suficiente para explicar:
+
+- por que alertou
+- por que não alertou
+- por que descartou
+- por que bloqueou
+- por que falhou
+
+### 90.3 UX limpa
+
+A experiência do usuário deve ser:
+
+- shortlist limpa
+- poucos alertas
+- motivos claros
+- foco operacional
+- sem poluição técnica
+
+### 90.4 Auditoria completa
+
+A experiência técnica deve permitir:
+
+- investigar problemas
+- calibrar thresholds
+- auditar funil
+- preparar automação futura
+
+### 90.5 Regra final
+
+> **O usuário vê oportunidades. O sistema registra decisões. A auditoria explica o caminho.**
+
+---
+
+## 91. Definição final expandida
+
+A definição final expandida do sistema é:
+
+> **Um assistente operacional de oportunidades em cripto BRL, focado inicialmente em Mercado Bitcoin e NovaDAX, que monitora dinamicamente pares relevantes, separa observações fracas de oportunidades reais, identifica zonas de compra e venda, detecta lateralização, rompimento e continuação, avalia liquidez, margem e risco de atraso, entrega apenas shortlist qualificada, registra descartes e bloqueios de forma controlada, aprende com outcomes e feedbacks, reduz ruído para o usuário e mantém auditoria suficiente para explicar decisões e preparar uma futura evolução segura para paper trading e automação.**
+
+Essa definição deve substituir qualquer entendimento anterior de que todo movimento observado deve ser exibido como oportunidade.
+
+---
+
+## 92. Status de implementacao - visibilidade operacional
+
+Implementado em 2026-05-08:
+
+- oportunidades agora carregam `pipeline_status`, `visibility_reason` e `operationally_visible`
+- dashboard, shortlist, WebSocket e Telegram usam o portao central de oportunidade operacional
+- `/api/opportunities` retorna somente oportunidades operacionais por padrao e aceita `include_technical=true`
+- `/api/history` e `/api/history/summary` aceitam `visibility=operational|technical|all`
+- a tela de historico permite alternar entre historico operacional, auditoria tecnica e todos os registros
+- registros tecnicos continuam disponiveis para calibragem, mas deixam de poluir a experiencia principal do usuario
+- near misses compactos sao registrados como `event_type=near_miss` no funil para descartes proximos de threshold e candidatos bloqueados por limite de promocao
+- `GET /api/diagnostics/near-misses` permite consultar near misses por periodo, exchange e par
+
+Proximo refinamento recomendado:
+
+- validar visualmente todas as telas com dados reais para remover combinacoes contraditorias restantes
+- criar tela dedicada de auditoria operacional fora de Settings
+- criar UI de calibragem de near misses e agregar metricas de qualidade do funil

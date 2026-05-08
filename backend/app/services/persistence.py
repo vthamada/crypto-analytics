@@ -22,6 +22,7 @@ from app.models.database import (
 )
 from app.models.schemas import AppConfig, HistoryRecord, MovementType, Opportunity, ScoreWeights
 from app.filters.executability import calculate_executability_score, classify_executability_band, classify_opportunity_type, rescale_slippage_bps
+from app.services.operational_visibility import add_visibility_fields
 from app.services.workspace_profiles import (
     explain_workspace_visibility,
     highest_order_notional,
@@ -172,7 +173,7 @@ def get_projected_opportunity_type(
     estimated_net_trade_edge_pct: float | None,
     movement_regime: str | None,
 ) -> str | None:
-    if trade_margin_score is None or estimated_net_trade_edge_pct is None:
+    if stored_type == "avoid" or executability_score is None or trade_margin_score is None or estimated_net_trade_edge_pct is None:
         return stored_type
     return classify_opportunity_type(
         operable_signal=operable_signal,
@@ -226,7 +227,7 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         movement_regime=movement_regime,
     )
 
-    return {
+    return add_visibility_fields({
         "id": record.id,
         "exchange": record.exchange,
         "pair": record.pair,
@@ -297,7 +298,15 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "spread_score": record.spread_score,
         "repetition_score": record.repetition_score,
         "movement_multiplier": record.movement_multiplier,
-    }
+    })
+
+
+def _filter_by_visibility(rows: list[dict], visibility: str = "all") -> list[dict]:
+    if visibility == "all":
+        return rows
+    if visibility == "technical":
+        return [row for row in rows if not row.get("operationally_visible")]
+    return [row for row in rows if row.get("operationally_visible")]
 
 
 def build_merged_scan_config(configs: list[AppConfig]) -> AppConfig:
@@ -560,6 +569,7 @@ async def get_history(
     min_score: float | None = None,
     hours: int | None = None,
     workspace_config: AppConfig | None = None,
+    visibility: str = "all",
 ) -> list[dict]:
     """Retrieve opportunity history from the database."""
     async with async_session() as session:
@@ -586,7 +596,7 @@ async def get_history(
         ]
         if workspace_config is not None and min_score is not None:
             serialized_rows = [record for record in serialized_rows if record["score"] >= min_score]
-        return serialized_rows
+        return _filter_by_visibility(serialized_rows, visibility)
 
 
 async def get_analytics() -> dict:
@@ -658,6 +668,7 @@ async def get_history_summary(
     min_score: float | None = None,
     hours: int | None = None,
     workspace_config: AppConfig | None = None,
+    visibility: str = "all",
 ) -> list[dict]:
     """Retrieve a reduced history payload for list views."""
     async with async_session() as session:
@@ -667,9 +678,12 @@ async def get_history_summary(
             OpportunityRecord.pair,
             OpportunityRecord.score,
             OpportunityRecord.executability_score,
+            OpportunityRecord.interesting_signal,
+            OpportunityRecord.operable_signal,
             OpportunityRecord.trade_margin_score,
             OpportunityRecord.estimated_net_trade_edge_pct,
             OpportunityRecord.opportunity_type,
+            OpportunityRecord.quote_volume_24h,
             OpportunityRecord.spread_pct,
             OpportunityRecord.last_price,
             OpportunityRecord.change_pct,
@@ -681,6 +695,7 @@ async def get_history_summary(
             OpportunityRecord.alert_moment_type,
             OpportunityRecord.alert_reason,
             OpportunityRecord.detected_at,
+            OpportunityRecord.arbitrage_available,
             OpportunityRecord.volatility_score,
             OpportunityRecord.volume_score,
             OpportunityRecord.liquidity_score,
@@ -702,16 +717,19 @@ async def get_history_summary(
         if min_score is not None and score < min_score:
             continue
         detected_at = ensure_utc_datetime(row["detected_at"])
-        summaries.append(
+        summary = add_visibility_fields(
             {
                 "id": row["id"],
                 "exchange": row["exchange"],
                 "pair": row["pair"],
                 "score": score,
                 "executability_score": row["executability_score"],
+                "interesting_signal": row["interesting_signal"],
+                "operable_signal": row["operable_signal"],
                 "trade_margin_score": row["trade_margin_score"],
                 "estimated_net_trade_edge_pct": row["estimated_net_trade_edge_pct"],
                 "opportunity_type": row["opportunity_type"],
+                "quote_volume_24h": row["quote_volume_24h"],
                 "spread_pct": row["spread_pct"],
                 "last_price": row["last_price"],
                 "change_pct": row["change_pct"],
@@ -723,9 +741,13 @@ async def get_history_summary(
                 "alert_moment_type": row["alert_moment_type"] or "neutral",
                 "alert_reason": row["alert_reason"],
                 "detected_at": detected_at.isoformat(),
+                "arbitrage_available": row["arbitrage_available"] or False,
             }
         )
-    return summaries
+        for internal_field in ("interesting_signal", "operable_signal", "quote_volume_24h", "arbitrage_available"):
+            summary.pop(internal_field, None)
+        summaries.append(summary)
+    return _filter_by_visibility(summaries, visibility)
 
 
 async def get_filtered_analytics(
