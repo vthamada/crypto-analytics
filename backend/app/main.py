@@ -26,6 +26,7 @@ from app.services.persistence import (
 )
 from app.services.shared_state import (
     calculate_technical_score,
+    count_workspace_alerts_sent_since,
     create_pending_outcomes,
     decay_stale_repetitions,
     get_scanner_runtime_state,
@@ -350,6 +351,36 @@ async def scan_loop() -> None:
                                 details={"score": opp.score, "candidate_count": len(eligible), "top_n": 5},
                             )
                         )
+                    daily_limit = workspace_config.telegram_daily_alert_limit
+                    if daily_limit is not None and daily_limit >= 0:
+                        day_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                        sent_today = await count_workspace_alerts_sent_since(workspace_id, day_start)
+                        remaining_today = max(daily_limit - sent_today, 0)
+                        if remaining_today < len(alert_candidates):
+                            blocked_by_daily_limit = alert_candidates[remaining_today:]
+                            alert_candidates = alert_candidates[:remaining_today]
+                            alerts_suppressed += len(blocked_by_daily_limit)
+                            alert_block_reasons["daily_alert_limit_reached"] = (
+                                alert_block_reasons.get("daily_alert_limit_reached", 0) + len(blocked_by_daily_limit)
+                            )
+                            for opp in blocked_by_daily_limit:
+                                alert_events.append(
+                                    build_signal_pipeline_event(
+                                        opp,
+                                        stage="alert",
+                                        status="blocked",
+                                        reason="daily_alert_limit_reached",
+                                        event_type="alert",
+                                        workspace_id=workspace_id,
+                                        details={
+                                            "score": opp.score,
+                                            "daily_limit": daily_limit,
+                                            "sent_today": sent_today,
+                                        },
+                                    )
+                                )
+                    if not alert_candidates:
+                        continue
                     sent = await send_telegram_alert(
                         alert_candidates,
                         token=workspace_config.telegram_bot_token,

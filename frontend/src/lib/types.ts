@@ -196,6 +196,7 @@ export interface ScoreWeights {
 export interface AppConfig {
   thresholds: FilterThresholds;
   weights: ScoreWeights;
+  pair_universe_mode: "all_brl" | "watchlist_only";
   trading_profile: "conservador" | "intraday_liquido" | "agressivo" | "scalp";
   order_notional_brl?: number | null;
   max_entry_slippage_bps?: number | null;
@@ -207,6 +208,7 @@ export interface AppConfig {
   telegram_enabled: boolean;
   telegram_alert_threshold?: number;
   telegram_alert_cooldown_seconds?: number;
+  telegram_daily_alert_limit?: number | null;
   telegram_alert_types?: string[];
   telegram_operable_only?: boolean;
   telegram_min_executability_score?: number | null;
@@ -469,6 +471,8 @@ export interface PairExchangeDiagnostic {
   overall_status: "ok" | "warning" | "error";
   checked_at: string;
   checks: PairDiagnosticCheck[];
+  monitorable: boolean;
+  monitorability_reason?: string | null;
 }
 
 export interface MissedSignalTimelineEvent {
@@ -511,6 +515,7 @@ export interface MissedSignalWorkspaceStatus {
   workspace_id?: string | null;
   exchange_enabled: boolean;
   pair_enabled_or_dynamic: boolean;
+  pair_selected?: boolean;
   telegram_enabled: boolean;
   telegram_destination_configured: boolean;
   telegram_alert_threshold: number;
@@ -528,6 +533,8 @@ export interface MissedSignalCatalogStatus {
   raw_symbol?: string | null;
   exists_in_catalog?: boolean;
   overall_status?: "ok" | "warning" | "error" | string;
+  monitorable?: boolean;
+  monitorability_reason?: string | null;
   checked_at?: string | null;
   checks?: PairDiagnosticCheck[];
   error?: string;

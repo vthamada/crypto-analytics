@@ -96,7 +96,7 @@ def opportunity_matches_config(opportunity: Opportunity | HistoryRecord | Opport
     profile = resolve_trading_profile(config)
     return (
         exchange in enabled_exchanges
-        and (not config.enabled_pairs or opportunity.pair in config.enabled_pairs)
+        and (config.pair_universe_mode != "watchlist_only" or opportunity.pair in config.enabled_pairs)
         and opportunity.volatility_pct >= config.thresholds.min_volatility_pct
         and opportunity.liquidity_units >= config.thresholds.min_liquidity_units
         and opportunity.spread_pct <= config.thresholds.max_spread_pct
@@ -339,6 +339,11 @@ def build_merged_scan_config(configs: list[AppConfig]) -> AppConfig:
             "max_spread_pct": max(config.thresholds.max_spread_pct for config in configs),
         },
         weights=configs[0].weights,
+        pair_universe_mode=(
+            "all_brl"
+            if any(config.pair_universe_mode == "all_brl" for config in configs)
+            else "watchlist_only"
+        ),
         enabled_exchanges=enabled_exchanges,
         enabled_pairs=enabled_pairs,
         scan_interval_seconds=scan_interval_seconds,
@@ -350,6 +355,10 @@ def build_merged_scan_config(configs: list[AppConfig]) -> AppConfig:
         telegram_enabled=any(config.telegram_enabled for config in configs),
         telegram_alert_threshold=max(config.telegram_alert_threshold for config in configs),
         telegram_alert_cooldown_seconds=max(config.telegram_alert_cooldown_seconds for config in configs),
+        telegram_daily_alert_limit=max(
+            [config.telegram_daily_alert_limit for config in configs if config.telegram_daily_alert_limit is not None],
+            default=None,
+        ),
         telegram_alert_types=list({alert_type for config in configs for alert_type in config.telegram_alert_types}),
         telegram_operable_only=any(config.telegram_operable_only for config in configs),
         telegram_min_executability_score=max(min_exec_candidates) if min_exec_candidates else None,
@@ -614,7 +623,7 @@ def _apply_workspace_history_filters(query, workspace_config: AppConfig | None):
     ]
     profile = resolve_trading_profile(workspace_config)
     query = query.where(OpportunityRecord.exchange.in_(enabled_exchanges))
-    if workspace_config.enabled_pairs:
+    if workspace_config.pair_universe_mode == "watchlist_only":
         query = query.where(OpportunityRecord.pair.in_(workspace_config.enabled_pairs))
     query = query.where(OpportunityRecord.volatility_pct >= workspace_config.thresholds.min_volatility_pct)
     query = query.where(OpportunityRecord.liquidity_units >= workspace_config.thresholds.min_liquidity_units)

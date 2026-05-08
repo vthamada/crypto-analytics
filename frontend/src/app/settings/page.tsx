@@ -158,7 +158,7 @@ type DisplayAuditLogEntry = AuditLogEntry & {
   aggregatedCount: number;
   groupedOldestCreatedAt?: string;
 };
-type MissedSignalWindow = "1" | "4" | "24" | "72";
+type MissedSignalWindow = "1" | "4" | "24" | "72" | "custom";
 
 const TRADING_PROFILE_OPTIONS: { value: TradingProfile; label: string; description: string }[] = [
   {
@@ -223,6 +223,7 @@ const CONFIG_UPDATE_FIELD_LABELS: Record<string, string> = {
   max_entry_slippage_bps: "slippage de entrada",
   max_exit_slippage_bps: "slippage de saida",
   min_quote_volume_brl: "liquidez notional minima",
+  pair_universe_mode: "universo de pares",
   enabled_exchanges: "exchanges",
   enabled_pairs: "pares",
   scan_interval_seconds: "intervalo do scanner",
@@ -263,12 +264,14 @@ function buildOperationalConfigPayload(config: AppConfig): Partial<AppConfig> {
     max_entry_slippage_bps: config.max_entry_slippage_bps,
     max_exit_slippage_bps: config.max_exit_slippage_bps,
     min_quote_volume_brl: config.min_quote_volume_brl,
+    pair_universe_mode: config.pair_universe_mode ?? "all_brl",
     enabled_exchanges: config.enabled_exchanges,
     enabled_pairs: config.enabled_pairs,
     scan_interval_seconds: config.scan_interval_seconds,
     telegram_enabled: config.telegram_enabled,
     telegram_alert_threshold: config.telegram_alert_threshold,
     telegram_alert_cooldown_seconds: config.telegram_alert_cooldown_seconds,
+    telegram_daily_alert_limit: config.telegram_daily_alert_limit,
     telegram_alert_types: config.telegram_alert_types,
     telegram_operable_only: config.telegram_operable_only,
     telegram_min_executability_score: config.telegram_min_executability_score,
@@ -400,6 +403,8 @@ export default function SettingsPage() {
   const [missedSignalPairInput, setMissedSignalPairInput] = useState("");
   const [missedSignalExchange, setMissedSignalExchange] = useState<Exchange>("novadax");
   const [missedSignalWindowHours, setMissedSignalWindowHours] = useState<MissedSignalWindow>("24");
+  const [missedSignalCustomFrom, setMissedSignalCustomFrom] = useState("");
+  const [missedSignalCustomTo, setMissedSignalCustomTo] = useState("");
   const [missedSignalDiagnostic, setMissedSignalDiagnostic] = useState<MissedSignalDiagnostic | null>(null);
   const [missedSignalLoading, setMissedSignalLoading] = useState(false);
   const [missedSignalError, setMissedSignalError] = useState<string | null>(null);
@@ -1025,9 +1030,19 @@ export default function SettingsPage() {
       return;
     }
 
-    const windowHours = Number(missedSignalWindowHours) || 24;
-    const to = new Date();
-    const from = new Date(to.getTime() - windowHours * 60 * 60 * 1000);
+    let to = new Date();
+    let from: Date;
+    if (missedSignalWindowHours === "custom") {
+      from = new Date(missedSignalCustomFrom);
+      to = missedSignalCustomTo ? new Date(missedSignalCustomTo) : to;
+      if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to) {
+        setMissedSignalError("Informe um periodo customizado valido, com inicio anterior ao fim.");
+        return;
+      }
+    } else {
+      const windowHours = Number(missedSignalWindowHours) || 24;
+      from = new Date(to.getTime() - windowHours * 60 * 60 * 1000);
+    }
 
     setMissedSignalLoading(true);
     setMissedSignalError(null);
@@ -2092,12 +2107,39 @@ export default function SettingsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base font-semibold">Pares monitorados</CardTitle>
+              <CardTitle className="text-base font-semibold">Watchlist de pares</CardTitle>
               <CardDescription>
-                Catalogo dinamico agregado por exchange e cacheado no backend por 1 hora.
+                O scanner avalia o catalogo BRL das exchanges habilitadas. Esta lista destaca pares prioritarios e ajuda no diagnostico.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="grid gap-3 rounded-xl border bg-muted/20 p-4 md:grid-cols-[minmax(0,1fr),220px] md:items-center">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">Universo de monitoramento</p>
+                  <p className="text-xs text-muted-foreground">
+                    Use todos os pares BRL para descobrir oportunidades novas ou restrinja o scanner aos pares da watchlist.
+                  </p>
+                  {(config.pair_universe_mode ?? "all_brl") === "watchlist_only" && config.enabled_pairs.length === 0 ? (
+                    <p className="text-xs text-amber-600 dark:text-amber-300">
+                      Nenhum par na watchlist. Neste modo o scanner nao tera pares para avaliar.
+                    </p>
+                  ) : null}
+                </div>
+                <select
+                  value={config.pair_universe_mode ?? "all_brl"}
+                  onChange={(event) =>
+                    setConfig({
+                      ...config,
+                      pair_universe_mode: event.target.value as AppConfig["pair_universe_mode"],
+                    })
+                  }
+                  className="h-9 rounded-md border bg-background px-3 text-sm font-medium"
+                >
+                  <option value="all_brl">Todos os pares BRL</option>
+                  <option value="watchlist_only">Apenas minha watchlist</option>
+                </select>
+              </div>
+
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -2200,7 +2242,7 @@ export default function SettingsPage() {
                   <div className="space-y-1">
                     <p className="text-sm font-semibold">Adicionar par manualmente</p>
                     <p className="text-xs text-muted-foreground">
-                      Use quando o ativo existe na exchange, mas ainda nao apareceu no catalogo cacheado. O scanner so conseguira coletar se a exchange ativa suportar o par.
+                      Use quando o ativo existe na exchange, mas ainda nao apareceu no catalogo cacheado. A lista nao limita o dashboard; ela destaca pares para acompanhamento e diagnostico.
                     </p>
                     <Input
                       value={manualPairInput}
@@ -2601,6 +2643,28 @@ export default function SettingsPage() {
               <Separator />
 
               <SettingRow
+                label="Limite diario de alertas"
+                description="Quantidade maxima de alertas Telegram por workspace a cada dia UTC. Vazio remove o limite."
+              >
+                <Input
+                  data-testid="settings-telegram-daily-limit"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={config.telegram_daily_alert_limit ?? ""}
+                  onChange={(event) =>
+                    setConfig({
+                      ...config,
+                      telegram_daily_alert_limit: event.target.value === "" ? null : Number(event.target.value),
+                    })
+                  }
+                  className="h-9 w-36 font-medium"
+                />
+              </SettingRow>
+
+              <Separator />
+
+              <SettingRow
                 label="Score minimo de operabilidade"
                 description="Exige uma nota minima de executabilidade antes de disparar alertas"
               >
@@ -2984,6 +3048,7 @@ export default function SettingsPage() {
                       <option value="4">Ultimas 4h</option>
                       <option value="24">Ultimas 24h</option>
                       <option value="72">Ultimos 3 dias</option>
+                      <option value="custom">Periodo customizado</option>
                     </select>
                   </div>
                   <Button
@@ -2997,6 +3062,27 @@ export default function SettingsPage() {
                     Investigar
                   </Button>
                 </div>
+
+                {missedSignalWindowHours === "custom" ? (
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-muted-foreground">Inicio</span>
+                      <Input
+                        type="datetime-local"
+                        value={missedSignalCustomFrom}
+                        onChange={(event) => setMissedSignalCustomFrom(event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-muted-foreground">Fim</span>
+                      <Input
+                        type="datetime-local"
+                        value={missedSignalCustomTo}
+                        onChange={(event) => setMissedSignalCustomTo(event.target.value)}
+                      />
+                    </div>
+                  </div>
+                ) : null}
 
                 {missedSignalError ? (
                   <p className="mt-3 text-xs text-amber-600 dark:text-amber-300">{missedSignalError}</p>
@@ -3040,7 +3126,7 @@ export default function SettingsPage() {
                         {missedSignalDiagnostic.workspace_status ? (
                           <div className="mt-1 space-y-1 text-muted-foreground">
                             <p>Exchange: {missedSignalDiagnostic.workspace_status.exchange_enabled ? "habilitada" : "bloqueada"}</p>
-                            <p>Par: {missedSignalDiagnostic.workspace_status.pair_enabled_or_dynamic ? "habilitado/dinamico" : "fora da lista"}</p>
+                            <p>Par: {missedSignalDiagnostic.workspace_status.pair_selected ? "na watchlist" : "fora da watchlist, mas elegivel pelo catalogo"}</p>
                             <p>Telegram: {missedSignalDiagnostic.workspace_status.telegram_enabled ? "ativo" : "desativado"}</p>
                             <p>Ultimo alerta: {formatPipelineReason(missedSignalDiagnostic.workspace_status.latest_alert_reason)}</p>
                           </div>
@@ -3053,6 +3139,8 @@ export default function SettingsPage() {
                         {missedSignalDiagnostic.catalog_status ? (
                           <div className="mt-1 space-y-1 text-muted-foreground">
                             <p>Status: {formatCatalogStatus(missedSignalDiagnostic.catalog_status.overall_status)}</p>
+                            <p>Monitoravel: {missedSignalDiagnostic.catalog_status.monitorable === false ? "nao" : "sim/indeterminado"}</p>
+                            <p>Motivo: {formatPipelineReason(missedSignalDiagnostic.catalog_status.monitorability_reason)}</p>
                             <p>Existe: {missedSignalDiagnostic.catalog_status.exists_in_catalog === false ? "nao" : "sim/indeterminado"}</p>
                             {missedSignalDiagnostic.catalog_status.error ? <p>Erro: {missedSignalDiagnostic.catalog_status.error}</p> : null}
                           </div>
@@ -3339,10 +3427,17 @@ function formatPipelineReason(reason?: string | null): string {
     missing_order_book: "book ausente",
     missing_ticker: "ticker ausente",
     movement_type_not_supported: "tipo de movimento nao suportado",
+    cache_empty: "catalogo vazio",
+    cache_stale: "catalogo desatualizado",
+    daily_alert_limit_reached: "limite diario de alertas atingido",
+    not_brl_pair: "par nao BRL",
+    pair_inactive: "par inativo",
     not_operable_for_alert_scope: "nao operavel para alerta",
     opportunity_type_not_alertable: "tipo de oportunidade nao alertavel",
     pair_not_enabled: "par fora da lista do workspace",
+    pair_not_in_catalog: "par fora do catalogo",
     pair_not_in_alert_scope: "par fora do alerta",
+    pair_not_tradable: "par nao negociavel",
     selected_for_deep_scan: "selecionado para analise profunda",
     spread_above_threshold: "spread acima do limite",
     spread_unfavorable: "spread desfavoravel",
@@ -3363,6 +3458,7 @@ function formatMissedSignalFinalState(state: string): string {
     audited_without_terminal_decision: "Houve auditoria, mas sem decisao final clara.",
     discarded_before_alert: "Sinal descartado antes de virar alerta.",
     insufficient_audit_data: "Sem trilha auditavel no periodo.",
+    not_monitorable: "Par nao monitoravel no periodo.",
     not_visible_for_workspace: "Sinal nao ficou visivel para este workspace.",
     provider_error: "Falha ou dado incompleto na exchange.",
     technical_signal_created: "Sinal tecnico criado, sem alerta registrado.",

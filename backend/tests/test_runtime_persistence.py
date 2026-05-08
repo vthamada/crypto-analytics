@@ -281,6 +281,8 @@ def test_pipeline_audit_persists_cycle_and_missed_signal_timeline(monkeypatch):
                 },
             ],
         )
+        sent_count = await shared_state.count_workspace_alerts_sent_since("workspace-1", started_at.replace(tzinfo=timezone.utc))
+        assert sent_count == 0
         await shared_state.save_scanner_cycle_audit(
             cycle_id="cycle-audit",
             started_at=started_at,

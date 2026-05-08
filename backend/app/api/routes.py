@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
@@ -287,6 +288,23 @@ def build_dashboard_stats(
     )
 
 
+async def get_monitored_pair_count(config: AppConfig) -> int:
+    if config.pair_universe_mode == "watchlist_only":
+        return len(config.enabled_pairs)
+
+    try:
+        scanner_state = await get_scanner_runtime_state()
+    except Exception as exc:
+        logger.debug("monitored_pair_count_state_unavailable error=%s", exc)
+        scanner_state = None
+    diagnostics = (scanner_state or {}).get("last_scan_diagnostics") or {}
+    try:
+        total_pairs = int(diagnostics.get("total_pairs") or 0)
+    except (TypeError, ValueError):
+        total_pairs = 0
+    return total_pairs or len(config.enabled_pairs)
+
+
 class AuthLoginRequest(BaseModel):
     username: str
     password: str
@@ -354,6 +372,7 @@ def require_workspace_owner_role(workspace: WorkspaceSummary) -> None:
 class ConfigUpdate(BaseModel):
     thresholds: FilterThresholds | None = None
     weights: ScoreWeights | None = None
+    pair_universe_mode: Literal["all_brl", "watchlist_only"] | None = None
     enabled_exchanges: list[Exchange] | None = None
     enabled_pairs: list[str] | None = None
     scan_interval_seconds: int | None = None
@@ -367,6 +386,7 @@ class ConfigUpdate(BaseModel):
     telegram_chat_id: str | None = None
     telegram_alert_threshold: float | None = None
     telegram_alert_cooldown_seconds: int | None = None
+    telegram_daily_alert_limit: int | None = None
     telegram_alert_types: list[str] | None = None
     telegram_operable_only: bool | None = None
     telegram_min_executability_score: float | None = None
@@ -824,9 +844,10 @@ async def dashboard_stats(
     base_opportunities = await _effective_opportunities()
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
     filtered_opportunities = [opportunity for opportunity in opps if opportunity is not None]
+    monitored_pairs = await get_monitored_pair_count(config)
     return build_dashboard_stats(
         opportunities=filtered_opportunities,
-        monitored_pairs=len(config.enabled_pairs),
+        monitored_pairs=monitored_pairs,
         last_scan=_last_scan,
     )
 
@@ -843,10 +864,11 @@ async def dashboard(
     opps = [project_workspace_opportunity(opportunity, config) for opportunity in base_opportunities]
     visible_opportunities = [opportunity for opportunity in opps if opportunity is not None]
     visible_opportunities = _sort_opportunities(visible_opportunities, sort_by)
+    monitored_pairs = await get_monitored_pair_count(config)
     return DashboardResponse(
         stats=build_dashboard_stats(
             opportunities=visible_opportunities,
-            monitored_pairs=len(config.enabled_pairs),
+            monitored_pairs=monitored_pairs,
             last_scan=_last_scan,
         ),
         opportunities=visible_opportunities[:limit],
@@ -874,10 +896,11 @@ async def dashboard_summary(
     if not shortlist:
         shortlist = _sort_opportunities(visible_opportunities, "score")
 
+    monitored_pairs = await get_monitored_pair_count(config)
     return DashboardSummaryResponse(
         stats=build_dashboard_stats(
             opportunities=visible_opportunities,
-            monitored_pairs=len(config.enabled_pairs),
+            monitored_pairs=monitored_pairs,
             last_scan=_last_scan,
         ),
         shortlist=[_summarize_opportunity(opportunity) for opportunity in shortlist[:limit]],
@@ -1109,6 +1132,8 @@ async def missed_signal_diagnostic(
             "overall_status": pair_status.get("overall_status"),
             "checked_at": pair_status.get("checked_at"),
             "checks": pair_status.get("checks", []),
+            "monitorable": pair_status.get("monitorable"),
+            "monitorability_reason": pair_status.get("monitorability_reason"),
         }
     except Exception as exc:
         logger.warning("missed_signal_catalog_status_failed exchange=%s pair=%s error=%s", exchange.value, pair, exc)

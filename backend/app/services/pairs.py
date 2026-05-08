@@ -204,6 +204,14 @@ async def get_pair_exchange_diagnostic(exchange: Exchange, pair: str) -> dict:
 
         normalized_available_pairs = [normalize_pair_symbol(item) for item in available_pairs]
         exists_in_catalog = normalized_pair in set(normalized_available_pairs)
+        if catalog_status == "error" and not normalized_available_pairs:
+            monitorability_reason = "cache_empty"
+        elif not normalized_pair.endswith("_BRL"):
+            monitorability_reason = "not_brl_pair"
+        elif not exists_in_catalog:
+            monitorability_reason = "pair_not_in_catalog"
+        else:
+            monitorability_reason = None
 
         checks = [
             {
@@ -234,6 +242,8 @@ async def get_pair_exchange_diagnostic(exchange: Exchange, pair: str) -> dict:
             "overall_status": overall_status,
             "checked_at": checked_at,
             "checks": checks,
+            "monitorable": monitorability_reason is None,
+            "monitorability_reason": monitorability_reason,
         }
     finally:
         await provider.close()
@@ -382,6 +392,58 @@ def filter_pairs_by_availability(
     return filtered_pairs
 
 
+def explain_pair_monitorability(*, catalog: dict, exchange: Exchange, pair: str) -> dict:
+    normalized_pair = normalize_pair_symbol(pair)
+    exchange_key = exchange.value if hasattr(exchange, "value") else str(exchange)
+    provider_status = {
+        (item.get("exchange").value if hasattr(item.get("exchange"), "value") else str(item.get("exchange"))): item
+        for item in catalog.get("provider_status", [])
+        if item.get("exchange") is not None
+    }
+    provider = provider_status.get(exchange_key, {})
+    pair_record = next(
+        (item for item in catalog.get("pairs", []) if item.get("pair") == normalized_pair),
+        None,
+    )
+
+    if provider.get("status") == "disabled":
+        reason = "exchange_disabled"
+    elif provider.get("status") == "error":
+        reason = "cache_empty" if int(provider.get("returned_pairs") or 0) == 0 else "cache_stale"
+    elif provider.get("status") == "empty":
+        reason = "cache_empty"
+    elif provider.get("status") == "stale":
+        reason = "cache_stale"
+    elif not normalized_pair.endswith("_BRL"):
+        reason = "not_brl_pair"
+    elif pair_record is None:
+        reason = "pair_not_in_catalog"
+    elif not pair_record.get("availability", {}).get(exchange_key, False):
+        reason = "pair_not_in_catalog"
+    elif not pair_record.get("is_active", {}).get(exchange_key, False):
+        reason = "pair_inactive"
+    elif not pair_record.get("is_tradable", {}).get(exchange_key, False):
+        reason = "pair_not_tradable"
+    else:
+        reason = None
+
+    return {
+        "exchange": exchange_key,
+        "pair": normalized_pair,
+        "monitorable": reason is None,
+        "monitorability_reason": reason,
+        "provider_status": provider.get("status"),
+        "provider_error": provider.get("error_message"),
+        "catalog_generated_at": catalog.get("generated_at"),
+        "catalog_expires_at": catalog.get("expires_at"),
+        "pair_status": (pair_record or {}).get("status", {}).get(exchange_key),
+        "exists_in_catalog": pair_record is not None and pair_record.get("availability", {}).get(exchange_key, False),
+        "is_active": (pair_record or {}).get("is_active", {}).get(exchange_key, False),
+        "is_tradable": (pair_record or {}).get("is_tradable", {}).get(exchange_key, False),
+        "is_brl_pair": normalized_pair.endswith("_BRL"),
+    }
+
+
 async def get_available_pairs_catalog(
     *,
     enabled_exchanges: list[Exchange] | None = None,
@@ -405,17 +467,25 @@ async def get_scannable_pairs_by_exchange(
     *,
     enabled_pairs: list[str],
     enabled_exchanges: list[Exchange],
+    pair_universe_mode: str = "all_brl",
     force_refresh: bool = False,
 ) -> dict[Exchange, list[str]]:
     if not enabled_exchanges:
         return {exchange: [] for exchange in enabled_exchanges}
 
     catalog = await get_available_pairs_catalog(enabled_exchanges=enabled_exchanges, force_refresh=force_refresh)
-    if not enabled_pairs:
-        enabled_pairs = select_relevant_brl_pairs(catalog)
+    if pair_universe_mode == "watchlist_only":
+        selected_pairs = [pair.upper().replace("/", "_").replace("-", "_") for pair in enabled_pairs]
+    else:
+        selected_pairs = select_relevant_brl_pairs(catalog)
+    if pair_universe_mode != "watchlist_only" and enabled_pairs:
+        selected_pairs = sorted(
+            {pair.upper().replace("/", "_").replace("-", "_") for pair in [*selected_pairs, *enabled_pairs]},
+            key=_sort_pair_key,
+        )
 
     return filter_pairs_by_availability(
-        enabled_pairs=enabled_pairs,
+        enabled_pairs=selected_pairs,
         enabled_exchanges=enabled_exchanges,
         catalog=catalog,
     )

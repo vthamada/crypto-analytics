@@ -67,6 +67,8 @@ def explain_workspace_visibility(opportunity: Opportunity, config: AppConfig) ->
     details: dict[str, object] = {
         "exchange": exchange,
         "pair": opportunity.pair,
+        "pair_selected": opportunity.pair in set(config.enabled_pairs),
+        "pair_universe_mode": config.pair_universe_mode,
         "volatility_pct": opportunity.volatility_pct,
         "min_volatility_pct": config.thresholds.min_volatility_pct,
         "liquidity_units": opportunity.liquidity_units,
@@ -80,7 +82,7 @@ def explain_workspace_visibility(opportunity: Opportunity, config: AppConfig) ->
 
     if exchange not in enabled_exchanges:
         return False, "exchange_disabled", details
-    if config.enabled_pairs and opportunity.pair not in config.enabled_pairs:
+    if config.pair_universe_mode == "watchlist_only" and opportunity.pair not in set(config.enabled_pairs):
         return False, "pair_not_enabled", details
     if opportunity.volatility_pct < config.thresholds.min_volatility_pct:
         return False, "volatility_below_threshold", details

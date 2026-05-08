@@ -1,6 +1,6 @@
 # Backlog
 
-Ultima revisao: 2026-05-07
+Ultima revisao: 2026-05-08
 
 Este backlog consolida tudo que ainda precisa ser implementado no sistema a partir da especificacao principal em `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEMENTACAO.md`.
 
@@ -39,6 +39,9 @@ Decisoes ja tomadas:
 - [x] Auditoria P0 do funil com `scanner_cycle_audits`, `signal_pipeline_events` e endpoint de sinal perdido.
 - [x] UI inicial de auditoria em Settings, com causa final, status do workspace e status do catalogo.
 - [x] Explicabilidade por workspace para sinais visiveis/bloqueados e motivos especificos de alerta.
+- [x] Watchlist deixou de limitar dashboard, historico e scan; pares selecionados viraram destaque/diagnostico.
+- [x] Modo de universo de pares configuravel: todos os pares BRL ou apenas watchlist.
+- [x] Hardening inicial do Supabase revogando execucao publica da funcao `public.rls_auto_enable()` quando existir.
 - [x] Multiusuario base: users, organizations, workspaces, memberships, invites, refresh token, auditoria administrativa.
 - [x] Worker dedicado e API capaz de ler estado compartilhado.
 
@@ -48,7 +51,7 @@ Decisoes ja tomadas:
 
 ### Auditoria e Diagnostico
 
-- [ ] **Periodo customizado na auditoria operacional**
+- [x] **Periodo customizado na auditoria operacional**
   Permitir selecionar `from` e `to` diretamente na UI, alem das janelas moveis atuais de 1h, 4h, 24h e 72h.
   Criterio de aceite: o usuario consegue investigar qualquer janela dentro da retencao de auditoria.
 
@@ -60,7 +63,7 @@ Decisoes ja tomadas:
   Incluir status de catalogo, status da exchange, status do par, ultima atualizacao do catalogo e se o par era monitoravel no intervalo.
   Criterio de aceite: `GET /api/diagnostics/missed-signal` responde se a falha ocorreu em catalogo, provider, filtro, ranking, workspace ou alerta.
 
-- [ ] **Motivos padronizados para par nao monitoravel**
+- [x] **Motivos padronizados para par nao monitoravel**
   Registrar explicitamente `exchange_disabled`, `pair_not_in_catalog`, `pair_inactive`, `pair_not_tradable`, `not_brl_pair`, `cache_empty`, `cache_stale`.
   Criterio de aceite: nenhum par relevante termina sem motivo quando nao entra no scan.
 
@@ -69,7 +72,7 @@ Decisoes ja tomadas:
   Criterio de aceite: todo sinal elegivel que nao foi alertado possui `alert_block_reason`.
   Status: implementados `lower_than_competing_signals`, `opportunity_type_not_alertable`, `exchange_not_in_alert_scope`, `pair_not_in_alert_scope`, `not_operable_for_alert_scope`, `below_min_executability`, `below_alert_threshold`, `telegram_disabled`, `telegram_not_configured` e `cooldown_active`.
 
-- [ ] **Limite diario de alertas por workspace**
+- [x] **Limite diario de alertas por workspace**
   Implementar limite configuravel por workspace para evitar excesso de notificacoes.
   Criterio de aceite: quando o limite for atingido, o bloqueio fica auditado como `daily_alert_limit_reached`.
 

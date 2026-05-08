@@ -15,7 +15,7 @@ from app.providers.base import ExchangeProvider
 from app.providers.novadax import NovaDaxProvider
 from app.providers.mercado_bitcoin import MercadoBitcoinProvider
 from app.providers.binance import BinanceProvider
-from app.services.pairs import get_scannable_pairs_by_exchange
+from app.services.pairs import explain_pair_monitorability, get_available_pairs_catalog, get_scannable_pairs_by_exchange
 from app.services.shared_state import (
     EXECUTABILITY_VERSION,
     MOVEMENT_VERSION,
@@ -454,6 +454,7 @@ class Scanner:
             return await get_scannable_pairs_by_exchange(
                 enabled_pairs=self.config.enabled_pairs,
                 enabled_exchanges=enabled_exchanges,
+                pair_universe_mode=self.config.pair_universe_mode,
             )
         except Exception as exc:
             logger.warning("scan_pair_catalog_filter_failed error=%s", exc)
@@ -461,6 +462,53 @@ class Scanner:
                 exchange: list(self.config.enabled_pairs)
                 for exchange in enabled_exchanges
             }
+
+    async def _record_non_monitorable_configured_pairs(
+        self,
+        scannable_pairs: dict[Exchange, list[str]],
+    ) -> None:
+        if not self.config.enabled_pairs:
+            return
+        enabled_exchanges = list(self._providers.keys())
+        try:
+            catalog = await get_available_pairs_catalog(enabled_exchanges=enabled_exchanges)
+        except Exception as exc:
+            for exchange in enabled_exchanges:
+                for pair in self.config.enabled_pairs:
+                    self._increment_scan_counter("skipped_pairs")
+                    self._increment_scan_counter("skip_reasons", "cache_empty")
+                    self._record_pipeline_event(
+                        exchange=exchange,
+                        pair=pair,
+                        stage="catalog",
+                        status="blocked",
+                        reason="cache_empty",
+                        details={"message": str(exc)[:240]},
+                    )
+            return
+
+        for exchange in enabled_exchanges:
+            scannable = set(scannable_pairs.get(exchange, []))
+            for pair in self.config.enabled_pairs:
+                normalized_pair = pair.upper().replace("/", "_").replace("-", "_")
+                if normalized_pair in scannable:
+                    continue
+                monitorability = explain_pair_monitorability(
+                    catalog=catalog,
+                    exchange=exchange,
+                    pair=normalized_pair,
+                )
+                reason = monitorability.get("monitorability_reason") or "not_monitorable"
+                self._increment_scan_counter("skipped_pairs")
+                self._increment_scan_counter("skip_reasons", str(reason))
+                self._record_pipeline_event(
+                    exchange=exchange,
+                    pair=normalized_pair,
+                    stage="catalog",
+                    status="blocked",
+                    reason=str(reason),
+                    details=monitorability,
+                )
 
     async def scan_pair(
         self,
@@ -840,6 +888,7 @@ class Scanner:
         """Run a full scan across all enabled exchanges and pairs."""
         scannable_pairs = await self._get_scannable_pairs_by_exchange()
         self._reset_scan_diagnostics(scannable_pairs)
+        await self._record_non_monitorable_configured_pairs(scannable_pairs)
 
         light_scan_tasks = []
         now = datetime.now(timezone.utc)

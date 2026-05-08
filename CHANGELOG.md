@@ -18,9 +18,14 @@ Convencao deste repositorio:
 - Diagnostico de sinal perdido agora inclui causa final, motivo raiz, status do catalogo e contexto do workspace ativo.
 - Eventos por workspace registram se cada sinal ficou visivel ou foi bloqueado por exchange/par/threshold/perfil operacional.
 - Bloqueios de Telegram passaram a registrar motivos especificos, incluindo escopo de exchange/par, operabilidade, executabilidade, limite de score, Telegram desativado/nao configurado, cooldown e menor prioridade no top 5.
+- Configuracao de limite diario de alertas Telegram por workspace, com bloqueio auditado como `daily_alert_limit_reached`.
+- Diagnostico de sinal perdido passou a aceitar periodo customizado na UI e a explicar pares nao monitoraveis por catalogo, provider ou par nao BRL.
+- Migration `0013_supabase_rls_hardening` revoga execucao publica da funcao `public.rls_auto_enable()` quando existente no Supabase.
 
 ### Fixed
 - Provider NovaDAX passou a calcular `change_pct_24h` a partir de `open24h` quando a API nao retorna `change24h`, evitando descarte total dos pares por erro de ticker no scan leve.
+- Watchlist de pares deixou de limitar dashboard, historico e universo de scan; o scanner agora avalia o catalogo BRL descoberto e usa pares selecionados apenas como destaque/diagnostico.
+- Configuracao `pair_universe_mode` permite escolher entre monitorar todos os pares BRL das exchanges habilitadas ou restringir scan/dashboard/historico apenas a watchlist.
 
 ## [2026-05-07]
 

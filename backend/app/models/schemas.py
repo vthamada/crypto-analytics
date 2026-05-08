@@ -178,6 +178,7 @@ class ScoreWeights(BaseModel):
 class AppConfig(BaseModel):
     thresholds: FilterThresholds = FilterThresholds()
     weights: ScoreWeights = ScoreWeights()
+    pair_universe_mode: Literal["all_brl", "watchlist_only"] = "all_brl"
     enabled_exchanges: list[Exchange] = [
         Exchange.NOVADAX,
         Exchange.MERCADO_BITCOIN,
@@ -192,6 +193,7 @@ class AppConfig(BaseModel):
     telegram_enabled: bool = True
     telegram_alert_threshold: float = 60.0
     telegram_alert_cooldown_seconds: int = 900
+    telegram_daily_alert_limit: int | None = None
     telegram_alert_types: list[str] = Field(default_factory=lambda: ["operable", "high_score", "arbitrage"])
     telegram_operable_only: bool = True
     telegram_min_executability_score: float | None = None
@@ -511,6 +513,8 @@ class PairExchangeDiagnosticResponse(BaseModel):
     overall_status: Literal["ok", "warning", "error"]
     checked_at: datetime
     checks: list[PairDiagnosticCheck]
+    monitorable: bool = False
+    monitorability_reason: str | None = None
 
 
 class InviteRecordResponse(BaseModel):

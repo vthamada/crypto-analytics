@@ -147,8 +147,8 @@ export function OnboardingChecklist() {
         />
         <ChecklistRow
           checked={pairsReady}
-          title="Selecionar pares monitorados"
-          description={`${workspaceStatus.configured_pairs_count} pares ativos no workspace atual.`}
+          title="Selecionar pares em destaque"
+          description={`${workspaceStatus.configured_pairs_count} pares na watchlist do workspace atual.`}
         />
         <ChecklistRow
           checked={understoodScores}
@@ -168,7 +168,7 @@ export function OnboardingChecklist() {
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground">
-            Ajustes operacionais ficam em Configurações. Depois disso, o dashboard passa a refletir o workspace ativo.
+            Ajustes operacionais ficam em Configurações. O scanner segue o catalogo BRL e a watchlist ajuda a diagnosticar pares prioritarios.
           </p>
           <div className="flex flex-wrap gap-2">
             <Link href="/settings" className={cn(buttonVariants({ variant: "outline" }))}>

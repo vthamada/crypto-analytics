@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, or_, select, update
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import (
@@ -204,6 +205,21 @@ async def save_signal_pipeline_events(cycle_id: str, events: list[dict]) -> int:
     return len(events)
 
 
+async def count_workspace_alerts_sent_since(workspace_id: str, since: datetime) -> int:
+    async with async_session() as session:
+        result = await session.execute(
+            select(func.count())
+            .select_from(SignalPipelineEventRecord)
+            .where(
+                SignalPipelineEventRecord.workspace_id == workspace_id,
+                SignalPipelineEventRecord.stage == "alert",
+                SignalPipelineEventRecord.status == "sent",
+                SignalPipelineEventRecord.created_at >= normalize_db_datetime(since),
+            )
+        )
+        return int(result.scalar_one() or 0)
+
+
 async def save_scanner_cycle_audit(
     *,
     cycle_id: str,
@@ -339,7 +355,11 @@ async def get_missed_signal_diagnostic(
         status = "events_found"
     else:
         status = "insufficient_audit_data"
-    final_state, root_cause_event = _summarize_signal_final_state(timeline, workspace_id=workspace_id)
+    final_state, root_cause_event = _summarize_signal_final_state(
+        timeline,
+        workspace_id=workspace_id,
+        catalog_status=catalog_status,
+    )
 
     return {
         "exchange": normalized_exchange,
@@ -372,8 +392,14 @@ def _summarize_signal_final_state(
     timeline: list[dict],
     *,
     workspace_id: str | None,
+    catalog_status: dict | None = None,
 ) -> tuple[str, dict | None]:
     if not timeline:
+        if catalog_status and catalog_status.get("monitorable") is False:
+            return "not_monitorable", {
+                "stage": "catalog",
+                "reason": catalog_status.get("monitorability_reason") or "not_monitorable",
+            }
         return "insufficient_audit_data", None
 
     scoped_events = [
@@ -439,7 +465,8 @@ def _build_workspace_signal_status(
     return {
         "workspace_id": workspace_id,
         "exchange_enabled": exchange in enabled_exchanges,
-        "pair_enabled_or_dynamic": not config.enabled_pairs or pair in config.enabled_pairs,
+        "pair_enabled_or_dynamic": config.pair_universe_mode != "watchlist_only" or pair in set(config.enabled_pairs),
+        "pair_selected": pair in set(config.enabled_pairs),
         "telegram_enabled": config.telegram_enabled,
         "telegram_destination_configured": telegram_destination_configured(
             token=config.telegram_bot_token,

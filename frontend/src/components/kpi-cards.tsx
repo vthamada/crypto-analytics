@@ -44,9 +44,9 @@ export function KPICards({ stats, loading }: KPICardsProps) {
     },
     {
       id: "monitored-pairs",
-      title: "Pares Monitorados",
+      title: "Pares Avaliados",
       value: stats?.monitored_pairs ?? 0,
-      subtitle: `${stats?.exchanges_online ?? 0} exchanges online`,
+      subtitle: `${stats?.exchanges_online ?? 0} exchanges com sinais`,
       emoji: "📡",
       color: "text-cyan-500",
     },

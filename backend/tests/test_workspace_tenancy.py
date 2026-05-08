@@ -158,13 +158,20 @@ def test_workspace_projection_uses_workspace_specific_weights_and_filters():
         enabled_pairs=["ETH_BRL"],
         enabled_exchanges=[Exchange.BINANCE],
     )
+    threshold_filtered_workspace = AppConfig(
+        enabled_pairs=["BTC_BRL"],
+        enabled_exchanges=[Exchange.BINANCE],
+        thresholds={"min_volatility_pct": 9.0},
+    )
 
     projected_volatility = routes.project_workspace_opportunity(opportunity, volatility_workspace)
     projected_spread = routes.project_workspace_opportunity(opportunity, spread_workspace)
-    projected_filtered = routes.project_workspace_opportunity(opportunity, filtered_workspace)
+    projected_watchlist = routes.project_workspace_opportunity(opportunity, filtered_workspace)
+    projected_filtered = routes.project_workspace_opportunity(opportunity, threshold_filtered_workspace)
 
     assert projected_volatility is not None
     assert projected_spread is not None
+    assert projected_watchlist is not None
     assert projected_filtered is None
     assert projected_volatility.score > projected_spread.score
     assert projected_volatility.executability_score == 82.0
@@ -192,19 +199,64 @@ def test_workspace_and_alert_explain_block_reasons_are_specific():
         last_price=100000,
         change_pct=4,
     )
-    config = AppConfig(
+    watchlist_config = AppConfig(
         enabled_pairs=["ETH_BRL"],
         enabled_exchanges=[Exchange.BINANCE],
         telegram_operable_only=True,
         telegram_min_executability_score=70.0,
     )
+    blocked_config = AppConfig(
+        enabled_pairs=["ETH_BRL"],
+        enabled_exchanges=[Exchange.NOVADAX],
+        telegram_operable_only=True,
+        telegram_min_executability_score=70.0,
+    )
 
-    visible, visibility_reason, visibility_details = explain_workspace_visibility(opportunity, config)
-    in_scope, alert_reason, alert_details = explain_alert_scope(opportunity, config)
+    watchlist_visible, watchlist_reason, watchlist_details = explain_workspace_visibility(opportunity, watchlist_config)
+    visible, visibility_reason, visibility_details = explain_workspace_visibility(opportunity, blocked_config)
+    in_scope, alert_reason, alert_details = explain_alert_scope(opportunity, watchlist_config)
 
+    assert watchlist_visible is True
+    assert watchlist_reason is None
+    assert watchlist_details["pair_selected"] is False
     assert visible is False
-    assert visibility_reason == "pair_not_enabled"
+    assert visibility_reason == "exchange_disabled"
     assert visibility_details["pair"] == "BTC_BRL"
     assert in_scope is False
     assert alert_reason == "not_operable_for_alert_scope"
     assert alert_details["operable_signal"] is False
+
+
+def test_watchlist_only_mode_blocks_pairs_outside_selected_universe():
+    opportunity = Opportunity(
+        id="opp-watchlist-only",
+        exchange=Exchange.BINANCE,
+        pair="BTC_BRL",
+        score=64,
+        technical_score=64,
+        executability_score=72.0,
+        executability_band="strong",
+        interesting_signal=True,
+        operable_signal=True,
+        volatility_pct=5,
+        volume_24h=1000,
+        quote_volume_24h=150000,
+        liquidity_units=8000,
+        spread_pct=0.2,
+        movement_type=MovementType.STRONG_RANGE,
+        last_price=100000,
+        change_pct=4,
+    )
+    config = AppConfig(
+        pair_universe_mode="watchlist_only",
+        enabled_pairs=["ETH_BRL"],
+        enabled_exchanges=[Exchange.BINANCE],
+    )
+
+    visible, visibility_reason, visibility_details = explain_workspace_visibility(opportunity, config)
+    projected = routes.project_workspace_opportunity(opportunity, config)
+
+    assert visible is False
+    assert visibility_reason == "pair_not_enabled"
+    assert visibility_details["pair_universe_mode"] == "watchlist_only"
+    assert projected is None
