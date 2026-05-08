@@ -766,15 +766,21 @@ def test_missed_signal_diagnostic_endpoint_returns_timeline(monkeypatch):
             token_version=0,
         )
 
-    async def fake_diagnostic(*, exchange, pair, from_time, to_time):
+    async def fake_diagnostic(*, exchange, pair, from_time, to_time, **kwargs):
         assert exchange == "novadax"
         assert pair == "SOL_BRL"
+        assert kwargs["workspace_id"] == "default"
         return {
             "exchange": exchange,
             "pair": pair,
             "from": from_time.isoformat(),
             "to": to_time.isoformat(),
             "status": "events_found",
+            "final_state": "technical_signal_created",
+            "root_cause_stage": "light_scan",
+            "root_cause_reason": "candidate",
+            "workspace_status": {"workspace_id": kwargs["workspace_id"]},
+            "catalog_status": kwargs["catalog_status"],
             "message": "Linha do tempo encontrada para o par no intervalo.",
             "timeline": [
                 {
@@ -788,8 +794,25 @@ def test_missed_signal_diagnostic_endpoint_returns_timeline(monkeypatch):
             "cycle_summaries": [],
         }
 
+    async def fake_pair_diagnostic(exchange, pair):
+        return {
+            "exchange": exchange,
+            "pair": "SOL_BRL",
+            "display_name": "SOL/BRL",
+            "raw_symbol": "SOLBRL",
+            "exists_in_catalog": True,
+            "overall_status": "ok",
+            "checked_at": "2026-05-07T10:00:00",
+            "checks": [],
+        }
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(id="default"), AppConfig()
+
     monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
     monkeypatch.setattr(routes, "get_missed_signal_diagnostic", fake_diagnostic)
+    monkeypatch.setattr(routes, "get_pair_exchange_diagnostic", fake_pair_diagnostic)
 
     client = create_test_client()
     response = client.get(

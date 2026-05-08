@@ -86,7 +86,7 @@ def _format_opportunity(opp: Opportunity) -> str:
     )
 
 
-def _telegram_rank_value(opp: Opportunity) -> float:
+def rank_telegram_opportunity(opp: Opportunity) -> float:
     phase = opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase
     phase_bonus = {
         "early_breakout": 8.0,
@@ -116,6 +116,10 @@ def _telegram_rank_value(opp: Opportunity) -> float:
         + type_bonus.get(opp.opportunity_type or "observe", 0.0)
         - (8.0 if opp.is_late_entry_risk else 0.0)
     )
+
+
+def _telegram_rank_value(opp: Opportunity) -> float:
+    return rank_telegram_opportunity(opp)
 
 
 def _destination_key(token: str, chat_id: str) -> str:

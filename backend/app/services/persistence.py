@@ -22,7 +22,12 @@ from app.models.database import (
 )
 from app.models.schemas import AppConfig, HistoryRecord, MovementType, Opportunity, ScoreWeights
 from app.filters.executability import calculate_executability_score, classify_executability_band, classify_opportunity_type, rescale_slippage_bps
-from app.services.workspace_profiles import highest_order_notional, resolve_trading_profile, widest_slippage_cap
+from app.services.workspace_profiles import (
+    explain_workspace_visibility,
+    highest_order_notional,
+    resolve_trading_profile,
+    widest_slippage_cap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +82,9 @@ def get_workspace_score(
 
 
 def opportunity_matches_config(opportunity: Opportunity | HistoryRecord | OpportunityRecord, config: AppConfig) -> bool:
+    if isinstance(opportunity, Opportunity):
+        return explain_workspace_visibility(opportunity, config)[0]
+
     exchange = opportunity.exchange.value if hasattr(opportunity.exchange, "value") else opportunity.exchange
     movement = (
         opportunity.movement_type.value

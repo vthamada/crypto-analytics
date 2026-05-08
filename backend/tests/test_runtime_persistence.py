@@ -315,6 +315,9 @@ def test_pipeline_audit_persists_cycle_and_missed_signal_timeline(monkeypatch):
         assert len(event_result.fetchall()) == 2
         assert len(cycle_result.fetchall()) == 1
         assert diagnostic["status"] == "events_found"
+        assert diagnostic["final_state"] == "discarded_before_alert"
+        assert diagnostic["root_cause_stage"] == "alert"
+        assert diagnostic["root_cause_reason"] == "below_alert_threshold"
         assert [event["stage"] for event in diagnostic["timeline"]] == ["light_scan", "alert"]
         assert diagnostic["cycle_summaries"][0]["alerts_sent"] == 0
         assert diagnostic["cycle_summaries"][0]["block_reasons"] == {"below_alert_threshold": 1}

@@ -15,6 +15,9 @@ Convencao deste repositorio:
 - Endpoint `GET /api/diagnostics/missed-signal` para investigar por exchange/par/janela onde um sinal foi candidato, descartado, bloqueado, ranqueado ou alertado.
 - Eventos compactos do scanner para scan leve, promocao, analise profunda, ranking e entrega/bloqueio de alertas Telegram.
 - Tela de configuracoes passou a ter busca de diagnostico de sinal perdido, com resumo por ciclo e linha do tempo do funil.
+- Diagnostico de sinal perdido agora inclui causa final, motivo raiz, status do catalogo e contexto do workspace ativo.
+- Eventos por workspace registram se cada sinal ficou visivel ou foi bloqueado por exchange/par/threshold/perfil operacional.
+- Bloqueios de Telegram passaram a registrar motivos especificos, incluindo escopo de exchange/par, operabilidade, executabilidade, limite de score, Telegram desativado/nao configurado, cooldown e menor prioridade no top 5.
 
 ### Fixed
 - Provider NovaDAX passou a calcular `change_pct_24h` a partir de `open24h` quando a API nao retorna `change24h`, evitando descarte total dos pares por erro de ticker no scan leve.

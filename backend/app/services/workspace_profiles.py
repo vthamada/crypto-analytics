@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.models.schemas import AppConfig, Opportunity
+from app.models.schemas import AppConfig, MovementType, Opportunity
 
 
 @dataclass(frozen=True)
@@ -46,8 +46,67 @@ def widest_slippage_cap(configs: list[AppConfig]) -> float:
 
 
 def opportunity_matches_alert_scope(opportunity: Opportunity, config: AppConfig) -> bool:
+    return explain_alert_scope(opportunity, config)[0]
+
+
+def explain_workspace_visibility(opportunity: Opportunity, config: AppConfig) -> tuple[bool, str | None, dict[str, object]]:
+    exchange = opportunity.exchange.value if hasattr(opportunity.exchange, "value") else str(opportunity.exchange)
+    movement = (
+        opportunity.movement_type.value
+        if hasattr(opportunity.movement_type, "value")
+        else str(opportunity.movement_type)
+    )
+    enabled_exchanges = {
+        item.value if hasattr(item, "value") else str(item)
+        for item in config.enabled_exchanges
+    }
+    enabled_movements = {item.value if hasattr(item, "value") else str(item) for item in MovementType}
+    profile = resolve_trading_profile(config)
+    min_quote_volume = max(config.thresholds.min_volume_brl_small, profile.min_quote_volume_brl)
+
+    details: dict[str, object] = {
+        "exchange": exchange,
+        "pair": opportunity.pair,
+        "volatility_pct": opportunity.volatility_pct,
+        "min_volatility_pct": config.thresholds.min_volatility_pct,
+        "liquidity_units": opportunity.liquidity_units,
+        "min_liquidity_units": config.thresholds.min_liquidity_units,
+        "spread_pct": opportunity.spread_pct,
+        "max_spread_pct": config.thresholds.max_spread_pct,
+        "quote_volume_24h": opportunity.quote_volume_24h,
+        "min_quote_volume_brl": min_quote_volume,
+        "trading_profile": profile.trading_profile,
+    }
+
+    if exchange not in enabled_exchanges:
+        return False, "exchange_disabled", details
+    if config.enabled_pairs and opportunity.pair not in config.enabled_pairs:
+        return False, "pair_not_enabled", details
+    if opportunity.volatility_pct < config.thresholds.min_volatility_pct:
+        return False, "volatility_below_threshold", details
+    if opportunity.liquidity_units < config.thresholds.min_liquidity_units:
+        return False, "insufficient_liquidity", details
+    if opportunity.spread_pct > config.thresholds.max_spread_pct:
+        return False, "spread_above_threshold", details
+    if opportunity.quote_volume_24h < min_quote_volume:
+        return False, "insufficient_volume", details
+    if movement not in enabled_movements:
+        return False, "movement_type_not_supported", details
+    return True, None, details
+
+
+def explain_alert_scope(opportunity: Opportunity, config: AppConfig) -> tuple[bool, str | None, dict[str, object]]:
+    details: dict[str, object] = {
+        "score": opportunity.score,
+        "opportunity_type": opportunity.opportunity_type,
+        "operable_signal": opportunity.operable_signal,
+        "executability_score": opportunity.executability_score,
+        "telegram_operable_only": config.telegram_operable_only,
+        "telegram_min_executability_score": config.telegram_min_executability_score,
+    }
+
     if opportunity.opportunity_type == "avoid":
-        return False
+        return False, "opportunity_type_not_alertable", details
 
     if config.telegram_alert_exchanges:
         allowed = {
@@ -55,19 +114,21 @@ def opportunity_matches_alert_scope(opportunity: Opportunity, config: AppConfig)
             for exchange in config.telegram_alert_exchanges
         }
         if opportunity.exchange.value not in allowed:
-            return False
+            details["allowed_exchanges"] = sorted(allowed)
+            return False, "exchange_not_in_alert_scope", details
 
     if config.telegram_alert_pairs and opportunity.pair not in set(config.telegram_alert_pairs):
-        return False
+        details["allowed_pairs"] = sorted(config.telegram_alert_pairs)
+        return False, "pair_not_in_alert_scope", details
 
     if config.telegram_operable_only and not opportunity.operable_signal:
-        return False
+        return False, "not_operable_for_alert_scope", details
 
     if (
         config.telegram_min_executability_score is not None
         and opportunity.executability_score is not None
         and opportunity.executability_score < config.telegram_min_executability_score
     ):
-        return False
+        return False, "below_min_executability", details
 
-    return True
+    return True, None, details

@@ -1093,13 +1093,40 @@ async def missed_signal_diagnostic(
     pair: str,
     from_time: datetime = Query(alias="from"),
     to_time: datetime = Query(alias="to"),
+    x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    workspace, config = await resolve_workspace_context(session_info, x_workspace_id)
+    catalog_status = None
+    try:
+        pair_status = await get_pair_exchange_diagnostic(exchange, pair)
+        catalog_status = {
+            "exchange": exchange.value,
+            "pair": pair_status.get("pair", pair.upper().replace("/", "_")),
+            "display_name": pair_status.get("display_name"),
+            "raw_symbol": pair_status.get("raw_symbol"),
+            "exists_in_catalog": pair_status.get("exists_in_catalog"),
+            "overall_status": pair_status.get("overall_status"),
+            "checked_at": pair_status.get("checked_at"),
+            "checks": pair_status.get("checks", []),
+        }
+    except Exception as exc:
+        logger.warning("missed_signal_catalog_status_failed exchange=%s pair=%s error=%s", exchange.value, pair, exc)
+        catalog_status = {
+            "exchange": exchange.value,
+            "pair": pair.upper().replace("/", "_"),
+            "overall_status": "error",
+            "error": str(exc),
+        }
+
     return await get_missed_signal_diagnostic(
         exchange=exchange.value,
         pair=pair,
         from_time=from_time,
         to_time=to_time,
+        workspace_id=workspace.id,
+        workspace_config=config,
+        catalog_status=catalog_status,
     )
 
 

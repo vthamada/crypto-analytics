@@ -10,6 +10,7 @@ from app.api import routes
 from app.models.database import Base
 from app.models.schemas import AppConfig, Exchange, MovementType, Opportunity, ScoreWeights
 from app.services import auth, persistence
+from app.services.workspace_profiles import explain_alert_scope, explain_workspace_visibility
 
 
 def test_workspace_configs_are_isolated_per_tenant(monkeypatch):
@@ -169,3 +170,41 @@ def test_workspace_projection_uses_workspace_specific_weights_and_filters():
     assert projected_volatility.executability_score == 82.0
     assert projected_volatility.operable_signal is True
     assert projected_spread.executability_band == "strong"
+
+
+def test_workspace_and_alert_explain_block_reasons_are_specific():
+    opportunity = Opportunity(
+        id="opp-explain-1",
+        exchange=Exchange.BINANCE,
+        pair="BTC_BRL",
+        score=64,
+        technical_score=64,
+        executability_score=42.0,
+        executability_band="weak",
+        interesting_signal=True,
+        operable_signal=False,
+        volatility_pct=5,
+        volume_24h=1000,
+        quote_volume_24h=150000,
+        liquidity_units=8000,
+        spread_pct=0.2,
+        movement_type=MovementType.STRONG_RANGE,
+        last_price=100000,
+        change_pct=4,
+    )
+    config = AppConfig(
+        enabled_pairs=["ETH_BRL"],
+        enabled_exchanges=[Exchange.BINANCE],
+        telegram_operable_only=True,
+        telegram_min_executability_score=70.0,
+    )
+
+    visible, visibility_reason, visibility_details = explain_workspace_visibility(opportunity, config)
+    in_scope, alert_reason, alert_details = explain_alert_scope(opportunity, config)
+
+    assert visible is False
+    assert visibility_reason == "pair_not_enabled"
+    assert visibility_details["pair"] == "BTC_BRL"
+    assert in_scope is False
+    assert alert_reason == "not_operable_for_alert_scope"
+    assert alert_details["operable_signal"] is False

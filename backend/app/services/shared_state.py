@@ -30,6 +30,7 @@ from app.models.database import (
     normalize_db_datetime,
 )
 from app.models.schemas import AppConfig, Opportunity, ScoreWeights
+from app.services.telegram import telegram_destination_configured
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +263,9 @@ async def get_missed_signal_diagnostic(
     pair: str,
     from_time: datetime,
     to_time: datetime,
+    workspace_id: str | None = None,
+    workspace_config: AppConfig | None = None,
+    catalog_status: dict | None = None,
 ) -> dict:
     normalized_exchange = exchange.value if hasattr(exchange, "value") else str(exchange)
     normalized_pair = pair.upper().replace("/", "_")
@@ -335,6 +339,7 @@ async def get_missed_signal_diagnostic(
         status = "events_found"
     else:
         status = "insufficient_audit_data"
+    final_state, root_cause_event = _summarize_signal_final_state(timeline, workspace_id=workspace_id)
 
     return {
         "exchange": normalized_exchange,
@@ -342,6 +347,17 @@ async def get_missed_signal_diagnostic(
         "from": normalize_db_datetime(from_time).isoformat(),
         "to": normalize_db_datetime(to_time).isoformat(),
         "status": status,
+        "final_state": final_state,
+        "root_cause_stage": root_cause_event.get("stage") if root_cause_event else None,
+        "root_cause_reason": root_cause_event.get("reason") if root_cause_event else None,
+        "workspace_status": _build_workspace_signal_status(
+            exchange=normalized_exchange,
+            pair=normalized_pair,
+            workspace_id=workspace_id,
+            config=workspace_config,
+            timeline=timeline,
+        ),
+        "catalog_status": catalog_status,
         "message": (
             "Linha do tempo encontrada para o par no intervalo."
             if timeline
@@ -349,6 +365,92 @@ async def get_missed_signal_diagnostic(
         ),
         "timeline": timeline,
         "cycle_summaries": cycle_summaries,
+    }
+
+
+def _summarize_signal_final_state(
+    timeline: list[dict],
+    *,
+    workspace_id: str | None,
+) -> tuple[str, dict | None]:
+    if not timeline:
+        return "insufficient_audit_data", None
+
+    scoped_events = [
+        event
+        for event in timeline
+        if workspace_id is None or event.get("workspace_id") in (None, workspace_id)
+    ]
+    workspace_events = [
+        event for event in timeline if workspace_id is not None and event.get("workspace_id") == workspace_id
+    ]
+    events = scoped_events or timeline
+
+    for event in reversed(events):
+        if event.get("stage") == "alert" and event.get("status") == "sent":
+            return "alerted", event
+    for event in reversed(workspace_events):
+        if event.get("stage") == "alert" and event.get("status") == "blocked":
+            return "alert_blocked", event
+    for event in reversed(workspace_events):
+        if event.get("stage") == "workspace_projection" and event.get("status") == "blocked":
+            return "not_visible_for_workspace", event
+    for event in reversed(workspace_events):
+        if event.get("stage") == "workspace_projection" and event.get("status") == "visible":
+            return "visible_not_alerted", event
+    for event in reversed(events):
+        if event.get("status") == "error":
+            return "provider_error", event
+    for event in reversed(events):
+        if event.get("status") in {"blocked", "discarded"}:
+            return "discarded_before_alert", event
+    for event in reversed(events):
+        if event.get("stage") == "ranking" and event.get("status") in {"ranked", "opportunity"}:
+            return "technical_signal_created", event
+    return "audited_without_terminal_decision", events[-1] if events else None
+
+
+def _build_workspace_signal_status(
+    *,
+    exchange: str,
+    pair: str,
+    workspace_id: str | None,
+    config: AppConfig | None,
+    timeline: list[dict],
+) -> dict | None:
+    if config is None:
+        return None
+
+    enabled_exchanges = {
+        item.value if hasattr(item, "value") else str(item)
+        for item in config.enabled_exchanges
+    }
+    workspace_events = [
+        event for event in timeline if workspace_id is None or event.get("workspace_id") == workspace_id
+    ]
+    latest_projection = next(
+        (event for event in reversed(workspace_events) if event.get("stage") == "workspace_projection"),
+        None,
+    )
+    latest_alert = next(
+        (event for event in reversed(workspace_events) if event.get("stage") == "alert"),
+        None,
+    )
+    return {
+        "workspace_id": workspace_id,
+        "exchange_enabled": exchange in enabled_exchanges,
+        "pair_enabled_or_dynamic": not config.enabled_pairs or pair in config.enabled_pairs,
+        "telegram_enabled": config.telegram_enabled,
+        "telegram_destination_configured": telegram_destination_configured(
+            token=config.telegram_bot_token,
+            chat_id=config.telegram_chat_id,
+        ),
+        "telegram_alert_threshold": config.telegram_alert_threshold,
+        "telegram_alert_types": list(config.telegram_alert_types),
+        "latest_projection_status": latest_projection.get("status") if latest_projection else None,
+        "latest_projection_reason": latest_projection.get("reason") if latest_projection else None,
+        "latest_alert_status": latest_alert.get("status") if latest_alert else None,
+        "latest_alert_reason": latest_alert.get("reason") if latest_alert else None,
     }
 
 

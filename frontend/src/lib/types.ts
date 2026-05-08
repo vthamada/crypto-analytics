@@ -507,12 +507,43 @@ export interface MissedSignalCycleSummary {
   error?: string | null;
 }
 
+export interface MissedSignalWorkspaceStatus {
+  workspace_id?: string | null;
+  exchange_enabled: boolean;
+  pair_enabled_or_dynamic: boolean;
+  telegram_enabled: boolean;
+  telegram_destination_configured: boolean;
+  telegram_alert_threshold: number;
+  telegram_alert_types: string[];
+  latest_projection_status?: string | null;
+  latest_projection_reason?: string | null;
+  latest_alert_status?: string | null;
+  latest_alert_reason?: string | null;
+}
+
+export interface MissedSignalCatalogStatus {
+  exchange?: Exchange | string;
+  pair?: string;
+  display_name?: string | null;
+  raw_symbol?: string | null;
+  exists_in_catalog?: boolean;
+  overall_status?: "ok" | "warning" | "error" | string;
+  checked_at?: string | null;
+  checks?: PairDiagnosticCheck[];
+  error?: string;
+}
+
 export interface MissedSignalDiagnostic {
   exchange: Exchange | string;
   pair: string;
   from: string;
   to: string;
   status: "events_found" | "insufficient_audit_data" | string;
+  final_state: string;
+  root_cause_stage?: string | null;
+  root_cause_reason?: string | null;
+  workspace_status?: MissedSignalWorkspaceStatus | null;
+  catalog_status?: MissedSignalCatalogStatus | null;
   message: string;
   timeline: MissedSignalTimelineEvent[];
   cycle_summaries: MissedSignalCycleSummary[];

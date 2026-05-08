@@ -41,7 +41,12 @@ from app.services.shared_state import (
     update_scanner_runtime_state,
     write_opportunity_snapshots,
 )
-from app.services.workspace_profiles import opportunity_matches_alert_scope
+from app.services.signal_audit import build_signal_pipeline_event, split_top_telegram_candidates
+from app.services.workspace_profiles import (
+    explain_alert_scope,
+    explain_workspace_visibility,
+    opportunity_matches_alert_scope,
+)
 from app.services.monitoring import scan_monitor
 from app.services.logging_handlers import HTTPLogHandler
 from app.services.auth import ensure_admin_bootstrap
@@ -163,14 +168,43 @@ async def scan_loop() -> None:
             alert_events: list[dict] = []
 
             for workspace_id, workspace_config in workspace_configs.items():
-                projected_opportunities = [
-                    projected
-                    for projected in (
-                        project_workspace_opportunity(opportunity, workspace_config)
-                        for opportunity in opportunities
+                projected_opportunities = []
+                for opportunity in opportunities:
+                    visible, block_reason, visibility_details = explain_workspace_visibility(opportunity, workspace_config)
+                    projected = project_workspace_opportunity(opportunity, workspace_config) if visible else None
+                    if projected is None:
+                        alert_block_reasons[block_reason or "workspace_projection_blocked"] = (
+                            alert_block_reasons.get(block_reason or "workspace_projection_blocked", 0) + 1
+                        )
+                        alert_events.append(
+                            build_signal_pipeline_event(
+                                opportunity,
+                                stage="workspace_projection",
+                                status="blocked",
+                                reason=block_reason or "workspace_projection_blocked",
+                                event_type="workspace_projection",
+                                workspace_id=workspace_id,
+                                details=visibility_details,
+                            )
+                        )
+                        continue
+
+                    projected_opportunities.append(projected)
+                    alert_events.append(
+                        build_signal_pipeline_event(
+                            projected,
+                            stage="workspace_projection",
+                            status="visible",
+                            reason="config_match",
+                            event_type="workspace_projection",
+                            workspace_id=workspace_id,
+                            details={
+                                "score": projected.score,
+                                "opportunity_type": projected.opportunity_type,
+                                "operable_signal": projected.operable_signal,
+                            },
+                        )
                     )
-                    if projected is not None
-                ]
                 projected_opportunities_by_workspace[workspace_id] = projected_opportunities
 
                 # Save workspace signal projections for signals that have IDs
@@ -228,6 +262,7 @@ async def scan_loop() -> None:
 
             # Send Telegram alerts with per-workspace configurable threshold
             for workspace_id, workspace_config in workspace_configs.items():
+                projected_opportunities = projected_opportunities_by_workspace.get(workspace_id, [])
                 if not (
                     workspace_config.telegram_enabled
                     and telegram_destination_configured(
@@ -235,17 +270,43 @@ async def scan_loop() -> None:
                         chat_id=workspace_config.telegram_chat_id,
                     )
                 ):
+                    reason = "telegram_disabled" if not workspace_config.telegram_enabled else "telegram_not_configured"
+                    alert_block_reasons[reason] = alert_block_reasons.get(reason, 0) + len(projected_opportunities)
+                    for opp in projected_opportunities:
+                        alert_events.append(
+                            build_signal_pipeline_event(
+                                opp,
+                                stage="alert",
+                                status="blocked",
+                                reason=reason,
+                                event_type="alert",
+                                workspace_id=workspace_id,
+                                details={"score": opp.score, "opportunity_type": opp.opportunity_type},
+                            )
+                        )
                     continue
 
                 alert_threshold = getattr(workspace_config, "telegram_alert_threshold", 60.0)
-                projected_opportunities = projected_opportunities_by_workspace.get(workspace_id, [])
 
                 # Filter by alert types if configured
                 alert_types = set(getattr(workspace_config, "telegram_alert_types", ["operable", "high_score", "arbitrage"]))
                 eligible = []
                 for opp in projected_opportunities:
-                    if not opportunity_matches_alert_scope(opp, workspace_config):
-                        alert_block_reasons["workspace_alert_scope_mismatch"] = alert_block_reasons.get("workspace_alert_scope_mismatch", 0) + 1
+                    in_scope, scope_reason, scope_details = explain_alert_scope(opp, workspace_config)
+                    if not in_scope:
+                        reason = scope_reason or "workspace_alert_scope_mismatch"
+                        alert_block_reasons[reason] = alert_block_reasons.get(reason, 0) + 1
+                        alert_events.append(
+                            build_signal_pipeline_event(
+                                opp,
+                                stage="alert",
+                                status="blocked",
+                                reason=reason,
+                                event_type="alert",
+                                workspace_id=workspace_id,
+                                details=scope_details,
+                            )
+                        )
                         continue
                     matches_alert_type = (
                         ("operable" in alert_types and bool(opp.operable_signal))
@@ -254,38 +315,65 @@ async def scan_loop() -> None:
                     )
                     if not matches_alert_type:
                         alert_block_reasons["below_alert_threshold"] = alert_block_reasons.get("below_alert_threshold", 0) + 1
+                        alert_events.append(
+                            build_signal_pipeline_event(
+                                opp,
+                                stage="alert",
+                                status="blocked",
+                                reason="below_alert_threshold",
+                                event_type="alert",
+                                workspace_id=workspace_id,
+                                details={
+                                    "score": opp.score,
+                                    "threshold": alert_threshold,
+                                    "alert_types": sorted(alert_types),
+                                },
+                            )
+                        )
                         continue
                     eligible.append(opp)
 
                 if eligible:
                     alerts_created += len(eligible)
+                    alert_candidates, lower_priority = split_top_telegram_candidates(eligible, top_n=5)
+                    alerts_suppressed += len(lower_priority)
+                    for opp in lower_priority:
+                        alert_block_reasons["lower_than_competing_signals"] = alert_block_reasons.get("lower_than_competing_signals", 0) + 1
+                        alert_events.append(
+                            build_signal_pipeline_event(
+                                opp,
+                                stage="alert",
+                                status="blocked",
+                                reason="lower_than_competing_signals",
+                                event_type="alert",
+                                workspace_id=workspace_id,
+                                details={"score": opp.score, "candidate_count": len(eligible), "top_n": 5},
+                            )
+                        )
                     sent = await send_telegram_alert(
-                        eligible,
+                        alert_candidates,
                         token=workspace_config.telegram_bot_token,
                         chat_id=workspace_config.telegram_chat_id,
                         cooldown_seconds=workspace_config.telegram_alert_cooldown_seconds,
                     )
                     if sent:
-                        alerts_sent += len(eligible)
+                        alerts_sent += len(alert_candidates)
                     else:
-                        alerts_suppressed += len(eligible)
-                    for opp in eligible:
-                        alert_events.append({
-                            "exchange": opp.exchange,
-                            "pair": opp.pair,
-                            "stage": "alert",
-                            "status": "sent" if sent else "blocked",
-                            "reason": "telegram_sent" if sent else "cooldown_active",
-                            "event_type": "alert",
-                            "workspace_id": workspace_id,
-                            "technical_signal_id": opp.technical_signal_id,
-                            "opportunity_id": opp.id,
-                            "details": {"score": opp.score, "opportunity_type": opp.opportunity_type},
-                        })
+                        alerts_suppressed += len(alert_candidates)
+                    for opp in alert_candidates:
+                        alert_events.append(
+                            build_signal_pipeline_event(
+                                opp,
+                                stage="alert",
+                                status="sent" if sent else "blocked",
+                                reason="telegram_sent" if sent else "cooldown_active",
+                                event_type="alert",
+                                workspace_id=workspace_id,
+                                details={"score": opp.score, "opportunity_type": opp.opportunity_type},
+                            )
+                        )
                 else:
                     alerts_suppressed += len(projected_opportunities)
-                    if projected_opportunities and not workspace_config.telegram_enabled:
-                        alert_block_reasons["telegram_disabled"] = alert_block_reasons.get("telegram_disabled", 0) + len(projected_opportunities)
 
             if alert_events:
                 await save_signal_pipeline_events(cycle_id, alert_events)

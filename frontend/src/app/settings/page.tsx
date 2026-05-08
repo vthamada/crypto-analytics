@@ -3025,6 +3025,43 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
+                    <div className="grid gap-2 md:grid-cols-3">
+                      <div className="rounded-lg border bg-background p-3 text-xs">
+                        <p className="font-semibold">Conclusao</p>
+                        <p className="mt-1 text-muted-foreground">{formatMissedSignalFinalState(missedSignalDiagnostic.final_state)}</p>
+                        {missedSignalDiagnostic.root_cause_reason ? (
+                          <p className="mt-2 text-muted-foreground">
+                            Causa: {formatPipelineReason(missedSignalDiagnostic.root_cause_reason)}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="rounded-lg border bg-background p-3 text-xs">
+                        <p className="font-semibold">Workspace</p>
+                        {missedSignalDiagnostic.workspace_status ? (
+                          <div className="mt-1 space-y-1 text-muted-foreground">
+                            <p>Exchange: {missedSignalDiagnostic.workspace_status.exchange_enabled ? "habilitada" : "bloqueada"}</p>
+                            <p>Par: {missedSignalDiagnostic.workspace_status.pair_enabled_or_dynamic ? "habilitado/dinamico" : "fora da lista"}</p>
+                            <p>Telegram: {missedSignalDiagnostic.workspace_status.telegram_enabled ? "ativo" : "desativado"}</p>
+                            <p>Ultimo alerta: {formatPipelineReason(missedSignalDiagnostic.workspace_status.latest_alert_reason)}</p>
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-muted-foreground">Sem contexto de workspace.</p>
+                        )}
+                      </div>
+                      <div className="rounded-lg border bg-background p-3 text-xs">
+                        <p className="font-semibold">Catalogo da exchange</p>
+                        {missedSignalDiagnostic.catalog_status ? (
+                          <div className="mt-1 space-y-1 text-muted-foreground">
+                            <p>Status: {formatCatalogStatus(missedSignalDiagnostic.catalog_status.overall_status)}</p>
+                            <p>Existe: {missedSignalDiagnostic.catalog_status.exists_in_catalog === false ? "nao" : "sim/indeterminado"}</p>
+                            {missedSignalDiagnostic.catalog_status.error ? <p>Erro: {missedSignalDiagnostic.catalog_status.error}</p> : null}
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-muted-foreground">Catalogo nao consultado.</p>
+                        )}
+                      </div>
+                    </div>
+
                     {missedSignalDiagnostic.cycle_summaries.length > 0 ? (
                       <div className="grid gap-2 md:grid-cols-2">
                         {missedSignalDiagnostic.cycle_summaries.slice(0, 4).map((cycle) => (
@@ -3261,6 +3298,7 @@ function formatPipelineStage(stage: string): string {
     promotion: "Promocao",
     deep_scan: "Analise profunda",
     ranking: "Ranking",
+    workspace_projection: "Workspace",
     alert: "Alerta",
   };
   return labels[stage] ?? stage;
@@ -3274,6 +3312,7 @@ function formatPipelineStatus(status: string): string {
     blocked: "bloqueado",
     ranked: "ranqueado",
     opportunity: "sinal",
+    visible: "visivel",
     sent: "enviado",
     error: "erro",
   };
@@ -3284,23 +3323,62 @@ function formatPipelineReason(reason?: string | null): string {
   if (!reason) return "-";
   const labels: Record<string, string> = {
     below_alert_threshold: "abaixo do limite de alerta",
+    below_min_executability: "executabilidade abaixo do minimo",
     candidate: "candidato",
     candidate_limit_lower_priority: "prioridade menor no limite de candidatos",
+    config_match: "passou nos filtros do workspace",
     cooldown_active: "cooldown ativo",
     entered_cycle_ranking: "entrou no ranking do ciclo",
+    exchange_disabled: "exchange desabilitada no workspace",
+    exchange_not_in_alert_scope: "exchange fora do alerta",
     insufficient_liquidity: "liquidez insuficiente",
     insufficient_movement: "movimento insuficiente",
     insufficient_volume: "volume insuficiente",
+    lower_than_competing_signals: "ficou fora do top 5",
     missing_candles: "candles ausentes",
     missing_order_book: "book ausente",
     missing_ticker: "ticker ausente",
+    movement_type_not_supported: "tipo de movimento nao suportado",
+    not_operable_for_alert_scope: "nao operavel para alerta",
+    opportunity_type_not_alertable: "tipo de oportunidade nao alertavel",
+    pair_not_enabled: "par fora da lista do workspace",
+    pair_not_in_alert_scope: "par fora do alerta",
     selected_for_deep_scan: "selecionado para analise profunda",
+    spread_above_threshold: "spread acima do limite",
     spread_unfavorable: "spread desfavoravel",
     telegram_sent: "Telegram enviado",
+    telegram_disabled: "Telegram desativado",
+    telegram_not_configured: "Telegram nao configurado",
     volume_below_minimum: "volume abaixo do minimo",
+    volatility_below_threshold: "volatilidade abaixo do limite",
     workspace_alert_scope_mismatch: "fora do escopo de alerta",
   };
   return labels[reason] ?? reason.replaceAll("_", " ");
+}
+
+function formatMissedSignalFinalState(state: string): string {
+  const labels: Record<string, string> = {
+    alerted: "Alerta enviado.",
+    alert_blocked: "Sinal chegou ao alerta, mas foi bloqueado.",
+    audited_without_terminal_decision: "Houve auditoria, mas sem decisao final clara.",
+    discarded_before_alert: "Sinal descartado antes de virar alerta.",
+    insufficient_audit_data: "Sem trilha auditavel no periodo.",
+    not_visible_for_workspace: "Sinal nao ficou visivel para este workspace.",
+    provider_error: "Falha ou dado incompleto na exchange.",
+    technical_signal_created: "Sinal tecnico criado, sem alerta registrado.",
+    visible_not_alerted: "Sinal visivel, mas nao alertado.",
+  };
+  return labels[state] ?? state.replaceAll("_", " ");
+}
+
+function formatCatalogStatus(status?: string | null): string {
+  if (!status) return "indeterminado";
+  const labels: Record<string, string> = {
+    ok: "ok",
+    warning: "atencao",
+    error: "erro",
+  };
+  return labels[status] ?? status;
 }
 
 function formatEventDetails(details: Record<string, unknown>): string {
