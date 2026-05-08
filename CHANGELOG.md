@@ -26,6 +26,7 @@ Convencao deste repositorio:
 - Provider NovaDAX passou a calcular `change_pct_24h` a partir de `open24h` quando a API nao retorna `change24h`, evitando descarte total dos pares por erro de ticker no scan leve.
 - Watchlist de pares deixou de limitar dashboard, historico e universo de scan; o scanner agora avalia o catalogo BRL descoberto e usa pares selecionados apenas como destaque/diagnostico.
 - Configuracao `pair_universe_mode` permite escolher entre monitorar todos os pares BRL das exchanges habilitadas ou restringir scan/dashboard/historico apenas a watchlist.
+- Migration `0014_revoke_public_rls_function_execute` remove permissao herdada de `PUBLIC` na funcao `public.rls_auto_enable()`.
 
 ## [2026-05-07]
 
