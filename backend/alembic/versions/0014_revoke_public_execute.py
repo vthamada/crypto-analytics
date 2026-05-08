@@ -1,6 +1,6 @@
 """Revoke inherited public execute on RLS helper.
 
-Revision ID: 0014_revoke_public_rls_function_execute
+Revision ID: 0014_revoke_public_execute
 Revises: 0013_supabase_rls_hardening
 Create Date: 2026-05-08
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 from alembic import op
 
 
-revision = "0014_revoke_public_rls_function_execute"
+revision = "0014_revoke_public_execute"
 down_revision = "0013_supabase_rls_hardening"
 branch_labels = None
 depends_on = None
@@ -30,6 +30,7 @@ def upgrade() -> None:
                 WHERE n.nspname = 'public'
                   AND p.proname = 'rls_auto_enable'
                   AND pg_get_function_arguments(p.oid) = ''
+                  AND pg_get_userbyid(p.proowner) = current_user
             ) THEN
                 REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM PUBLIC;
                 REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM anon;
@@ -55,6 +56,7 @@ def downgrade() -> None:
                 WHERE n.nspname = 'public'
                   AND p.proname = 'rls_auto_enable'
                   AND pg_get_function_arguments(p.oid) = ''
+                  AND pg_get_userbyid(p.proowner) = current_user
             ) THEN
                 GRANT EXECUTE ON FUNCTION public.rls_auto_enable() TO PUBLIC;
             END IF;
