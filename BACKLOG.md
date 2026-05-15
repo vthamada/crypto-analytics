@@ -1,6 +1,6 @@
 # Backlog
 
-Ultima revisao: 2026-05-08
+Ultima revisao: 2026-05-15
 
 Este backlog consolida tudo que ainda precisa ser implementado no sistema a partir da especificacao principal em `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEMENTACAO.md`.
 
@@ -50,6 +50,81 @@ Decisoes ja tomadas:
 - [x] Multiusuario base: users, organizations, workspaces, memberships, invites, refresh token, auditoria administrativa.
 - [x] Worker dedicado e API capaz de ler estado compartilhado.
 - [x] Primeira camada de `alert_worthiness`: `accumulation`/`preparation` sem gatilho nao interrompem o usuario por Telegram.
+- [x] Campos persistidos de valor de alerta: `alert_worthiness_score`, `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason`.
+- [x] Cache vazio de provider deixou de ser catalogo valido; ultimo catalogo bom e reaproveitado como `stale`.
+- [x] Metricas compactas de qualidade do funil em `GET /api/diagnostics/funnel-quality`.
+
+---
+
+## Mapa Atual De Pendencias Pela Especificacao
+
+Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEMENTACAO.md`. Esta secao consolida o que ainda falta para o produto aderir totalmente a definicao final do assistente operacional.
+
+### Pendencias P0 / P1 Operacionais
+
+- [ ] **Taxonomia operacional expandida** — refs. 96, 103, 104
+  Evoluir `trade`, `hold`, `observe`, `avoid` para tipos mais precisos: `directional_trade`, `range_trade`, `hold_continuation`, `breakout_trade`, `intra_exchange_spread`, `book_scalping`, `cross_exchange_arbitrage`, `inventory_arbitrage`, `transfer_arbitrage`, `profit_zone`, `observe_only`, `avoid`.
+
+- [ ] **Spread interno e book scalping** — refs. 97, 100, 101
+  Detectar spread dentro da mesma exchange, medir margem liquida, profundidade em book, repeticao, fase do spread e bloquear falso spread sem liquidez.
+
+- [ ] **Arbitragem multi-exchange** — refs. 98, 99, 101, feedback do usuario
+  Generalizar arbitragem para qualquer combinacao de exchanges habilitadas, nao apenas Mercado Bitcoin x NovaDAX, separando `inventory_arbitrage`, `transfer_arbitrage` e `cross_exchange_spread`.
+
+- [ ] **Fases do spread e alertas de spread** — refs. 100, 101
+  Classificar `normal_spread`, `spread_opening`, `spread_operable`, `spread_peak`, `spread_closing`, `spread_stale`, `false_spread`, `illiquid_spread` e alertar apenas quando houver margem operacional real.
+
+- [ ] **Thresholds contextuais por tipo de oportunidade** — refs. 10, 11, 12, 74, 102
+  Substituir cortes rigidos globais por reguas contextuais considerando ativo, liquidez, tamanho de ordem, fase do movimento, tipo de oportunidade e risco de execucao.
+
+- [ ] **Simulacao de multiplos tamanhos de ordem** — refs. 102.3, 102.4
+  Simular R$ 25, R$ 300, R$ 1.000, R$ 5.000 e R$ 10.000, classificando capacidade operacional por tamanho.
+
+- [ ] **Refino de lateralizacao + rompimento** — refs. 50, 59, 60, 61
+  Melhorar deteccao de compressao, rompimento, continuacao, faixa operacional reaproveitavel, zona de compra/venda e risco de movimento esticado.
+
+- [ ] **Ranking usando outcomes e feedbacks de forma ativa** — refs. 62, 63, 89
+  Outcomes e feedback manual ja existem, mas ainda precisam influenciar ranking, calibragem e reducao de falsos positivos/falsos negativos com limites e versao.
+
+- [ ] **Persistencia de cooldown/temperatura por provider/par** — refs. 37, 84, 90
+  Persistir estado `hot`, `warm`, `cold`, falhas recorrentes e cooldown tecnico para sobreviver a restart do worker.
+
+### Pendencias De Auditoria, UX E Produto
+
+- [ ] **Tela dedicada de auditoria operacional** — refs. 75, 88, 89, 103
+  Tirar a auditoria de dentro de Settings e criar tela propria com funil por ciclo, bloqueios, near misses, alertas enviados e gargalos.
+
+- [ ] **Dashboard por tipo de oportunidade** — refs. 18, 88, 103
+  Separar visualmente oportunidades direcionais, faixas operacionais, spread interno, arbitragem multi-exchange, observaveis e auditoria tecnica.
+
+- [ ] **Historico operacional com filtros ricos** — refs. 82, 88, 103
+  Adicionar filtros por direcional, faixa, spread interno, arbitragem, alerta, bloqueado, descartado, fase, motivo e outcome.
+
+- [ ] **Detalhe de oportunidade completo por decisao** — refs. 19, 61, 101, 103
+  Mostrar dados usados, gatilho, liquidez, margem bruta/liquida, risco, necessidade de ordem limitada, dependencia de transferencia e motivo de alerta/bloqueio.
+
+- [ ] **Fluxo de falso negativo reportado pelo usuario** — refs. 71, 76, 85, 89
+  Permitir marcar "deveria ter avisado", associar par/janela e comparar com timeline do funil.
+
+- [ ] **Calibragem visual de near misses** — refs. 85, 89
+  Exibir candidatos quase bons e distancia ate thresholds sem poluir dashboard principal.
+
+- [ ] **Benchmark de egress por tela e governanca de retencao** — refs. 27-33, 84, 90
+  Medir payloads por tela, validar TTLs em producao e garantir que novos endpoints nao reintroduzam datasets brutos.
+
+### Pendencias Estruturais Futuras
+
+- [ ] **Metadados de trading por par/exchange** — refs. 44, 53, 64, 87
+  Persistir status negociavel, minimo de ordem, precisao, limites e disponibilidade para suportar simulacao/paper trading.
+
+- [ ] **Paper trading** — refs. 86, 87, 104.3
+  Simular decisoes, entrada, saida, P&L, drawdown e performance antes de qualquer automacao real.
+
+- [ ] **Camada de risco para trading futuro** — refs. 86, 87
+  Definir limite por operacao, perda diaria, exposicao, ativo, exchange, kill switch e regras versionadas.
+
+- [ ] **SaaS multi-tenant maduro** — refs. arquitetura/produto, P3 deste backlog
+  Feature gates por plano, Stripe, billing portal, cadastro publico, email transacional e administracao da organizacao.
 
 ---
 
