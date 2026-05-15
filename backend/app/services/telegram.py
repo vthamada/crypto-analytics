@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_API = "https://api.telegram.org"
 _last_alert_sent_at: dict[str, datetime] = {}
+_last_alert_state_by_key: dict[str, str] = {}
 
 
 def resolve_telegram_destination(*, token: str = "", chat_id: str = "") -> tuple[str, str]:
@@ -92,7 +93,7 @@ def rank_telegram_opportunity(opp: Opportunity) -> float:
     phase_bonus = {
         "early_breakout": 8.0,
         "continuation": 5.0,
-        "accumulation": 2.0,
+        "accumulation": -6.0,
         "extended": -4.0,
         "distribution_or_profit_zone": -6.0,
         "exhaustion": -8.0,
@@ -130,6 +131,49 @@ def _destination_key(token: str, chat_id: str) -> str:
 
 def _alert_key(opp: Opportunity, *, destination_key: str) -> str:
     return f"{destination_key}:{opp.exchange.value}:{opp.pair}"
+
+
+def _opportunity_alert_state(opp: Opportunity) -> str:
+    if opp.alert_state_key:
+        return opp.alert_state_key
+    phase = opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase
+    return "|".join(
+        [
+            opp.alert_trigger_type or "no_trigger",
+            str(phase or "neutral"),
+            str(opp.alert_moment_type or "neutral"),
+            str(opp.opportunity_type or "unknown"),
+            f"score_{int((opp.score or 0) // 10) * 10}",
+        ]
+    )
+
+
+def split_alerts_by_state_change(
+    opportunities: list[Opportunity],
+    *,
+    token: str = "",
+    chat_id: str = "",
+) -> tuple[list[Opportunity], list[Opportunity]]:
+    effective_token, effective_chat_id = resolve_telegram_destination(token=token, chat_id=chat_id)
+    if not effective_token or not effective_chat_id:
+        return opportunities, []
+
+    destination_key = _destination_key(effective_token, effective_chat_id)
+    changed: list[Opportunity] = []
+    unchanged: list[Opportunity] = []
+    for opp in opportunities:
+        key = _alert_key(opp, destination_key=destination_key)
+        current_state = _opportunity_alert_state(opp)
+        if _last_alert_state_by_key.get(key) == current_state:
+            unchanged.append(opp)
+        else:
+            changed.append(opp)
+    return changed, unchanged
+
+
+def _mark_alert_states_sent(opportunities: list[Opportunity], *, destination_key: str) -> None:
+    for opp in opportunities:
+        _last_alert_state_by_key[_alert_key(opp, destination_key=destination_key)] = _opportunity_alert_state(opp)
 
 
 def _filter_by_cooldown(
@@ -201,7 +245,9 @@ async def send_telegram_alert(
         await _send_message(token=effective_token, chat_id=effective_chat_id, text=message)
         now = datetime.now(timezone.utc)
         for opp in top:
-            _last_alert_sent_at[_alert_key(opp, destination_key=destination_key)] = now
+            key = _alert_key(opp, destination_key=destination_key)
+            _last_alert_sent_at[key] = now
+        _mark_alert_states_sent(top, destination_key=destination_key)
         logger.info("Telegram alert sent successfully")
         return True
     except Exception as e:

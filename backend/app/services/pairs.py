@@ -129,6 +129,29 @@ async def _fetch_provider_pairs(enabled_exchanges: list[Exchange] | None = None)
                 continue
 
             normalized_pairs = sorted({normalize_pair_symbol(pair) for pair in result if pair})
+            if not normalized_pairs:
+                stale_pairs = _provider_last_successful_pairs.get(provider.exchange, [])
+                provider_pairs[provider.exchange] = stale_pairs
+                provider_status.append(
+                    {
+                        "exchange": provider.exchange,
+                        "returned_pairs": len(stale_pairs),
+                        "brl_pairs": len([pair for pair in stale_pairs if pair.endswith("_BRL")]),
+                        "status": "stale" if stale_pairs else "empty",
+                        "checked_at": checked_at,
+                        "error_message": "provider returned an empty catalog"
+                        if stale_pairs
+                        else "provider returned no catalog pairs",
+                        "examples": stale_pairs[:5],
+                    }
+                )
+                logger.warning(
+                    "available_pairs_provider_empty exchange=%s stale_pairs=%s",
+                    provider.exchange.value,
+                    len(stale_pairs),
+                )
+                continue
+
             brl_pairs = [pair for pair in normalized_pairs if pair.endswith("_BRL")]
             _provider_last_successful_pairs[provider.exchange] = normalized_pairs
             provider_pairs[provider.exchange] = normalized_pairs
@@ -459,7 +482,14 @@ async def get_available_pairs_catalog(
 
     provider_pairs = await _fetch_provider_pairs(normalized_exchanges)
     payload = _build_catalog_payload(provider_pairs, now, enabled_exchanges=normalized_exchanges)
-    _set_cache_entry(cache_key, payload, now)
+    has_any_catalog_pairs = any(provider_pairs.get(exchange) for exchange in normalized_exchanges)
+    if has_any_catalog_pairs:
+        _set_cache_entry(cache_key, payload, now)
+    else:
+        logger.warning(
+            "available_pairs_catalog_empty_not_cached exchanges=%s",
+            [exchange.value for exchange in normalized_exchanges],
+        )
     return payload
 
 

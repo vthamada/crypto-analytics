@@ -2836,6 +2836,10 @@ Essa definição deve orientar as próximas implementações.
 ### 79.1 Implementado
 
 - NovaDAX: `get_ticker()` passou a derivar `change_pct_24h` a partir de `open24h` quando `change24h` nao vem na API publica.
+- NovaDAX: a descoberta de pares passou a normalizar `AAA_BRL`, `AAABRL`, `AAA/BRL` e payloads com `baseCurrency`/`quoteCurrency`, evitando perda de pares por variacao de formato da API.
+- Catalogo: resposta vazia de provider nao substitui mais o ultimo catalogo valido; quando houver catalogo anterior, o sistema marca `stale` com erro explicito.
+- Alertas: `alert_worthiness_score`, `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason` passaram a ser campos persistidos e visiveis no detalhe da oportunidade.
+- Telegram: repeticao do mesmo estado operacional para o mesmo destino/par passa a ser bloqueada como `no_state_change`, reduzindo alertas de moedas paradas na mesma fase.
 - Scanner: o funil passou a emitir eventos compactos para scan leve, promocao, analise profunda, ranking e alertas.
 - Persistencia: foram adicionadas as tabelas `scanner_cycle_audits` e `signal_pipeline_events`.
 - API: foi criado `GET /api/diagnostics/missed-signal?exchange=...&pair=...&from=...&to=...`.
@@ -3535,3 +3539,962 @@ Proximo refinamento recomendado:
 - validar visualmente todas as telas com dados reais para remover combinacoes contraditorias restantes
 - criar tela dedicada de auditoria operacional fora de Settings
 - criar UI de calibragem de near misses e agregar metricas de qualidade do funil
+
+---
+
+## 93. Refinamento após feedback real: alertas úteis e spreads operacionais
+
+### 93.1 Contexto
+
+Após uso real do sistema, o usuário final trouxe novos feedbacks importantes:
+
+- o sistema está enviando muitos alertas de ADA e XRP mesmo quando as moedas estão paradas
+- sinais em `accumulation` / `preparation` estão indo para Telegram cedo demais
+- o usuário não quer apenas movimentos direcionais
+- o usuário opera spreads dentro da própria corretora
+- o usuário opera spreads entre Mercado Bitcoin e NovaDAX
+- o usuário quer ser avisado quando o spread começa a abrir
+- o usuário quer operar mais rápido com ajuda do sistema
+- o usuário considera que spreads operáveis podem ser mais comuns do que movimentos direcionais tradicionais
+
+Esses feedbacks refinam a tese do produto.
+
+O sistema não deve ser apenas um scanner de moedas que sobem.
+
+O sistema deve ser um:
+
+> **radar de operações possíveis em BRL, capaz de detectar movimentos direcionais, faixas operacionais, spreads internos de livro e spreads entre corretoras, sempre filtrando por liquidez, margem líquida, execução e risco.**
+
+### 93.2 Regra de prevalência
+
+Esta seção prevalece sobre qualquer interpretação anterior que trate:
+
+- acumulação simples como alerta obrigatório
+- spread alto apenas como problema
+- todo score técnico alto como oportunidade de Telegram
+- todo movimento observado como oportunidade operacional
+- arbitragem entre exchanges como lucro garantido
+
+---
+
+## 94. Separação entre score operacional e score de alerta
+
+### 94.1 Problema observado
+
+O sistema pode atribuir score alto a ativos parados porque eles possuem:
+
+- boa liquidez
+- bom spread
+- boa executabilidade
+- volume razoável
+- book saudável
+
+Isso não significa que existe uma oportunidade agora.
+
+Um ativo pode ser saudável, mas não acionável.
+
+### 94.2 Requisito
+
+O sistema deve separar obrigatoriamente:
+
+#### `operational_score`
+
+Mede se o ativo/par é operacionalmente saudável.
+
+Considera:
+
+- liquidez
+- volume
+- spread
+- profundidade do book
+- slippage
+- executabilidade
+- risco de ficar preso
+
+#### `alert_worthiness_score`
+
+Mede se vale interromper o usuário agora.
+
+Considera:
+
+- mudança recente de estado
+- gatilho operacional novo
+- abertura de spread
+- rompimento
+- volume entrando
+- alteração relevante no book
+- margem líquida nova ou crescente
+- fase útil do movimento
+- novidade em relação ao último alerta
+- risco de alerta repetido
+- risco de oportunidade atrasada
+
+### 94.3 Regra
+
+Um ativo pode ter `operational_score` alto e `alert_worthiness_score` baixo.
+
+Nesse caso:
+
+- pode aparecer no painel como observável
+- não deve gerar Telegram
+- deve registrar motivo de bloqueio do alerta
+
+### 94.4 Campos sugeridos
+
+Adicionar ou calcular:
+
+- `operational_score`
+- `alert_worthiness_score`
+- `alert_trigger_type`
+- `alert_block_reason`
+- `last_alerted_phase`
+- `last_alerted_at`
+- `state_changed_since_last_alert`
+- `has_actionable_trigger`
+
+### 94.5 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- ativos parados com boa liquidez não gerarem alertas repetidos
+- score técnico alto não for suficiente para Telegram
+- todo alerta tiver um gatilho operacional claro
+- o painel puder observar ativos saudáveis sem alertar o usuário
+
+---
+
+## 95. Controle de ruído: acumulação e preparação não devem alertar por padrão
+
+### 95.1 Problema observado
+
+O usuário final relatou receber muitos alertas de ADA e XRP, mas as moedas estavam paradas.
+
+Os alertas mostravam estados como:
+
+- `accumulation`
+- `preparation`
+- possível lateralização
+- ativo em preparação
+
+Para o usuário final, isso não é suficiente para interrupção por Telegram.
+
+### 95.2 Regra principal
+
+`accumulation` e `preparation` não devem gerar alerta de Telegram por padrão.
+
+Esses estados devem ser tratados como:
+
+- observação no painel
+- possível candidato para acompanhamento
+- base para detecção futura de rompimento ou spread
+- não como oportunidade acionável imediata
+
+### 95.3 Quando preparação pode alertar
+
+Preparação só pode virar alerta se houver gatilho adicional forte, como:
+
+- aumento relevante de volume
+- abertura relevante de spread interno
+- abertura relevante de spread entre exchanges
+- tentativa clara de rompimento
+- mudança brusca no book
+- saída da faixa lateral
+- melhora relevante de margem operacional
+- entrada em `early_breakout`
+- oportunidade de spread líquido operável
+
+### 95.4 Motivos padronizados de bloqueio
+
+Adicionar motivos como:
+
+- `preparation_without_trigger`
+- `sideways_without_volume_expansion`
+- `no_state_change`
+- `repeated_same_phase_alert`
+- `insufficient_alert_worthiness`
+- `accumulation_only`
+- `no_actionable_book_structure`
+- `no_actionable_spread`
+
+### 95.5 Cooldown por fase
+
+Implementar cooldown por par e por fase:
+
+- `preparation`: não alertar por padrão ou cooldown alto
+- `accumulation`: não alertar por padrão ou cooldown alto
+- `early_breakout`: pode alertar com cooldown menor
+- `continuation`: pode alertar se ainda houver margem
+- `extended`: alertar apenas como risco/realização, quando útil
+- `spread_opening`: pode alertar se margem líquida e liquidez forem suficientes
+- `spread_closing`: não alertar como oportunidade; registrar para auditoria
+
+### 95.6 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- ADA/XRP parados não gerarem alertas repetidos
+- Telegram não for usado para preparação simples
+- painel puder mostrar observáveis sem poluir alertas
+- todo alerta explicar o gatilho real
+- alertas repetidos da mesma fase forem bloqueados
+
+---
+
+## 96. Nova taxonomia de oportunidades operacionais
+
+### 96.1 Necessidade
+
+Com base no comportamento real do usuário, o sistema precisa diferenciar várias famílias de oportunidade.
+
+Não é correto tratar tudo como `trade` ou `hold`.
+
+### 96.2 Tipos obrigatórios
+
+Adicionar ou consolidar os seguintes tipos:
+
+- `directional_trade`
+- `range_trade`
+- `hold_continuation`
+- `breakout_trade`
+- `intra_exchange_spread`
+- `book_scalping`
+- `cross_exchange_arbitrage`
+- `inventory_arbitrage`
+- `transfer_arbitrage`
+- `profit_zone`
+- `observe_only`
+- `avoid`
+
+### 96.3 Significado
+
+#### `directional_trade`
+
+Movimento direcional com volume, liquidez e margem.
+
+#### `range_trade`
+
+Compra em zona inferior e venda em zona superior dentro de uma faixa reaproveitável.
+
+#### `hold_continuation`
+
+Movimento forte com possibilidade de continuidade por horas ou dias.
+
+#### `breakout_trade`
+
+Rompimento de lateralização ou faixa relevante.
+
+#### `intra_exchange_spread`
+
+Oportunidade de capturar spread dentro da própria exchange.
+
+#### `book_scalping`
+
+Operação curta baseada em ordens limitadas no livro da mesma corretora.
+
+#### `cross_exchange_arbitrage`
+
+Diferença de preço entre duas exchanges.
+
+#### `inventory_arbitrage`
+
+Arbitragem com saldo ou inventário pré-posicionado nas duas exchanges.
+
+#### `transfer_arbitrage`
+
+Arbitragem que depende de comprar em uma exchange, transferir a cripto e vender em outra.
+
+#### `profit_zone`
+
+Ativo em região potencial de realização/venda.
+
+#### `observe_only`
+
+Ativo interessante, mas sem gatilho operacional suficiente.
+
+#### `avoid`
+
+Ativo ou sinal que deve ser evitado.
+
+### 96.4 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- oportunidades direcionais não forem misturadas com arbitragem
+- spread interno não for misturado com arbitragem entre exchanges
+- preparação/lateralização puder ser observação sem Telegram
+- cada alerta indicar claramente o tipo de oportunidade
+
+---
+
+## 97. Módulo de spread interno e scalping de livro
+
+### 97.1 Contexto
+
+O usuário final informou que trades dentro da própria corretora são muito comuns para ele.
+
+Exemplo citado:
+
+- USDT na NovaDAX já apresentou spreads no próprio livro
+- o usuário comprou e vendeu várias vezes dentro da própria corretora
+- esses trades são mais comuns para o usuário
+
+### 97.2 Princípio
+
+O sistema deve diferenciar:
+
+> **spread como custo de execução imediata**
+
+de
+
+> **spread como oportunidade para ordem limitada**
+
+Um spread alto pode ser ruim para uma ordem a mercado, mas pode ser oportunidade para quem opera ordens limitadas, desde que haja liquidez, margem líquida e repetição.
+
+### 97.3 Requisito
+
+Criar ou refinar módulo de:
+
+- `intra_exchange_spread`
+- `book_scalping`
+- `internal_book_spread_opportunity`
+
+Esse módulo deve analisar oportunidades dentro da mesma exchange.
+
+### 97.4 O que calcular
+
+Para cada par em cada exchange habilitada, quando promovido para análise de book, calcular:
+
+- melhor bid
+- melhor ask
+- spread bruto
+- spread percentual
+- zonas de compra limitadas
+- zonas de venda limitadas
+- profundidade em BRL no lado comprador
+- profundidade em BRL no lado vendedor
+- quantidade disponível por nível relevante
+- margem bruta entre zona de compra e zona de venda
+- taxas estimadas de compra e venda
+- margem líquida estimada
+- risco de execução parcial
+- risco de ficar preso
+- estabilidade do spread
+- repetição do spread
+- tempo de permanência do spread
+- capital suportado
+- adequação para operação pequena, média ou maior
+
+### 97.5 Campos sugeridos
+
+Adicionar ou calcular:
+
+- `intra_exchange_spread_pct`
+- `internal_spread_gross_brl`
+- `internal_spread_net_brl`
+- `internal_spread_net_pct`
+- `book_buy_zone_low`
+- `book_buy_zone_high`
+- `book_sell_zone_low`
+- `book_sell_zone_high`
+- `book_scalping_capacity_brl`
+- `book_spread_repetition_score`
+- `book_spread_stability_score`
+- `limited_order_required`
+- `market_order_not_recommended`
+- `partial_fill_risk_score`
+- `trapped_inventory_risk_score`
+
+### 97.6 Regras
+
+- spread sem liquidez não é oportunidade
+- spread sem margem líquida não é oportunidade
+- spread pontual sem repetição deve ser rebaixado
+- spread operável deve indicar que requer ordem limitada
+- `spread_too_high` não deve ser bloqueio absoluto universal
+- `spread_too_high` deve bloquear execução a mercado, mas pode virar candidato de spread interno
+- o alerta deve deixar claro quando a oportunidade é de spread interno, não de movimento direcional
+
+### 97.7 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- detectar oportunidades de spread interno na NovaDAX e Mercado Bitcoin
+- mostrar quando a oportunidade é dentro da própria corretora
+- calcular margem líquida depois de taxas
+- estimar capital suportado pelo book
+- evitar alertar spread bonito sem liquidez
+- alertar spread interno apenas quando houver margem, liquidez e repetição suficientes
+
+---
+
+## 98. Módulo de arbitragem entre Mercado Bitcoin e NovaDAX
+
+### 98.1 Contexto
+
+O usuário final informou que faz arbitragem entre Mercado Bitcoin e NovaDAX.
+
+Fluxo observado:
+
+- compra cripto na Mercado Bitcoin
+- transfere a cripto para a NovaDAX
+- vende a cripto na NovaDAX
+- transfere o dinheiro da NovaDAX de volta para a Mercado Bitcoin
+- repete o ciclo quando o spread compensa
+
+Exemplo informado:
+
+- compra de 10 SOL na Mercado Bitcoin por aproximadamente R$ 4.609,90
+- venda de 10 SOL na NovaDAX por aproximadamente R$ 4.980,00
+- spread bruto aproximado de R$ 370,10
+
+### 98.2 Requisito
+
+Criar módulo de arbitragem cross-exchange entre:
+
+- Mercado Bitcoin
+- NovaDAX
+
+Inicialmente focado em pares BRL comuns.
+
+### 98.3 O que calcular
+
+Para cada par comum entre as duas exchanges:
+
+- preço de compra na exchange barata
+- preço de venda na exchange cara
+- direção da arbitragem
+- spread bruto em R$
+- spread percentual
+- profundidade disponível para compra
+- profundidade disponível para venda
+- slippage estimado na compra
+- slippage estimado na venda
+- taxa de compra
+- taxa de venda
+- taxa de saque da cripto
+- tempo estimado de transferência
+- lucro bruto estimado
+- lucro líquido estimado
+- margem de segurança
+- risco de execução
+- risco de transferência
+- risco de fechamento do spread
+- capital suportado
+- classificação da oportunidade
+
+### 98.4 Campos sugeridos
+
+Adicionar ou calcular:
+
+- `arbitrage_pair`
+- `buy_exchange`
+- `sell_exchange`
+- `buy_price_estimated`
+- `sell_price_estimated`
+- `gross_spread_brl`
+- `gross_spread_pct`
+- `estimated_buy_slippage_pct`
+- `estimated_sell_slippage_pct`
+- `estimated_trading_fees_brl`
+- `estimated_withdraw_fee_brl`
+- `estimated_net_profit_brl`
+- `estimated_net_profit_pct`
+- `transfer_time_estimate_minutes`
+- `spread_decay_risk_score`
+- `execution_risk_score`
+- `arbitrage_capacity_brl`
+- `arbitrage_mode`
+- `arbitrage_confidence`
+
+### 98.5 Classificações
+
+`arbitrage_mode` deve aceitar:
+
+- `inventory_arbitrage`
+- `transfer_arbitrage`
+- `theoretical_arbitrage`
+
+`arbitrage_confidence` deve aceitar:
+
+- `high`
+- `medium`
+- `low`
+- `avoid`
+
+### 98.6 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- mostrar oportunidades Mercado Bitcoin ↔ NovaDAX em módulo separado
+- indicar onde comprar e onde vender
+- calcular spread bruto e líquido estimado
+- descontar taxas e slippage
+- indicar se há liquidez suficiente
+- indicar risco de transferência
+- não chamar spread pequeno de oportunidade
+- enviar alerta apenas quando a arbitragem for materialmente relevante
+
+---
+
+## 99. Arbitragem com inventário versus arbitragem com transferência
+
+### 99.1 Problema
+
+Comprar em uma corretora, transferir a cripto e vender em outra envolve risco relevante.
+
+A transferência é o principal risco desse tipo de arbitragem.
+
+### 99.2 Arbitragem com inventário pré-posicionado
+
+Mais segura.
+
+Exemplo:
+
+- BRL disponível na Mercado Bitcoin
+- cripto disponível na NovaDAX
+
+Nesse cenário, o usuário consegue:
+
+- comprar na Mercado Bitcoin
+- vender na NovaDAX quase ao mesmo tempo
+
+Depois ele rebalanceia os saldos.
+
+### 99.3 Arbitragem com transferência
+
+Mais arriscada.
+
+Exemplo:
+
+- compra na Mercado Bitcoin
+- transfere para NovaDAX
+- vende depois
+
+Durante a transferência:
+
+- o preço pode mudar
+- o spread pode fechar
+- a rede pode atrasar
+- a exchange pode atrasar crédito
+- o book pode perder liquidez
+- a ordem pode não executar
+- taxas podem consumir margem
+- o ativo pode ficar temporariamente preso
+
+### 99.4 Regra
+
+Arbitragem com transferência não deve ser tratada como lucro garantido.
+
+Deve ser classificada como:
+
+> **oportunidade estimada com risco de execução e tempo**
+
+### 99.5 Requisito
+
+O sistema deve diferenciar claramente:
+
+- oportunidade executável agora com saldo pré-posicionado
+- oportunidade teórica que depende de transferência
+- oportunidade arriscada demais para alertar
+
+### 99.6 Critério de aceitação
+
+O alerta deve explicitar:
+
+- se depende de transferência
+- tempo estimado de transferência
+- risco de fechamento do spread
+- lucro líquido estimado
+- margem de segurança
+- que não é lucro garantido
+
+---
+
+## 100. Ciclo e fases do spread
+
+### 100.1 Objetivo
+
+O usuário quer aproveitar spreads desde o início.
+
+Portanto, o sistema deve detectar não apenas quando o spread já está grande, mas quando ele começa a abrir.
+
+### 100.2 Fases do spread
+
+Adicionar classificação:
+
+- `normal_spread`
+- `spread_opening`
+- `spread_operable`
+- `spread_peak`
+- `spread_closing`
+- `spread_stale`
+- `false_spread`
+- `illiquid_spread`
+
+### 100.3 Significado
+
+#### `normal_spread`
+
+Spread normal para o par/exchange, sem oportunidade.
+
+#### `spread_opening`
+
+Spread começou a abrir acima do padrão recente.
+
+#### `spread_operable`
+
+Spread tem margem líquida, liquidez e execução suficientes.
+
+#### `spread_peak`
+
+Spread muito alto, mas pode estar próximo de fechar ou sem liquidez.
+
+#### `spread_closing`
+
+Spread está reduzindo.
+
+#### `spread_stale`
+
+Spread parado há muito tempo sem execução ou sem liquidez.
+
+#### `false_spread`
+
+Diferença aparente sem book executável.
+
+#### `illiquid_spread`
+
+Spread alto, mas com liquidez insuficiente.
+
+### 100.4 Requisitos
+
+O sistema deve calcular:
+
+- spread atual
+- média recente do spread
+- desvio do spread atual contra o padrão recente
+- tempo de permanência do spread
+- recorrência do spread
+- liquidez disponível durante o spread
+- margem líquida estimada
+- se o spread está abrindo ou fechando
+
+### 100.5 Alertas
+
+Alertar preferencialmente:
+
+- `spread_opening` com indícios fortes
+- `spread_operable` com liquidez e margem
+- `spread_peak` apenas se ainda houver execução viável
+
+Não alertar:
+
+- `normal_spread`
+- `spread_stale`
+- `false_spread`
+- `illiquid_spread`
+- `spread_closing`, salvo se for alerta informativo de encerramento configurado
+
+---
+
+## 101. Regras para alertas de spread
+
+### 101.1 Princípio
+
+Alertas de spread devem ser separados dos alertas de movimento direcional.
+
+O usuário deve entender imediatamente:
+
+- se é operação dentro da exchange
+- se é arbitragem entre exchanges
+- se depende de ordem limitada
+- se depende de transferência
+- se é oportunidade estimada ou executável
+
+### 101.2 Conteúdo mínimo do alerta de spread interno
+
+O alerta deve conter:
+
+- par
+- exchange
+- tipo: spread interno / book scalping
+- zona de compra
+- zona de venda
+- spread bruto
+- margem líquida estimada
+- liquidez disponível
+- capital suportado
+- necessidade de ordem limitada
+- risco de execução parcial
+- motivo do alerta
+
+### 101.3 Conteúdo mínimo do alerta de arbitragem
+
+O alerta deve conter:
+
+- par
+- comprar em qual exchange
+- vender em qual exchange
+- preço estimado de compra
+- preço estimado de venda
+- spread bruto
+- spread líquido estimado
+- liquidez dos dois lados
+- capital suportado
+- modo: inventário ou transferência
+- risco de transferência
+- tempo estimado de transferência
+- motivo do alerta
+
+### 101.4 Bloqueios de alerta de spread
+
+Adicionar motivos:
+
+- `spread_below_minimum`
+- `net_spread_negative`
+- `insufficient_book_depth`
+- `spread_not_recurrent`
+- `spread_stale`
+- `spread_closing`
+- `false_spread`
+- `transfer_risk_too_high`
+- `fees_consume_spread`
+- `slippage_consumes_spread`
+- `no_common_pair_between_exchanges`
+- `deposit_withdraw_status_unknown`
+- `requires_inventory_not_available`
+
+### 101.5 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- Telegram não confundir spread com alta de preço
+- cada alerta de spread explicar exatamente a operação observada
+- spreads pequenos, falsos ou sem liquidez forem bloqueados
+- spreads operáveis forem priorizados
+
+---
+
+## 102. Ajustes nas configurações operacionais
+
+### 102.1 Problema observado
+
+Configurações atuais podem funcionar como cortes rígidos e bloquear oportunidades ou gerar ruído.
+
+Pontos críticos:
+
+- tamanho único de ordem em R$ 1.000
+- slippage de saída rígido
+- spread máximo como bloqueio universal
+- liquidez mínima em unidades
+- volatilidade mínima aplicada antes da fase correta
+- pesos de score favorecendo volatilidade em detrimento de margem e liquidez
+- alertas de preparação enviados sem gatilho
+
+### 102.2 Requisitos
+
+O sistema deve substituir cortes globais rígidos por régua contextual, considerando:
+
+- tipo de oportunidade
+- fase do movimento
+- fase do spread
+- tipo do ativo
+- liquidez absoluta
+- tamanho de operação simulado
+- margem líquida
+- risco de execução
+- risco de transferência
+
+### 102.3 Tamanhos simulados
+
+O sistema deve simular múltiplos tamanhos:
+
+- R$ 25
+- R$ 300
+- R$ 1.000
+- R$ 5.000
+- R$ 10.000
+
+Classificar:
+
+- bom para teste pequeno
+- bom para operação média
+- bom para operação maior
+- insuficiente para o tamanho solicitado
+
+### 102.4 Liquidez
+
+Priorizar liquidez em BRL, não apenas em unidades.
+
+Métricas principais:
+
+- profundidade em BRL para compra
+- profundidade em BRL para venda
+- slippage por tamanho simulado
+- capital máximo estimado
+- liquidez no nível de preço relevante
+
+### 102.5 Spread máximo
+
+`max_spread_pct` não deve ser bloqueio universal.
+
+Deve ser interpretado conforme contexto:
+
+- para execução a mercado: spread alto é risco
+- para ordem limitada: spread alto pode ser oportunidade
+- para arbitragem: spread precisa sobreviver a taxas, slippage e risco
+- para spread interno: spread precisa ter book, repetição e margem líquida
+
+### 102.6 Critério de aceitação
+
+O sistema estará adequado quando:
+
+- thresholds não bloquearem boas oportunidades por regra rígida
+- oportunidades forem avaliadas por contexto
+- configurações mostrarem efeito esperado ao usuário
+- liquidez em unidades não for usada como métrica dominante
+- spread for tratado como risco ou oportunidade conforme tipo de operação
+
+---
+
+## 103. Ajustes obrigatórios na interface
+
+### 103.1 Dashboard
+
+O dashboard deve separar claramente:
+
+- oportunidades direcionais
+- faixas operacionais
+- spreads internos
+- arbitragem entre exchanges
+- observáveis
+- auditoria técnica
+
+### 103.2 Cards principais
+
+Adicionar ou refinar cards para:
+
+- oportunidades operacionais
+- spreads internos ativos
+- arbitragem MB ↔ NovaDAX
+- alertas enviados
+- sinais bloqueados
+- saúde da NovaDAX
+
+### 103.3 Histórico
+
+O histórico deve permitir filtrar por:
+
+- direcional
+- faixa
+- spread interno
+- arbitragem
+- alerta
+- bloqueado
+- descartado
+- auditoria
+
+### 103.4 Detalhe da oportunidade
+
+Cada oportunidade deve mostrar:
+
+- tipo da oportunidade
+- motivo do sinal
+- gatilho do alerta
+- dados usados
+- liquidez
+- margem bruta
+- margem líquida
+- riscos
+- se requer ordem limitada
+- se depende de transferência
+- por que foi alertada ou bloqueada
+
+### 103.5 Critério de aceitação
+
+O usuário deve conseguir diferenciar rapidamente:
+
+- moeda subindo
+- moeda em faixa
+- spread dentro da corretora
+- arbitragem entre corretoras
+- observação sem ação
+- alerta bloqueado por falta de gatilho
+
+---
+
+## 104. Backlog consolidado após spreads e controle de ruído
+
+### 104.1 P0 — Confiabilidade e ruído
+
+Implementar primeiro:
+
+- corrigir NovaDAX ponta a ponta
+- impedir alertas repetidos de `accumulation` / `preparation` sem gatilho
+- criar `alert_worthiness_score`
+- separar score operacional de score de alerta
+- implementar bloqueios `preparation_without_trigger`, `no_state_change` e `insufficient_alert_worthiness`
+- garantir que Telegram receba apenas oportunidades acionáveis
+- registrar motivo de bloqueio de alertas
+- ajustar dashboard para não exibir observações fracas como oportunidades
+- revisar thresholds que hoje funcionam como cortes rígidos
+
+### 104.2 P1 — Spread interno e arbitragem
+
+Implementar depois do P0:
+
+- módulo de spread interno / book scalping
+- módulo de arbitragem Mercado Bitcoin ↔ NovaDAX
+- cálculo de spread bruto e líquido
+- cálculo de margem líquida após taxas e slippage
+- fase do spread
+- alerta de `spread_opening` e `spread_operable`
+- separação entre `inventory_arbitrage` e `transfer_arbitrage`
+- exibição de risco de transferência
+- dashboard separado para spreads e arbitragem
+
+### 104.3 P2 — Validação e evolução
+
+Implementar posteriormente:
+
+- outcomes específicos para oportunidades de spread
+- feedback manual por tipo de oportunidade
+- paper trading de spread interno
+- paper trading de arbitragem
+- integração autenticada futura para saldos
+- status de saque/depósito por exchange
+- estimativa real de taxas de rede
+- relatório de spreads perdidos
+- calibragem de thresholds por par e exchange
+
+---
+
+## 105. Critérios finais de aceitação após este refinamento
+
+O produto estará alinhado ao uso real quando conseguir:
+
+- parar de alertar moedas paradas sem gatilho operacional
+- diferenciar observação de oportunidade
+- detectar movimentos direcionais úteis
+- detectar lateralização seguida de rompimento
+- detectar faixas operacionais reaproveitáveis
+- detectar spread interno dentro da mesma corretora
+- detectar arbitragem entre Mercado Bitcoin e NovaDAX
+- diferenciar arbitragem com inventário de arbitragem com transferência
+- mostrar risco de transferência quando aplicável
+- calcular margem líquida, não apenas margem bruta
+- alertar quando o spread começa a abrir
+- bloquear spreads falsos ou sem liquidez
+- explicar por que alertou ou bloqueou
+- reduzir ruído no Telegram
+- manter auditoria para investigação e calibração
+- preparar evolução futura para paper trading sem automatizar ordens reais agora
+
+---
+
+## 106. Definição final revisada do sistema
+
+A definição final revisada passa a ser:
+
+> **Um assistente operacional de oportunidades em cripto BRL, focado inicialmente em Mercado Bitcoin e NovaDAX, que monitora dinamicamente pares relevantes, diferencia observação de oportunidade acionável, identifica movimentos direcionais, faixas operacionais, spreads internos de livro e spreads entre corretoras, avalia liquidez, margem líquida, execução, fase, risco de atraso e risco de transferência, entrega apenas alertas úteis, reduz ruído para o usuário, mantém auditoria ponta a ponta e prepara a base para paper trading futuro sem executar ordens automaticamente.**
+
+Essa definição deve orientar as próximas implementações e substituir qualquer entendimento anterior de que o produto é apenas um scanner de sinais ou ranking de moedas em alta.

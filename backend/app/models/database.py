@@ -104,6 +104,11 @@ class OpportunityRecord(Base):
     operational_range_quality = Column(String, nullable=True)
     alert_moment_type = Column(String, nullable=True)
     alert_reason = Column(String, nullable=True)
+    alert_worthiness_score = Column(Float, nullable=True)
+    alert_trigger_type = Column(String, nullable=True)
+    has_actionable_trigger = Column(Boolean, default=False)
+    alert_state_key = Column(String, nullable=True)
+    alert_block_reason = Column(String, nullable=True)
     movement_persistence_score = Column(Float, nullable=True)
 
 
@@ -339,6 +344,11 @@ class OpportunitySnapshotRecord(Base):
     operational_range_quality = Column(String, nullable=True)
     alert_moment_type = Column(String, nullable=True)
     alert_reason = Column(String, nullable=True)
+    alert_worthiness_score = Column(Float, nullable=True)
+    alert_trigger_type = Column(String, nullable=True)
+    has_actionable_trigger = Column(Boolean, default=False)
+    alert_state_key = Column(String, nullable=True)
+    alert_block_reason = Column(String, nullable=True)
     movement_persistence_score = Column(Float, nullable=True)
     last_price = Column(Float, nullable=False)
     change_pct = Column(Float, nullable=False)
@@ -418,6 +428,11 @@ class WorkspaceSignalProjectionRecord(Base):
     reweighting_version = Column(String, nullable=False, default="v1")
     visible = Column(Boolean, nullable=False, default=True)
     alert_eligible = Column(Boolean, nullable=False, default=False)
+    alert_worthiness_score = Column(Float, nullable=True)
+    alert_trigger_type = Column(String, nullable=True)
+    has_actionable_trigger = Column(Boolean, default=False)
+    alert_state_key = Column(String, nullable=True)
+    alert_block_reason = Column(String, nullable=True)
     projection_reason = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow, index=True)
 
@@ -618,6 +633,11 @@ async def ensure_schema_compatibility() -> None:
         "operational_range_quality": "VARCHAR",
         "alert_moment_type": "VARCHAR",
         "alert_reason": "VARCHAR",
+        "alert_worthiness_score": "FLOAT",
+        "alert_trigger_type": "VARCHAR",
+        "has_actionable_trigger": "BOOLEAN DEFAULT FALSE",
+        "alert_state_key": "VARCHAR",
+        "alert_block_reason": "VARCHAR",
         "movement_persistence_score": "FLOAT",
     }
 
@@ -672,6 +692,11 @@ async def ensure_schema_compatibility() -> None:
         "operational_range_quality": "VARCHAR",
         "alert_moment_type": "VARCHAR",
         "alert_reason": "VARCHAR",
+        "alert_worthiness_score": "FLOAT",
+        "alert_trigger_type": "VARCHAR",
+        "has_actionable_trigger": "BOOLEAN DEFAULT FALSE",
+        "alert_state_key": "VARCHAR",
+        "alert_block_reason": "VARCHAR",
         "movement_persistence_score": "FLOAT",
     }
 
@@ -730,6 +755,11 @@ async def ensure_schema_compatibility() -> None:
         "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "reweighting_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "alert_worthiness_score": "FLOAT",
+        "alert_trigger_type": "VARCHAR",
+        "has_actionable_trigger": "BOOLEAN DEFAULT FALSE",
+        "alert_state_key": "VARCHAR",
+        "alert_block_reason": "VARCHAR",
     }
 
     audit_columns = {

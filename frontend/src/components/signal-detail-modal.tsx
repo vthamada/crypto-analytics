@@ -380,6 +380,28 @@ export function SignalDetailModal({
               label="Motivo"
               value={opportunity.alert_reason ?? opportunity.phase_reason ?? "n/d"}
             />
+            <DetailCard
+              label="Valor de alerta"
+              value={
+                opportunity.alert_worthiness_score != null
+                  ? `${opportunity.alert_worthiness_score.toFixed(1)}${opportunity.has_actionable_trigger ? " • acionavel" : " • sem gatilho"}`
+                  : "n/d"
+              }
+              valueClass={opportunity.has_actionable_trigger ? "text-emerald-500" : "text-amber-500"}
+            />
+            <DetailCard
+              label="Gatilho"
+              value={opportunity.alert_trigger_type?.replaceAll("_", " ") ?? "nenhum"}
+            />
+            <DetailCard
+              label="Bloqueio alerta"
+              value={opportunity.alert_block_reason?.replaceAll("_", " ") ?? "n/d"}
+              valueClass={opportunity.alert_block_reason ? "text-amber-500" : undefined}
+            />
+            <DetailCard
+              label="Estado alerta"
+              value={opportunity.alert_state_key?.replaceAll("|", " • ") ?? "n/d"}
+            />
           </div>
         </div>
 

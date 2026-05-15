@@ -154,6 +154,11 @@ class Opportunity(BaseModel):
     operational_range_quality: str = "none"
     alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
     alert_reason: str | None = None
+    alert_worthiness_score: float | None = None
+    alert_trigger_type: str | None = None
+    has_actionable_trigger: bool = False
+    alert_state_key: str | None = None
+    alert_block_reason: str | None = None
     movement_persistence_score: float | None = None
     last_price: float
     change_pct: float
@@ -304,6 +309,11 @@ class OpportunitySummary(BaseModel):
     operational_range_quality: str = "none"
     alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
     alert_reason: str | None = None
+    alert_worthiness_score: float | None = None
+    alert_trigger_type: str | None = None
+    has_actionable_trigger: bool = False
+    alert_state_key: str | None = None
+    alert_block_reason: str | None = None
     detected_at: datetime
     cross_exchange_gap_pct: float = 0.0
     cross_exchange_reference_exchange: Exchange | None = None
@@ -386,6 +396,11 @@ class HistoryRecord(BaseModel):
     operational_range_quality: str = "none"
     alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
     alert_reason: str | None = None
+    alert_worthiness_score: float | None = None
+    alert_trigger_type: str | None = None
+    has_actionable_trigger: bool = False
+    alert_state_key: str | None = None
+    alert_block_reason: str | None = None
     movement_persistence_score: float | None = None
     last_price: float
     change_pct: float
@@ -437,6 +452,11 @@ class HistorySummaryRecord(BaseModel):
     operational_range_quality: str = "none"
     alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
     alert_reason: str | None = None
+    alert_worthiness_score: float | None = None
+    alert_trigger_type: str | None = None
+    has_actionable_trigger: bool = False
+    alert_state_key: str | None = None
+    alert_block_reason: str | None = None
     detected_at: datetime
 
 

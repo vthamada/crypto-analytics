@@ -98,6 +98,11 @@ export interface Opportunity {
   operational_range_quality?: string;
   alert_moment_type?: AlertMomentType;
   alert_reason?: string | null;
+  alert_worthiness_score?: number | null;
+  alert_trigger_type?: string | null;
+  has_actionable_trigger?: boolean;
+  alert_state_key?: string | null;
+  alert_block_reason?: string | null;
   movement_persistence_score?: number | null;
   last_price: number;
   change_pct: number;
@@ -182,6 +187,11 @@ export type OpportunitySummary = Pick<
   | "operational_range_quality"
   | "alert_moment_type"
   | "alert_reason"
+  | "alert_worthiness_score"
+  | "alert_trigger_type"
+  | "has_actionable_trigger"
+  | "alert_state_key"
+  | "alert_block_reason"
   | "detected_at"
   | "cross_exchange_gap_pct"
   | "cross_exchange_reference_exchange"

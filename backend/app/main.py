@@ -52,8 +52,8 @@ from app.services.monitoring import scan_monitor
 from app.services.logging_handlers import HTTPLogHandler
 from app.services.auth import ensure_admin_bootstrap
 from app.services.scan_runtime import wait_for_refresh_or_timeout
-from app.services.telegram import send_telegram_alert, telegram_destination_configured
-from app.services.operational_visibility import is_telegram_alertable
+from app.services.telegram import send_telegram_alert, split_alerts_by_state_change, telegram_destination_configured
+from app.services.operational_visibility import classify_alert_worthiness, is_telegram_alertable
 from app.services.outcome_evaluator import evaluate_pending_outcomes
 
 try:
@@ -228,6 +228,11 @@ async def scan_loop() -> None:
                                 and opportunity_matches_alert_scope(projected, workspace_config)
                                 and is_telegram_alertable(projected)
                             ),
+                            "alert_worthiness_score": projected.alert_worthiness_score,
+                            "alert_trigger_type": projected.alert_trigger_type,
+                            "has_actionable_trigger": projected.has_actionable_trigger,
+                            "alert_state_key": projected.alert_state_key,
+                            "alert_block_reason": projected.alert_block_reason,
                             "projection_reason": "config_match",
                         })
 
@@ -299,8 +304,9 @@ async def scan_loop() -> None:
                 alert_types = set(getattr(workspace_config, "telegram_alert_types", ["operable", "high_score", "arbitrage"]))
                 eligible = []
                 for opp in projected_opportunities:
-                    if not is_telegram_alertable(opp):
-                        reason = opp.visibility_reason or "opportunity_type_not_alertable"
+                    is_alertable, alert_block_reason, alert_worthiness_details = classify_alert_worthiness(opp)
+                    if not is_alertable:
+                        reason = alert_block_reason or opp.visibility_reason or "opportunity_type_not_alertable"
                         alert_block_reasons[reason] = alert_block_reasons.get(reason, 0) + 1
                         alert_events.append(
                             build_signal_pipeline_event(
@@ -315,6 +321,7 @@ async def scan_loop() -> None:
                                     "opportunity_type": opp.opportunity_type,
                                     "pipeline_status": opp.pipeline_status,
                                     "operationally_visible": opp.operationally_visible,
+                                    **alert_worthiness_details,
                                 },
                             )
                         )
@@ -405,6 +412,35 @@ async def scan_loop() -> None:
                                         },
                                     )
                                 )
+                    if not alert_candidates:
+                        continue
+                    alert_candidates, unchanged_state = split_alerts_by_state_change(
+                        alert_candidates,
+                        token=workspace_config.telegram_bot_token,
+                        chat_id=workspace_config.telegram_chat_id,
+                    )
+                    if unchanged_state:
+                        alerts_suppressed += len(unchanged_state)
+                        alert_block_reasons["no_state_change"] = (
+                            alert_block_reasons.get("no_state_change", 0) + len(unchanged_state)
+                        )
+                        for opp in unchanged_state:
+                            alert_events.append(
+                                build_signal_pipeline_event(
+                                    opp,
+                                    stage="alert",
+                                    status="blocked",
+                                    reason="no_state_change",
+                                    event_type="alert",
+                                    workspace_id=workspace_id,
+                                    details={
+                                        "score": opp.score,
+                                        "alert_state_key": opp.alert_state_key,
+                                        "alert_trigger_type": opp.alert_trigger_type,
+                                        "alert_worthiness_score": opp.alert_worthiness_score,
+                                    },
+                                )
+                            )
                     if not alert_candidates:
                         continue
                     sent = await send_telegram_alert(

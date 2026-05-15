@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.models.schemas import Exchange, MovementType, Opportunity
-from app.services.operational_visibility import classify_pipeline_visibility, is_telegram_alertable
+from app.models.schemas import Exchange, MovementPhase, MovementType, Opportunity
+from app.services.operational_visibility import classify_alert_worthiness, classify_pipeline_visibility, is_telegram_alertable
 
 
 def make_opportunity(**overrides) -> Opportunity:
@@ -22,6 +22,8 @@ def make_opportunity(**overrides) -> Opportunity:
         "liquidity_units": 2_000.0,
         "spread_pct": 0.2,
         "movement_type": MovementType.STRONG_RANGE,
+        "movement_phase": MovementPhase.EARLY_BREAKOUT,
+        "alert_moment_type": "early_breakout",
         "last_price": 10.0,
         "change_pct": 2.0,
     }
@@ -36,6 +38,49 @@ def test_trade_signal_is_operational_and_alertable():
     assert reason == "trade_qualified"
     assert visible is True
     assert is_telegram_alertable(make_opportunity()) is True
+
+
+def test_accumulation_without_trigger_is_visible_but_not_alertable():
+    opportunity = make_opportunity(
+        movement_phase=MovementPhase.ACCUMULATION,
+        alert_moment_type="preparation",
+        alert_reason="ativo em possivel preparacao/lateralizacao",
+    )
+
+    status, reason, visible = classify_pipeline_visibility(opportunity)
+    alertable, block_reason, details = classify_alert_worthiness(opportunity)
+
+    assert status == "operational_opportunity"
+    assert reason == "trade_qualified"
+    assert visible is True
+    assert alertable is False
+    assert block_reason == "accumulation_only"
+    assert details["has_actionable_trigger"] is False
+    assert details["alert_state_key"].startswith("no_trigger|accumulation")
+    assert is_telegram_alertable(opportunity) is False
+
+
+def test_preparation_without_trigger_is_not_alertable():
+    opportunity = make_opportunity(
+        movement_phase=MovementPhase.NEUTRAL,
+        alert_moment_type="preparation",
+    )
+
+    alertable, block_reason, details = classify_alert_worthiness(opportunity)
+
+    assert alertable is False
+    assert block_reason == "preparation_without_trigger"
+    assert details["alert_worthiness_score"] > 0
+
+
+def test_actionable_alert_has_trigger_and_state_key():
+    alertable, block_reason, details = classify_alert_worthiness(make_opportunity())
+
+    assert alertable is True
+    assert block_reason is None
+    assert details["alert_trigger_type"] == "early_breakout"
+    assert details["has_actionable_trigger"] is True
+    assert details["alert_state_key"].startswith("early_breakout|early_breakout|early_breakout")
 
 
 def test_avoid_signal_is_blocked_even_when_score_is_high():

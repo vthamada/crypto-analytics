@@ -22,17 +22,24 @@ Convencao deste repositorio:
 - Historico passou a separar visao operacional, auditoria tecnica e visao completa por `visibility=operational|technical|all`.
 - Scanner passou a registrar near misses compactos (`event_type=near_miss`) para descartes proximos de threshold e candidatos bloqueados por limite de promocao.
 - Endpoint `GET /api/diagnostics/near-misses` lista near misses por periodo, exchange e par sem expor o dataset bruto do scanner.
+- Classificacao de valor de alerta em runtime com `alert_worthiness_score`, `alert_trigger_type` e `has_actionable_trigger` nos detalhes de auditoria.
 - Bloqueios de Telegram passaram a registrar motivos especificos, incluindo escopo de exchange/par, operabilidade, executabilidade, limite de score, Telegram desativado/nao configurado, cooldown e menor prioridade no top 5.
 - Configuracao de limite diario de alertas Telegram por workspace, com bloqueio auditado como `daily_alert_limit_reached`.
 - Diagnostico de sinal perdido passou a aceitar periodo customizado na UI e a explicar pares nao monitoraveis por catalogo, provider ou par nao BRL.
 - Migration `0013_supabase_rls_hardening` revoga execucao publica da funcao `public.rls_auto_enable()` quando existente no Supabase.
+- Provider NovaDAX passou a normalizar formatos alternativos de simbolo (`SOLBRL`, `SOL/BRL`, `baseCurrency`/`quoteCurrency`) e a retornar pares BRL ativos mesmo quando a API variar o payload.
+- Campos persistidos de valor de alerta: `alert_worthiness_score`, `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason`.
+- Migration `0015_alert_worthiness_state` adiciona os campos de alerta em oportunidades, snapshots e projecoes por workspace.
 
 ### Fixed
 - Dashboard, shortlist, WebSocket e `/api/opportunities` passaram a ocultar ruido tecnico por padrao; registros tecnicos podem ser incluidos explicitamente com `include_technical=true`.
 - `/api/history` e `/api/history/summary` retornam historico operacional por padrao, mantendo descartes e bloqueios acessiveis apenas na visao tecnica/auditoria.
 - Telegram agora possui uma defesa final para nao enviar sinais nao operacionais, mesmo quando configuracoes de `high_score` ou arbitragem estiverem ativas.
+- Telegram deixou de enviar `accumulation`, `preparation` ou estado neutro sem gatilho acionavel, bloqueando como `accumulation_only`, `preparation_without_trigger`, `no_actionable_trigger` ou `insufficient_alert_worthiness`.
 - Badges do frontend evitam mostrar combinacoes contraditorias como `Operavel` junto com `Evitar` ou margem negativa.
 - Provider NovaDAX passou a calcular `change_pct_24h` a partir de `open24h` quando a API nao retorna `change24h`, evitando descarte total dos pares por erro de ticker no scan leve.
+- Catalogo de pares deixou de cachear resposta totalmente vazia como estado valido; quando um provider retorna vazio apos sucesso anterior, o sistema usa o ultimo catalogo valido e marca status `stale`.
+- Telegram agora bloqueia repeticao do mesmo estado de alerta para o mesmo destino/par como `no_state_change`, evitando reenviar moeda parada na mesma fase depois do cooldown temporal.
 - Watchlist de pares deixou de limitar dashboard, historico e universo de scan; o scanner agora avalia o catalogo BRL descoberto e usa pares selecionados apenas como destaque/diagnostico.
 - Configuracao `pair_universe_mode` permite escolher entre monitorar todos os pares BRL das exchanges habilitadas ou restringir scan/dashboard/historico apenas a watchlist.
 - Migration `0014_revoke_public_execute` remove permissao herdada de `PUBLIC` na funcao `public.rls_auto_enable()` sem bloquear deploys quando o usuario do app nao e dono da funcao.

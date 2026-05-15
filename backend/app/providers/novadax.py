@@ -15,9 +15,69 @@ class NovaDaxProvider(ExchangeProvider):
     exchange = Exchange.NOVADAX
     base_url = "https://api.novadax.com/v1"
 
+    _INACTIVE_STATUSES = {
+        "OFFLINE",
+        "DISABLED",
+        "SUSPENDED",
+        "CLOSED",
+        "MAINTENANCE",
+        "DELISTED",
+        "HALT",
+        "HALTED",
+        "BREAK",
+    }
+    _QUOTE_SUFFIXES = ("BRL", "USDT", "USD", "BTC", "ETH")
+
     def normalize_pair(self, pair: str) -> str:
-        # Internal: BTC_BRL -> NovaDAX: BTC_BRL (same format)
-        return pair.upper()
+        # Internal: BTC_BRL -> NovaDAX: BTC_BRL. Accept compact symbols too.
+        return self._normalize_symbol(pair) or pair.upper()
+
+    @classmethod
+    def _normalize_symbol(cls, symbol: str | None) -> str | None:
+        if not symbol:
+            return None
+        normalized = str(symbol).strip().upper().replace("/", "_").replace("-", "_")
+        normalized = "_".join(part for part in normalized.split("_") if part)
+        if not normalized:
+            return None
+        if "_" in normalized:
+            base, quote, *_ = normalized.split("_")
+            if base and quote:
+                return f"{base}_{quote}"
+            return None
+        for quote in cls._QUOTE_SUFFIXES:
+            if normalized.endswith(quote) and len(normalized) > len(quote):
+                return f"{normalized[:-len(quote)]}_{quote}"
+        return normalized
+
+    @staticmethod
+    def _extract_field(payload: dict, names: tuple[str, ...]) -> str | None:
+        lower_lookup = {str(key).lower(): value for key, value in payload.items()}
+        for name in names:
+            value = lower_lookup.get(name.lower())
+            if value not in (None, ""):
+                return str(value)
+        return None
+
+    @classmethod
+    def _extract_symbol_from_payload(cls, payload: dict) -> str | None:
+        direct_symbol = cls._extract_field(payload, ("symbol", "name", "code"))
+        normalized_symbol = cls._normalize_symbol(direct_symbol)
+        if normalized_symbol:
+            return normalized_symbol
+
+        base = cls._extract_field(payload, ("baseCurrency", "base_currency", "base", "baseAsset"))
+        quote = cls._extract_field(payload, ("quoteCurrency", "quote_currency", "quote", "quoteAsset"))
+        if base and quote:
+            return cls._normalize_symbol(f"{base}_{quote}")
+        return None
+
+    @classmethod
+    def _is_symbol_active(cls, payload: dict) -> bool:
+        raw_status = cls._extract_field(payload, ("status", "state", "tradeStatus"))
+        if raw_status in (None, ""):
+            return True
+        return raw_status.strip().upper() not in cls._INACTIVE_STATUSES
 
     @staticmethod
     def _extract_kline_timestamp(payload: dict) -> int | None:
@@ -33,13 +93,15 @@ class NovaDaxProvider(ExchangeProvider):
 
     async def get_available_pairs(self) -> list[str]:
         data = await self._request("GET", "/common/symbols")
+        raw_items = data.get("data", []) if isinstance(data, dict) else data
         pairs = []
-        for item in data.get("data", []):
-            symbol = item.get("symbol", "")
-            status = str(item.get("status", "ONLINE")).upper()
-            if symbol.endswith("_BRL") and status == "ONLINE":
+        for item in raw_items or []:
+            if not isinstance(item, dict) or not self._is_symbol_active(item):
+                continue
+            symbol = self._extract_symbol_from_payload(item)
+            if symbol and symbol.endswith("_BRL"):
                 pairs.append(symbol)
-        return pairs
+        return sorted(set(pairs))
 
     async def get_ticker(self, pair: str) -> Ticker:
         symbol = self.normalize_pair(pair)

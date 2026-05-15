@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.models.schemas import Exchange, MovementType, Opportunity
+from app.models.schemas import Exchange, MovementPhase, MovementType, Opportunity
 from app.services import telegram
 
 
@@ -34,6 +34,8 @@ def _make_opportunity() -> Opportunity:
         exchange=Exchange.MERCADO_BITCOIN,
         pair="BTC_BRL",
         movement_type=MovementType.STRONG_RANGE,
+        movement_phase=MovementPhase.EARLY_BREAKOUT,
+        alert_moment_type="early_breakout",
         score=82.5,
         operable_signal=True,
         executability_score=91.2,
@@ -53,6 +55,8 @@ def _make_opportunity() -> Opportunity:
 
 def test_send_telegram_alert_uses_html_parse_mode_and_escapes_dynamic_values(monkeypatch):
     recorded: dict[str, object] = {}
+    telegram._last_alert_sent_at.clear()
+    telegram._last_alert_state_by_key.clear()
 
     monkeypatch.setattr(
         telegram.httpx,
@@ -75,6 +79,37 @@ def test_send_telegram_alert_uses_html_parse_mode_and_escapes_dynamic_values(mon
     assert "BTC_BRL" in recorded["json"]["text"]
     assert "*Crypto Analytics" not in recorded["json"]["text"]
     assert "<b>Crypto Analytics - Novas Oportunidades</b>" in recorded["json"]["text"]
+
+
+def test_split_alerts_by_state_change_blocks_repeated_state_after_send(monkeypatch):
+    recorded: dict[str, object] = {}
+    telegram._last_alert_sent_at.clear()
+    telegram._last_alert_state_by_key.clear()
+
+    monkeypatch.setattr(
+        telegram.httpx,
+        "AsyncClient",
+        lambda: _FakeAsyncClient(recorder=recorded),
+    )
+
+    first = _make_opportunity()
+    sent = asyncio.run(
+        telegram.send_telegram_alert(
+            [first],
+            token="bot-token",
+            chat_id="chat-id",
+            cooldown_seconds=0,
+        )
+    )
+    changed, unchanged = telegram.split_alerts_by_state_change(
+        [_make_opportunity()],
+        token="bot-token",
+        chat_id="chat-id",
+    )
+
+    assert sent is True
+    assert changed == []
+    assert len(unchanged) == 1
 
 
 def test_send_telegram_test_message_escapes_workspace_and_actor_names(monkeypatch):

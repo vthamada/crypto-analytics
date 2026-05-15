@@ -24,6 +24,8 @@ Decisoes ja tomadas:
 | Multiusuario | Organization como unidade de cobranca; Workspace como unidade operacional |
 | UX principal | Usuario ve oportunidades; auditoria explica decisoes tecnicas |
 | Ruido tecnico | Movimentos fracos, `avoid`, margem negativa e baixa liquidez nao aparecem por padrao |
+| Alertas | Telegram deve exigir gatilho acionavel; ativo saudavel/parado pode ser observavel, mas nao alerta |
+| Arbitragem | Modelar como multi-exchange; Mercado Bitcoin e NovaDAX sao foco inicial, nao acoplamento fixo |
 
 ---
 
@@ -32,6 +34,7 @@ Decisoes ja tomadas:
 - [x] Scanner em dois estagios: scan leve amplo e analise profunda apenas de candidatos.
 - [x] Mercado Bitcoin e NovaDAX habilitadas por padrao; Binance opcional/desativada.
 - [x] Catalogo dinamico de pares por exchange com status tecnico e diagnostico por par.
+- [x] Provider NovaDAX normaliza formatos variados de simbolo e diagnostica catalogo vazio sem apagar ultimo catalogo valido.
 - [x] Dashboard usando endpoints resumidos e detalhe sob demanda para reduzir egress.
 - [x] Score tecnico, executabilidade, margem operacional e classificacao `trade`, `hold`, `observe`, `avoid`.
 - [x] Fase do movimento, risco de entrada tardia e faixa operacional reaproveitavel.
@@ -46,10 +49,37 @@ Decisoes ja tomadas:
 - [x] Hardening inicial do Supabase revogando execucao publica da funcao `public.rls_auto_enable()` quando existir.
 - [x] Multiusuario base: users, organizations, workspaces, memberships, invites, refresh token, auditoria administrativa.
 - [x] Worker dedicado e API capaz de ler estado compartilhado.
+- [x] Primeira camada de `alert_worthiness`: `accumulation`/`preparation` sem gatilho nao interrompem o usuario por Telegram.
 
 ---
 
 ## P0 - Confiabilidade Operacional Imediata
+
+### Controle De Ruido E Alertas Acionaveis
+
+- [x] **Bloquear moedas paradas no Telegram**
+  Separar ativo operacionalmente saudavel de alerta acionavel.
+  Criterio de aceite: `accumulation`, `preparation` ou estado neutro sem gatilho real nao geram Telegram, mesmo com score/executabilidade altos.
+  Status: `classify_alert_worthiness()` bloqueia `accumulation_only`, `preparation_without_trigger`, `no_actionable_trigger` e `insufficient_alert_worthiness`.
+
+- [x] **Separar score operacional de score de alerta**
+  Criar `alert_worthiness_score` independente do score operacional.
+  Criterio de aceite: ativo parado pode ter score operacional alto e `alert_worthiness_score` baixo.
+  Status: score calculado, persistido em oportunidades/projecoes e exibido no detalhe da oportunidade.
+
+- [x] **Gatilhos acionaveis de alerta**
+  Exigir gatilho claro para Telegram: rompimento inicial, continuacao com margem, momentum direcional com volume, arbitragem/spread acionavel ou faixa operacional com margem.
+  Criterio de aceite: todo alerta enviado tem `alert_trigger_type` e motivo compreensivel.
+  Status: primeira versao cobre `early_breakout`, `continuation`, `directional_momentum`, `range_trade` e `cross_exchange_arbitrage`, persistindo `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason`.
+
+- [x] **Cooldown por fase/estado**
+  Evitar alertas repetidos da mesma fase para o mesmo par.
+  Criterio de aceite: `repeated_same_phase_alert` aparece na auditoria quando o estado nao mudou desde o ultimo alerta.
+  Status: Telegram bloqueia repeticao do mesmo `alert_state_key` por destino/par e registra `no_state_change` na auditoria.
+
+- [ ] **Arbitragem multi-exchange**
+  Evoluir arbitragem para pares comuns entre todas as exchanges habilitadas, sem acoplamento fixo MB x NovaDAX.
+  Criterio de aceite: o motor calcula oportunidades entre qualquer combinacao de exchanges habilitadas e separa `inventory_arbitrage`, `transfer_arbitrage` e `cross_exchange_spread`.
 
 ### Separacao Entre Oportunidade E Registro Tecnico
 
@@ -109,15 +139,16 @@ Decisoes ja tomadas:
 - [~] **Completar motivos de bloqueio de alerta**
   Adicionar eventos para `not_in_top_shortlist`, `lower_than_competing_signals`, `opportunity_type_not_alertable`, `movement_too_late`, `high_late_entry_risk`, `insufficient_operational_margin`, `telegram_send_failed`.
   Criterio de aceite: todo sinal elegivel que nao foi alertado possui `alert_block_reason`.
-  Status: implementados `lower_than_competing_signals`, `opportunity_type_not_alertable`, `exchange_not_in_alert_scope`, `pair_not_in_alert_scope`, `not_operable_for_alert_scope`, `below_min_executability`, `below_alert_threshold`, `telegram_disabled`, `telegram_not_configured` e `cooldown_active`.
+  Status: implementados `lower_than_competing_signals`, `opportunity_type_not_alertable`, `exchange_not_in_alert_scope`, `pair_not_in_alert_scope`, `not_operable_for_alert_scope`, `below_min_executability`, `below_alert_threshold`, `telegram_disabled`, `telegram_not_configured`, `cooldown_active`, `accumulation_only`, `preparation_without_trigger`, `no_actionable_trigger` e `insufficient_alert_worthiness`.
 
 - [x] **Limite diario de alertas por workspace**
   Implementar limite configuravel por workspace para evitar excesso de notificacoes.
   Criterio de aceite: quando o limite for atingido, o bloqueio fica auditado como `daily_alert_limit_reached`.
 
-- [ ] **Cache vazio nao pode ser catalogo valido**
+- [x] **Cache vazio nao pode ser catalogo valido**
   Reforcar regra para catalogo vazio ou parcialmente falho: usar ultimo catalogo valido, marcar `stale` ou `error`, nunca `ok`.
   Criterio de aceite: falha temporaria de provider nao apaga o universo monitoravel nem fica silenciosa.
+  Status: `_fetch_provider_pairs()` reaproveita o ultimo catalogo valido quando provider retorna lista vazia, marca status `stale` com erro explicito e `get_available_pairs_catalog()` nao grava payload totalmente vazio no cache.
 
 - [ ] **Retencao da auditoria validada em producao**
   Validar `run_audit_retention_if_due` e politicas de retencao em API/worker com volume real.

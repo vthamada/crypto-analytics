@@ -34,13 +34,16 @@ def test_novadax_get_klines_accepts_timestamp_field(monkeypatch):
     assert int(klines[0].open_time.timestamp()) == 1713350400
 
 
-def test_novadax_get_available_pairs_filters_online_brl_symbols(monkeypatch):
+def test_novadax_get_available_pairs_normalizes_active_brl_symbols(monkeypatch):
     provider = NovaDaxProvider()
 
     async def fake_request(method: str, path: str, **kwargs):
         return {
             "data": [
                 {"symbol": "BTC_BRL", "status": "ONLINE"},
+                {"symbol": "SOLBRL", "status": "TRADING"},
+                {"symbol": "eth/brl", "status": "ONLINE"},
+                {"baseCurrency": "USDT", "quoteCurrency": "BRL", "status": "ONLINE"},
                 {"symbol": "ETH_USDT", "status": "ONLINE"},
                 {"symbol": "LAB_BRL", "status": "OFFLINE"},
                 {"symbol": "TON_BRL", "status": "ONLINE"},
@@ -49,7 +52,13 @@ def test_novadax_get_available_pairs_filters_online_brl_symbols(monkeypatch):
 
     monkeypatch.setattr(provider, "_request", fake_request)
 
-    assert asyncio.run(provider.get_available_pairs()) == ["BTC_BRL", "TON_BRL"]
+    assert asyncio.run(provider.get_available_pairs()) == [
+        "BTC_BRL",
+        "ETH_BRL",
+        "SOL_BRL",
+        "TON_BRL",
+        "USDT_BRL",
+    ]
 
 
 def test_novadax_get_available_pairs_propagates_request_failures(monkeypatch):

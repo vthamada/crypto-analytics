@@ -145,6 +145,44 @@ def test_fetch_provider_pairs_uses_stale_success_when_provider_fails(monkeypatch
     asyncio.run(run_test())
 
 
+def test_fetch_provider_pairs_uses_stale_success_when_provider_returns_empty(monkeypatch):
+    async def run_test():
+        class WorkingNovaDaxProvider:
+            exchange = Exchange.NOVADAX
+
+            async def get_available_pairs(self):
+                return ["SOL_BRL", "USDT_BRL"]
+
+            async def close(self):
+                return None
+
+        class EmptyNovaDaxProvider:
+            exchange = Exchange.NOVADAX
+
+            async def get_available_pairs(self):
+                return []
+
+            async def close(self):
+                return None
+
+        monkeypatch.setattr(pairs, "_pair_catalog_provider_status", {})
+        monkeypatch.setattr(pairs, "_provider_last_successful_pairs", {})
+        monkeypatch.setattr(pairs, "NovaDaxProvider", WorkingNovaDaxProvider)
+
+        first = await pairs._fetch_provider_pairs([Exchange.NOVADAX])
+
+        monkeypatch.setattr(pairs, "NovaDaxProvider", EmptyNovaDaxProvider)
+        second = await pairs._fetch_provider_pairs([Exchange.NOVADAX])
+        status = pairs._provider_status_for_key((Exchange.NOVADAX.value,))[0]
+
+        assert first[Exchange.NOVADAX] == ["SOL_BRL", "USDT_BRL"]
+        assert second[Exchange.NOVADAX] == ["SOL_BRL", "USDT_BRL"]
+        assert status["status"] == "stale"
+        assert status["error_message"] == "provider returned an empty catalog"
+
+    asyncio.run(run_test())
+
+
 def test_pair_diagnostic_reports_symbol_and_endpoint_checks(monkeypatch, sample_ticker, sample_order_book, sample_klines):
     async def run_test():
         class DiagnosticProvider:

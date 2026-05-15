@@ -110,8 +110,136 @@ def is_operationally_visible(opportunity: Opportunity) -> bool:
     return classify_pipeline_visibility(opportunity)[2]
 
 
-def is_telegram_alertable(opportunity: Opportunity) -> bool:
+def _alert_state_key(
+    *,
+    opportunity: Opportunity,
+    trigger_type: str | None,
+    phase: str,
+    moment: str,
+) -> str:
+    score_bucket = int((opportunity.score or 0) // 10) * 10
+    return "|".join(
+        [
+            trigger_type or "no_trigger",
+            phase or "neutral",
+            moment or "neutral",
+            opportunity.opportunity_type or "unknown",
+            opportunity.operational_range_quality or "none",
+            f"score_{score_bucket}",
+            f"late_{bool(opportunity.is_late_entry_risk)}",
+        ]
+    )
+
+
+def classify_alert_worthiness(opportunity: Opportunity) -> tuple[bool, str | None, dict[str, Any]]:
+    """Decide if an operational signal is worth interrupting the user now.
+
+    A healthy/operable asset is not necessarily an actionable alert. Accumulation
+    and preparation are useful for the dashboard, but Telegram needs a fresh
+    trigger such as breakout, continuation with margin, or arbitrage.
+    """
     status, _, visible = classify_pipeline_visibility(opportunity)
     if not visible or status != "operational_opportunity":
-        return False
-    return opportunity.opportunity_type in {"trade", "hold"} or bool(opportunity.operable_signal)
+        return False, opportunity.visibility_reason or "opportunity_type_not_alertable", {
+            "alert_worthiness_score": 0.0,
+            "alert_trigger_type": None,
+            "has_actionable_trigger": False,
+            "alert_state_key": None,
+            "pipeline_status": status,
+            "operationally_visible": visible,
+        }
+
+    phase = _value(opportunity.movement_phase)
+    moment = _value(opportunity.alert_moment_type)
+    movement_type = _value(opportunity.movement_type)
+    score = float(opportunity.score or 0.0)
+    executability = float(opportunity.executability_score or 0.0)
+    net_edge = opportunity.estimated_net_trade_edge_pct
+    range_margin = opportunity.operational_range_margin_pct or 0.0
+
+    trigger_type: str | None = None
+    trigger_bonus = 0.0
+
+    if opportunity.arbitrage_available:
+        trigger_type = "cross_exchange_arbitrage"
+        trigger_bonus = 35.0
+    elif moment == "early_breakout" or phase == "early_breakout":
+        trigger_type = "early_breakout"
+        trigger_bonus = 30.0
+    elif moment == "continuation" or phase == "continuation":
+        trigger_type = "continuation"
+        trigger_bonus = 22.0
+    elif movement_type == "spike" and opportunity.quote_volume_24h >= 10_000:
+        trigger_type = "directional_momentum"
+        trigger_bonus = 18.0
+    elif (
+        opportunity.operational_range_quality in {"high_quality_reusable_range", "valid_large_trade", "valid_medium_trade"}
+        and range_margin >= 1.0
+        and phase not in {"accumulation"}
+        and moment not in {"preparation"}
+    ):
+        trigger_type = "range_trade"
+        trigger_bonus = 14.0
+
+    has_actionable_trigger = trigger_type is not None
+    alert_state_key = _alert_state_key(
+        opportunity=opportunity,
+        trigger_type=trigger_type,
+        phase=phase,
+        moment=moment,
+    )
+    alert_worthiness_score = min(
+        100.0,
+        round(
+            (score * 0.45)
+            + (executability * 0.2)
+            + (max(net_edge or 0.0, 0.0) * 6.0)
+            + min(max(range_margin, 0.0), 10.0)
+            + trigger_bonus
+            - (18.0 if opportunity.is_late_entry_risk else 0.0),
+            2,
+        ),
+    )
+    details = {
+        "alert_worthiness_score": alert_worthiness_score,
+        "alert_trigger_type": trigger_type,
+        "has_actionable_trigger": has_actionable_trigger,
+        "alert_state_key": alert_state_key,
+        "movement_phase": phase,
+        "alert_moment_type": moment,
+        "opportunity_type": opportunity.opportunity_type,
+        "score": score,
+        "executability_score": opportunity.executability_score,
+        "estimated_net_trade_edge_pct": net_edge,
+    }
+
+    if not (opportunity.opportunity_type in {"trade", "hold"} or bool(opportunity.operable_signal)):
+        return False, "opportunity_type_not_alertable", details
+    if phase == "accumulation" and not has_actionable_trigger:
+        return False, "accumulation_only", details
+    if moment == "preparation" and not has_actionable_trigger:
+        return False, "preparation_without_trigger", details
+    if phase in {"neutral"} and moment in {"neutral"} and not has_actionable_trigger:
+        return False, "no_actionable_trigger", details
+    if alert_worthiness_score < 55:
+        return False, "insufficient_alert_worthiness", details
+    return True, None, details
+
+
+def enrich_alert_worthiness(opportunity: Opportunity) -> Opportunity:
+    alertable, block_reason, details = classify_alert_worthiness(opportunity)
+    data = opportunity.model_dump()
+    data.update(
+        {
+            "alert_worthiness_score": details.get("alert_worthiness_score"),
+            "alert_trigger_type": details.get("alert_trigger_type"),
+            "has_actionable_trigger": bool(details.get("has_actionable_trigger")),
+            "alert_state_key": details.get("alert_state_key"),
+            "alert_block_reason": None if alertable else block_reason,
+        }
+    )
+    return Opportunity(**data)
+
+
+def is_telegram_alertable(opportunity: Opportunity) -> bool:
+    return classify_alert_worthiness(opportunity)[0]

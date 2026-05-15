@@ -63,7 +63,11 @@ from app.services.auth import (
     verify_refresh_token,
 )
 from app.services.monitoring import scan_monitor
-from app.services.operational_visibility import enrich_operational_visibility, is_operationally_visible
+from app.services.operational_visibility import (
+    enrich_alert_worthiness,
+    enrich_operational_visibility,
+    is_operationally_visible,
+)
 from app.services.pairs import get_available_pairs_catalog, get_pair_exchange_diagnostic
 from app.services.exchange_credentials import validate_exchange_credentials
 from app.services.shared_state import (
@@ -268,7 +272,7 @@ def project_workspace_opportunity(opportunity: Opportunity, config: AppConfig) -
                 else data.get("movement_regime")
             ),
         )
-    return enrich_operational_visibility(Opportunity(**data))
+    return enrich_alert_worthiness(enrich_operational_visibility(Opportunity(**data)))
 
 
 def build_dashboard_stats(
@@ -836,6 +840,11 @@ def _summarize_opportunity(opportunity: Opportunity) -> OpportunitySummary:
         operational_range_quality=opportunity.operational_range_quality,
         alert_moment_type=opportunity.alert_moment_type,
         alert_reason=opportunity.alert_reason,
+        alert_worthiness_score=opportunity.alert_worthiness_score,
+        alert_trigger_type=opportunity.alert_trigger_type,
+        has_actionable_trigger=opportunity.has_actionable_trigger,
+        alert_state_key=opportunity.alert_state_key,
+        alert_block_reason=opportunity.alert_block_reason,
         detected_at=opportunity.detected_at,
         cross_exchange_gap_pct=opportunity.cross_exchange_gap_pct,
         cross_exchange_reference_exchange=opportunity.cross_exchange_reference_exchange,
