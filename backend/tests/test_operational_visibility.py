@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from app.models.schemas import Exchange, MovementPhase, MovementType, Opportunity
-from app.services.operational_visibility import classify_alert_worthiness, classify_pipeline_visibility, is_telegram_alertable
+from app.services.operational_visibility import (
+    classify_alert_worthiness,
+    classify_opportunity_subtype,
+    classify_pipeline_visibility,
+    is_telegram_alertable,
+)
 
 
 def make_opportunity(**overrides) -> Opportunity:
@@ -38,6 +43,23 @@ def test_trade_signal_is_operational_and_alertable():
     assert reason == "trade_qualified"
     assert visible is True
     assert is_telegram_alertable(make_opportunity()) is True
+    assert classify_opportunity_subtype(make_opportunity()) == "breakout_trade"
+
+
+def test_range_signal_gets_range_trade_subtype():
+    opportunity = make_opportunity(
+        movement_phase=MovementPhase.NEUTRAL,
+        alert_moment_type="neutral",
+        operational_range_quality="valid_medium_trade",
+        operational_range_margin_pct=1.4,
+    )
+
+    assert classify_opportunity_subtype(opportunity) == "range_trade"
+
+
+def test_arbitrage_and_avoid_subtypes_are_explicit():
+    assert classify_opportunity_subtype(make_opportunity(arbitrage_available=True)) == "cross_exchange_arbitrage"
+    assert classify_opportunity_subtype(make_opportunity(opportunity_type="avoid")) == "avoid"
 
 
 def test_accumulation_without_trigger_is_visible_but_not_alertable():

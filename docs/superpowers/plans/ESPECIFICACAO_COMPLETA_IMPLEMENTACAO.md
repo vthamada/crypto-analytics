@@ -3827,6 +3827,24 @@ O sistema estará adequado quando:
 
 ---
 
+### 96.5 Estado de implementacao em 2026-05-15
+
+Implementado parcialmente:
+
+- `opportunity_subtype` foi adicionado como camada derivada e compativel com `opportunity_type`
+- o subtipo e persistido em `opportunities` e `opportunity_snapshots`
+- API, historico resumido, analytics e detalhe do sinal passam a expor essa classificacao
+- a primeira versao cobre `directional_trade`, `range_trade`, `hold_continuation`, `breakout_trade`, `cross_exchange_arbitrage`, `profit_zone`, `observe_only` e `avoid`
+
+Ainda pendente:
+
+- calculo especifico de `intra_exchange_spread`
+- calculo especifico de `book_scalping`
+- diferenciacao real entre `inventory_arbitrage` e `transfer_arbitrage`
+- alertas e dashboards separados por subtipo operacional
+
+---
+
 ## 97. Módulo de spread interno e scalping de livro
 
 ### 97.1 Contexto

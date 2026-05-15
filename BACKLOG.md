@@ -53,6 +53,7 @@ Decisoes ja tomadas:
 - [x] Campos persistidos de valor de alerta: `alert_worthiness_score`, `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason`.
 - [x] Cache vazio de provider deixou de ser catalogo valido; ultimo catalogo bom e reaproveitado como `stale`.
 - [x] Metricas compactas de qualidade do funil em `GET /api/diagnostics/funnel-quality`.
+- [x] Primeira camada da taxonomia operacional expandida com `opportunity_subtype`, mantendo `opportunity_type` compativel.
 
 ---
 
@@ -62,8 +63,9 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 
 ### Pendencias P0 / P1 Operacionais
 
-- [ ] **Taxonomia operacional expandida** — refs. 96, 103, 104
+- [~] **Taxonomia operacional expandida** — refs. 96, 103, 104
   Evoluir `trade`, `hold`, `observe`, `avoid` para tipos mais precisos: `directional_trade`, `range_trade`, `hold_continuation`, `breakout_trade`, `intra_exchange_spread`, `book_scalping`, `cross_exchange_arbitrage`, `inventory_arbitrage`, `transfer_arbitrage`, `profit_zone`, `observe_only`, `avoid`.
+  Status: `opportunity_subtype` foi criado como camada derivada, persistida em `opportunities` e `opportunity_snapshots`, exposta na API e exibida no detalhe do sinal. Ainda falta implementar os calculos especificos de spread interno, book scalping e arbitragem com inventario/transferencia.
 
 - [ ] **Spread interno e book scalping** — refs. 97, 100, 101
   Detectar spread dentro da mesma exchange, medir margem liquida, profundidade em book, repeticao, fase do spread e bloquear falso spread sem liquidez.

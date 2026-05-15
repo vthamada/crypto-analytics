@@ -41,6 +41,22 @@ class MovementPhase(str, Enum):
     NEUTRAL = "neutral"
 
 
+OpportunitySubtype = Literal[
+    "directional_trade",
+    "range_trade",
+    "hold_continuation",
+    "breakout_trade",
+    "intra_exchange_spread",
+    "book_scalping",
+    "cross_exchange_arbitrage",
+    "inventory_arbitrage",
+    "transfer_arbitrage",
+    "profit_zone",
+    "observe_only",
+    "avoid",
+]
+
+
 class Ticker(BaseModel):
     exchange: Exchange
     pair: str
@@ -121,6 +137,7 @@ class Opportunity(BaseModel):
     estimated_net_trade_edge_pct: float | None = None
     trade_margin_score: float | None = None
     opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
+    opportunity_subtype: OpportunitySubtype | None = None
     volatility_pct: float
     volume_24h: float
     quote_volume_24h: float
@@ -280,6 +297,7 @@ class OpportunitySummary(BaseModel):
     visibility_reason: str | None = None
     operationally_visible: bool = False
     opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
+    opportunity_subtype: OpportunitySubtype | None = None
     interesting_signal: bool | None = None
     operable_signal: bool | None = None
     volatility_pct: float
@@ -363,6 +381,7 @@ class HistoryRecord(BaseModel):
     estimated_net_trade_edge_pct: float | None = None
     trade_margin_score: float | None = None
     opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
+    opportunity_subtype: OpportunitySubtype | None = None
     volatility_pct: float
     volume_24h: float
     liquidity_units: float
@@ -442,6 +461,7 @@ class HistorySummaryRecord(BaseModel):
     visibility_reason: str | None = None
     operationally_visible: bool = False
     opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
+    opportunity_subtype: OpportunitySubtype | None = None
     spread_pct: float
     last_price: float
     change_pct: float

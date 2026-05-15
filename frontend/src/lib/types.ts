@@ -16,6 +16,19 @@ export type MovementPhase =
   | "exhaustion"
   | "neutral";
 export type OpportunityType = "trade" | "hold" | "observe" | "avoid";
+export type OpportunitySubtype =
+  | "directional_trade"
+  | "range_trade"
+  | "hold_continuation"
+  | "breakout_trade"
+  | "intra_exchange_spread"
+  | "book_scalping"
+  | "cross_exchange_arbitrage"
+  | "inventory_arbitrage"
+  | "transfer_arbitrage"
+  | "profit_zone"
+  | "observe_only"
+  | "avoid";
 export type AlertMomentType = "preparation" | "early_breakout" | "continuation" | "extended" | "profit_zone" | "neutral";
 export type HistoryVisibility = "operational" | "technical" | "all";
 export type PipelineStatus =
@@ -65,6 +78,7 @@ export interface Opportunity {
   estimated_net_trade_edge_pct?: number | null;
   trade_margin_score?: number | null;
   opportunity_type?: OpportunityType | null;
+  opportunity_subtype?: OpportunitySubtype | null;
   volatility_pct: number;
   volume_24h: number;
   quote_volume_24h: number;
@@ -158,6 +172,7 @@ export type OpportunitySummary = Pick<
   | "trade_margin_score"
   | "estimated_net_trade_edge_pct"
   | "opportunity_type"
+  | "opportunity_subtype"
   | "interesting_signal"
   | "operable_signal"
   | "volatility_pct"
@@ -282,6 +297,7 @@ export interface HistoryRecord {
   estimated_net_trade_edge_pct?: number | null;
   trade_margin_score?: number | null;
   opportunity_type?: OpportunityType | null;
+  opportunity_subtype?: OpportunitySubtype | null;
   volatility_pct: number;
   volume_24h: number;
   quote_volume_24h: number;
@@ -340,6 +356,7 @@ export interface HistorySummaryRecord {
   visibility_reason?: string | null;
   operationally_visible?: boolean;
   opportunity_type?: OpportunityType | null;
+  opportunity_subtype?: OpportunitySubtype | null;
   spread_pct: number;
   last_price: number;
   change_pct: number;
@@ -366,6 +383,7 @@ export interface Analytics {
   alert_moment_distribution?: Record<string, number>;
   feedback_distribution?: Record<string, number>;
   opportunity_type_distribution?: Record<OpportunityType, number>;
+  opportunity_subtype_distribution?: Partial<Record<OpportunitySubtype, number>>;
   avg_net_trade_edge_by_type?: Partial<Record<OpportunityType, number>>;
   hourly_distribution: Record<string, number>;
   arbitrage_count: number;

@@ -1,6 +1,6 @@
 # Estado Atual do Sistema
 
-Ultima revisao: 2026-05-08
+Ultima revisao: 2026-05-15
 
 ## Objetivo deste documento
 
@@ -21,6 +21,7 @@ O ponto mais importante para entender o comportamento atual e este:
 - as oportunidades detectadas sao globais
 - cada oportunidade agora carrega tambem uma camada paralela de executabilidade
 - cada oportunidade projetada tambem recebe `pipeline_status`, `visibility_reason` e `operationally_visible`
+- cada oportunidade tambem recebe `opportunity_subtype`, uma taxonomia operacional expandida derivada para diferenciar trade direcional, faixa, rompimento, continuidade, arbitragem, zona de realizacao, observacao e avoid sem quebrar o campo legado `opportunity_type`
 - dashboard, WebSocket e Telegram ocultam por padrao registros tecnicos como `avoid`, margem negativa, movimento fraco e baixa liquidez
 - historico e resumo historico agora possuem visoes separadas: operacional, auditoria tecnica e todos os registros
 - a visibilidade final e recalculada por workspace
@@ -323,6 +324,7 @@ Campos produzidos hoje no `Opportunity`:
 - `fillable_notional_within_slippage_cap`
 - `executability_score`
 - `executability_band`
+- `opportunity_subtype`
 
 Bandas atuais de executabilidade:
 

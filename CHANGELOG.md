@@ -31,6 +31,8 @@ Convencao deste repositorio:
 - Campos persistidos de valor de alerta: `alert_worthiness_score`, `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason`.
 - Migration `0015_alert_worthiness_state` adiciona os campos de alerta em oportunidades, snapshots e projecoes por workspace.
 - Endpoint `GET /api/diagnostics/funnel-quality` agrega metricas compactas de qualidade do funil a partir de ciclos e eventos de auditoria.
+- Taxonomia operacional expandida inicial com `opportunity_subtype`, cobrindo direcional, faixa, hold/continuidade, rompimento, arbitragem cross-exchange, zona de realizacao, observacao e avoid.
+- Migration `0016_opportunity_subtype` adiciona `opportunity_subtype` em oportunidades e snapshots.
 
 ### Fixed
 - Dashboard, shortlist, WebSocket e `/api/opportunities` passaram a ocultar ruido tecnico por padrao; registros tecnicos podem ser incluidos explicitamente com `include_technical=true`.
@@ -43,6 +45,7 @@ Convencao deste repositorio:
 - Telegram agora bloqueia repeticao do mesmo estado de alerta para o mesmo destino/par como `no_state_change`, evitando reenviar moeda parada na mesma fase depois do cooldown temporal.
 - Watchlist de pares deixou de limitar dashboard, historico e universo de scan; o scanner agora avalia o catalogo BRL descoberto e usa pares selecionados apenas como destaque/diagnostico.
 - Configuracao `pair_universe_mode` permite escolher entre monitorar todos os pares BRL das exchanges habilitadas ou restringir scan/dashboard/historico apenas a watchlist.
+- O detalhe do sinal agora mostra o subtipo operacional, preparando a UI para separar movimentos direcionais, faixas, spread interno e arbitragem.
 - Migration `0014_revoke_public_execute` remove permissao herdada de `PUBLIC` na funcao `public.rls_auto_enable()` sem bloquear deploys quando o usuario do app nao e dono da funcao.
 
 ## [2026-05-07]

@@ -77,6 +77,7 @@ class OpportunityRecord(Base):
     estimated_net_trade_edge_pct = Column(Float, nullable=True)
     trade_margin_score = Column(Float, nullable=True)
     opportunity_type = Column(String, nullable=True, index=True)
+    opportunity_subtype = Column(String, nullable=True, index=True)
     bid_notional_top_n = Column(Float, nullable=True)
     ask_notional_top_n = Column(Float, nullable=True)
     total_notional_top_n = Column(Float, nullable=True)
@@ -319,6 +320,7 @@ class OpportunitySnapshotRecord(Base):
     estimated_net_trade_edge_pct = Column(Float, nullable=True)
     trade_margin_score = Column(Float, nullable=True)
     opportunity_type = Column(String, nullable=True, index=True)
+    opportunity_subtype = Column(String, nullable=True, index=True)
     estimated_buy_slippage_bps = Column(Float, nullable=True)
     estimated_sell_slippage_bps = Column(Float, nullable=True)
     fillable_notional_within_slippage_cap = Column(Float, nullable=True)
@@ -606,6 +608,7 @@ async def ensure_schema_compatibility() -> None:
         "estimated_net_trade_edge_pct": "FLOAT",
         "trade_margin_score": "FLOAT",
         "opportunity_type": "VARCHAR",
+        "opportunity_subtype": "VARCHAR",
         "bid_notional_top_n": "FLOAT",
         "ask_notional_top_n": "FLOAT",
         "total_notional_top_n": "FLOAT",
@@ -668,6 +671,7 @@ async def ensure_schema_compatibility() -> None:
         "estimated_net_trade_edge_pct": "FLOAT",
         "trade_margin_score": "FLOAT",
         "opportunity_type": "VARCHAR",
+        "opportunity_subtype": "VARCHAR",
         "estimated_buy_slippage_bps": "FLOAT",
         "estimated_sell_slippage_bps": "FLOAT",
         "fillable_notional_within_slippage_cap": "FLOAT",

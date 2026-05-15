@@ -31,6 +31,7 @@ from app.models.database import (
     normalize_db_datetime,
 )
 from app.models.schemas import AppConfig, Opportunity, ScoreWeights
+from app.services.operational_visibility import classify_opportunity_subtype
 from app.services.telegram import telegram_destination_configured
 
 logger = logging.getLogger(__name__)
@@ -748,6 +749,7 @@ async def write_opportunity_snapshots(
                 estimated_net_trade_edge_pct=opp.estimated_net_trade_edge_pct,
                 trade_margin_score=opp.trade_margin_score,
                 opportunity_type=opp.opportunity_type,
+                opportunity_subtype=classify_opportunity_subtype(opp),
                 estimated_buy_slippage_bps=opp.estimated_buy_slippage_bps,
                 estimated_sell_slippage_bps=opp.estimated_sell_slippage_bps,
                 fillable_notional_within_slippage_cap=opp.fillable_notional_within_slippage_cap,
@@ -841,6 +843,19 @@ async def read_opportunity_snapshots() -> list[dict]:
                 "estimated_net_trade_edge_pct": getattr(r, "estimated_net_trade_edge_pct", None),
                 "trade_margin_score": getattr(r, "trade_margin_score", None),
                 "opportunity_type": getattr(r, "opportunity_type", None),
+                "opportunity_subtype": classify_opportunity_subtype(
+                    {
+                        "opportunity_type": getattr(r, "opportunity_type", None),
+                        "opportunity_subtype": getattr(r, "opportunity_subtype", None),
+                        "arbitrage_available": getattr(r, "arbitrage_available", False),
+                        "is_profit_zone_candidate": getattr(r, "is_profit_zone_candidate", False),
+                        "movement_phase": getattr(r, "movement_phase", None) or "neutral",
+                        "alert_moment_type": getattr(r, "alert_moment_type", None) or "neutral",
+                        "operational_range_quality": getattr(r, "operational_range_quality", None) or "none",
+                        "operational_range_margin_pct": getattr(r, "operational_range_margin_pct", None),
+                        "movement_regime": getattr(r, "movement_regime", None),
+                    }
+                ),
                 "estimated_buy_slippage_bps": getattr(r, "estimated_buy_slippage_bps", None),
                 "estimated_sell_slippage_bps": getattr(r, "estimated_sell_slippage_bps", None),
                 "fillable_notional_within_slippage_cap": getattr(r, "fillable_notional_within_slippage_cap", None),

@@ -324,6 +324,7 @@ def test_history_summary_returns_reduced_payload(monkeypatch):
                 "trade_margin_score": 44,
                 "estimated_net_trade_edge_pct": 0.88,
                 "opportunity_type": "trade",
+                "opportunity_subtype": "directional_trade",
                 "spread_pct": 0.2,
                 "last_price": 100,
                 "change_pct": 4,

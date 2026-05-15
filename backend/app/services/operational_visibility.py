@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from app.models.schemas import Opportunity
+from app.models.schemas import Opportunity, OpportunitySubtype
 
 PipelineStatus = Literal[
     "observed_pair",
@@ -83,19 +83,61 @@ def classify_pipeline_visibility(opportunity: Opportunity) -> tuple[PipelineStat
     return classify_pipeline_visibility_payload(opportunity)
 
 
+def classify_opportunity_subtype(data: Mapping[str, Any] | Opportunity) -> OpportunitySubtype:
+    """Map the broad opportunity type into the operational taxonomy.
+
+    This keeps the legacy opportunity_type stable while giving the product a
+    richer language for routing dashboards, Telegram copy, and future
+    multi-exchange/spread logic.
+    """
+    stored_subtype = _get(data, "opportunity_subtype")
+    valid_subtypes = set(OpportunitySubtype.__args__)
+    if stored_subtype in valid_subtypes:
+        return stored_subtype
+
+    opportunity_type = _get(data, "opportunity_type") or "observe"
+    movement_phase = _value(_get(data, "movement_phase", "neutral"))
+    alert_moment_type = _value(_get(data, "alert_moment_type", "neutral"))
+    range_quality = _get(data, "operational_range_quality") or "none"
+    range_margin = _get(data, "operational_range_margin_pct") or 0.0
+    movement_regime = _value(_get(data, "movement_regime"))
+
+    if opportunity_type == "avoid":
+        return "avoid"
+    if _get(data, "arbitrage_available"):
+        return "cross_exchange_arbitrage"
+    if alert_moment_type == "profit_zone" or _get(data, "is_profit_zone_candidate"):
+        return "profit_zone"
+    if movement_phase == "early_breakout" or alert_moment_type == "early_breakout":
+        return "breakout_trade"
+    if (
+        range_quality in {"high_quality_reusable_range", "valid_large_trade", "valid_medium_trade", "valid_small_trade"}
+        and range_margin >= 1.0
+    ):
+        return "range_trade"
+    if opportunity_type == "hold" or movement_phase == "continuation" or alert_moment_type == "continuation":
+        return "hold_continuation"
+    if opportunity_type == "trade" or movement_regime in {"trend_continuation", "breakout_clean"}:
+        return "directional_trade"
+    return "observe_only"
+
+
 def add_visibility_fields(data: dict[str, Any]) -> dict[str, Any]:
     pipeline_status, visibility_reason, operationally_visible = classify_pipeline_visibility_payload(data)
+    opportunity_subtype = classify_opportunity_subtype(data)
     return {
         **data,
         "pipeline_status": pipeline_status,
         "visibility_reason": visibility_reason,
         "operationally_visible": operationally_visible,
+        "opportunity_subtype": opportunity_subtype,
     }
 
 
 def enrich_operational_visibility(opportunity: Opportunity) -> Opportunity:
     pipeline_status, visibility_reason, operationally_visible = classify_pipeline_visibility(opportunity)
     data = opportunity.model_dump()
+    data["opportunity_subtype"] = classify_opportunity_subtype(opportunity)
     data.update(
         {
             "pipeline_status": pipeline_status,

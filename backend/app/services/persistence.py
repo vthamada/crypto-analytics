@@ -22,7 +22,7 @@ from app.models.database import (
 )
 from app.models.schemas import AppConfig, HistoryRecord, MovementType, Opportunity, ScoreWeights
 from app.filters.executability import calculate_executability_score, classify_executability_band, classify_opportunity_type, rescale_slippage_bps
-from app.services.operational_visibility import add_visibility_fields
+from app.services.operational_visibility import add_visibility_fields, classify_opportunity_subtype
 from app.services.workspace_profiles import (
     explain_workspace_visibility,
     highest_order_notional,
@@ -249,6 +249,19 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "estimated_net_trade_edge_pct": getattr(record, "estimated_net_trade_edge_pct", None),
         "trade_margin_score": getattr(record, "trade_margin_score", None),
         "opportunity_type": opportunity_type,
+        "opportunity_subtype": classify_opportunity_subtype(
+            {
+                "opportunity_type": opportunity_type,
+                "opportunity_subtype": getattr(record, "opportunity_subtype", None),
+                "arbitrage_available": getattr(record, "arbitrage_available", False),
+                "is_profit_zone_candidate": getattr(record, "is_profit_zone_candidate", False),
+                "movement_phase": getattr(record, "movement_phase", None) or "neutral",
+                "alert_moment_type": getattr(record, "alert_moment_type", None) or "neutral",
+                "operational_range_quality": getattr(record, "operational_range_quality", None) or "none",
+                "operational_range_margin_pct": getattr(record, "operational_range_margin_pct", None),
+                "movement_regime": movement_regime,
+            }
+        ),
         "volatility_pct": record.volatility_pct,
         "volume_24h": record.volume_24h,
         "quote_volume_24h": record.quote_volume_24h,
@@ -472,6 +485,7 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
                 estimated_net_trade_edge_pct=opp.estimated_net_trade_edge_pct,
                 trade_margin_score=opp.trade_margin_score,
                 opportunity_type=opp.opportunity_type,
+                opportunity_subtype=classify_opportunity_subtype(opp),
                 bid_notional_top_n=opp.bid_notional_top_n,
                 ask_notional_top_n=opp.ask_notional_top_n,
                 total_notional_top_n=opp.total_notional_top_n,
@@ -693,6 +707,7 @@ async def get_history_summary(
             OpportunityRecord.trade_margin_score,
             OpportunityRecord.estimated_net_trade_edge_pct,
             OpportunityRecord.opportunity_type,
+            OpportunityRecord.opportunity_subtype,
             OpportunityRecord.quote_volume_24h,
             OpportunityRecord.spread_pct,
             OpportunityRecord.last_price,
@@ -744,6 +759,17 @@ async def get_history_summary(
                 "trade_margin_score": row["trade_margin_score"],
                 "estimated_net_trade_edge_pct": row["estimated_net_trade_edge_pct"],
                 "opportunity_type": row["opportunity_type"],
+                "opportunity_subtype": classify_opportunity_subtype(
+                    {
+                        "opportunity_type": row["opportunity_type"],
+                        "opportunity_subtype": row["opportunity_subtype"],
+                        "arbitrage_available": row["arbitrage_available"] or False,
+                        "movement_phase": row["movement_phase"] or "neutral",
+                        "alert_moment_type": row["alert_moment_type"] or "neutral",
+                        "operational_range_quality": row["operational_range_quality"] or "none",
+                        "operational_range_margin_pct": row["operational_range_margin_pct"],
+                    }
+                ),
                 "quote_volume_24h": row["quote_volume_24h"],
                 "spread_pct": row["spread_pct"],
                 "last_price": row["last_price"],
@@ -794,6 +820,7 @@ async def get_filtered_analytics(
             OpportunityRecord.executability_score,
             OpportunityRecord.profile_version,
             OpportunityRecord.opportunity_type,
+            OpportunityRecord.opportunity_subtype,
             OpportunityRecord.estimated_net_trade_edge_pct,
             OpportunityRecord.volatility_score,
             OpportunityRecord.volume_score,
@@ -842,6 +869,7 @@ async def get_filtered_analytics(
     gap_values: list[float] = []
     executability_buckets = {"0-40": 0, "40-60": 0, "60-80": 0, "80-100": 0}
     opportunity_type_distribution = {"trade": 0, "hold": 0, "observe": 0, "avoid": 0}
+    opportunity_subtype_distribution: dict[str, int] = {}
     net_edge_by_type: dict[str, list[float]] = {}
 
     for row in history_rows:
@@ -882,6 +910,8 @@ async def get_filtered_analytics(
             opportunity_type_distribution[opportunity_type] += 1
             if row.get("estimated_net_trade_edge_pct") is not None:
                 net_edge_by_type.setdefault(opportunity_type, []).append(float(row["estimated_net_trade_edge_pct"]))
+        opportunity_subtype = classify_opportunity_subtype(row)
+        opportunity_subtype_distribution[opportunity_subtype] = opportunity_subtype_distribution.get(opportunity_subtype, 0) + 1
 
     top_pairs = [
         {"pair": pair_name, "count": count}
@@ -920,6 +950,7 @@ async def get_filtered_analytics(
         "alert_moment_distribution": alert_moment_distribution,
         "feedback_distribution": feedback_distribution,
         "opportunity_type_distribution": opportunity_type_distribution,
+        "opportunity_subtype_distribution": opportunity_subtype_distribution,
         "avg_net_trade_edge_by_type": {
             opportunity_type: round(sum(values) / len(values), 4)
             for opportunity_type, values in net_edge_by_type.items()

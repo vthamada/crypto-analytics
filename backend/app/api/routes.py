@@ -812,6 +812,7 @@ def _summarize_opportunity(opportunity: Opportunity) -> OpportunitySummary:
         visibility_reason=opportunity.visibility_reason,
         operationally_visible=opportunity.operationally_visible,
         opportunity_type=opportunity.opportunity_type,
+        opportunity_subtype=opportunity.opportunity_subtype,
         interesting_signal=opportunity.interesting_signal,
         operable_signal=opportunity.operable_signal,
         volatility_pct=opportunity.volatility_pct,

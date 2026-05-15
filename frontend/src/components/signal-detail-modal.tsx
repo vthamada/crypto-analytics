@@ -62,6 +62,24 @@ function exchangeLabel(exchange: string): string {
   return map[exchange] || exchange;
 }
 
+function subtypeLabel(subtype?: string | null): string {
+  const map: Record<string, string> = {
+    directional_trade: "trade direcional",
+    range_trade: "trade em faixa",
+    hold_continuation: "hold/continuidade",
+    breakout_trade: "rompimento",
+    intra_exchange_spread: "spread interno",
+    book_scalping: "book scalping",
+    cross_exchange_arbitrage: "arbitragem cross-exchange",
+    inventory_arbitrage: "arbitragem de inventario",
+    transfer_arbitrage: "arbitragem com transferencia",
+    profit_zone: "zona de realizacao",
+    observe_only: "observacao",
+    avoid: "evitar",
+  };
+  return subtype ? (map[subtype] ?? subtype.replaceAll("_", " ")) : "n/d";
+}
+
 const CHART_GRID_STROKE = "var(--border)";
 const CHART_AXIS_TICK = {
   fill: "var(--muted-foreground)",
@@ -212,6 +230,10 @@ export function SignalDetailModal({
           <DetailCard
             label="Movimento"
             value={opportunity.movement_type.replace("_", " ")}
+          />
+          <DetailCard
+            label="Subtipo"
+            value={subtypeLabel(opportunity.opportunity_subtype)}
           />
           <DetailCard
             label="Gap Cross"
