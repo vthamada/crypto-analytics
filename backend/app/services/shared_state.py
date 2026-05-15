@@ -436,6 +436,160 @@ async def get_near_misses(
     ]
 
 
+def _merge_count_dict(target: dict[str, int], source: dict | None) -> None:
+    for key, value in (source or {}).items():
+        try:
+            target[str(key)] = target.get(str(key), 0) + int(value or 0)
+        except (TypeError, ValueError):
+            continue
+
+
+def _top_counts(values: dict[str, int], limit: int = 10) -> list[dict]:
+    return [
+        {"reason": key, "count": count}
+        for key, count in sorted(values.items(), key=lambda item: item[1], reverse=True)[:limit]
+    ]
+
+
+def _rate(numerator: int | float, denominator: int | float) -> float:
+    if not denominator:
+        return 0.0
+    return round(float(numerator) / float(denominator), 4)
+
+
+async def get_funnel_quality_metrics(
+    *,
+    from_time: datetime,
+    to_time: datetime,
+    workspace_id: str | None = None,
+    exchange: str | None = None,
+    pair: str | None = None,
+) -> dict:
+    """Summarize scanner funnel quality from compact audit tables.
+
+    This intentionally derives metrics from existing audit rows instead of
+    persisting another aggregate table. The goal is operational visibility:
+    how much the scanner saw, where candidates were filtered, and why alerts
+    were blocked.
+    """
+    normalized_exchange = exchange.value if hasattr(exchange, "value") else str(exchange) if exchange else None
+    normalized_pair = pair.upper().replace("/", "_") if pair else None
+
+    async with async_session() as session:
+        cycle_result = await session.execute(
+            select(ScannerCycleAuditRecord)
+            .where(
+                ScannerCycleAuditRecord.started_at >= normalize_db_datetime(from_time),
+                ScannerCycleAuditRecord.started_at <= normalize_db_datetime(to_time),
+            )
+            .order_by(ScannerCycleAuditRecord.started_at.asc())
+        )
+        cycles = cycle_result.scalars().all()
+
+        event_query = select(SignalPipelineEventRecord).where(
+            SignalPipelineEventRecord.created_at >= normalize_db_datetime(from_time),
+            SignalPipelineEventRecord.created_at <= normalize_db_datetime(to_time),
+        )
+        if workspace_id:
+            event_query = event_query.where(
+                or_(
+                    SignalPipelineEventRecord.workspace_id.is_(None),
+                    SignalPipelineEventRecord.workspace_id == workspace_id,
+                )
+            )
+        if normalized_exchange:
+            event_query = event_query.where(SignalPipelineEventRecord.exchange == normalized_exchange)
+        if normalized_pair:
+            event_query = event_query.where(SignalPipelineEventRecord.pair == normalized_pair)
+        event_result = await session.execute(event_query)
+        events = event_result.scalars().all()
+
+    discard_reasons: dict[str, int] = {}
+    block_reasons: dict[str, int] = {}
+    cycle_totals = {
+        "cycles": len(cycles),
+        "total_pairs": 0,
+        "brl_pairs": 0,
+        "light_candidates": 0,
+        "deep_candidates": 0,
+        "deep_completed": 0,
+        "signals_created": 0,
+        "shortlist_count": 0,
+        "alerts_created": 0,
+        "alerts_sent": 0,
+        "provider_errors": 0,
+    }
+    durations = []
+    for cycle in cycles:
+        cycle_totals["total_pairs"] += int(cycle.total_pairs or 0)
+        cycle_totals["brl_pairs"] += int(cycle.brl_pairs or 0)
+        cycle_totals["light_candidates"] += int(cycle.light_candidates or 0)
+        cycle_totals["deep_candidates"] += int(cycle.deep_candidates or 0)
+        cycle_totals["deep_completed"] += int(cycle.deep_completed or 0)
+        cycle_totals["signals_created"] += int(cycle.signals_created or 0)
+        cycle_totals["shortlist_count"] += int(cycle.shortlist_count or 0)
+        cycle_totals["alerts_created"] += int(cycle.alerts_created or 0)
+        cycle_totals["alerts_sent"] += int(cycle.alerts_sent or 0)
+        cycle_totals["provider_errors"] += int(cycle.provider_errors or 0)
+        if cycle.duration_ms is not None:
+            durations.append(float(cycle.duration_ms))
+        _merge_count_dict(discard_reasons, _safe_json_loads(cycle.discard_reasons, {}))
+        _merge_count_dict(block_reasons, _safe_json_loads(cycle.block_reasons, {}))
+
+    stage_distribution: dict[str, int] = {}
+    status_distribution: dict[str, int] = {}
+    event_reasons: dict[str, int] = {}
+    alert_block_reasons: dict[str, int] = {}
+    workspace_block_reasons: dict[str, int] = {}
+    alerts_sent_events = 0
+    for event in events:
+        stage_distribution[event.stage] = stage_distribution.get(event.stage, 0) + 1
+        status_distribution[event.status] = status_distribution.get(event.status, 0) + 1
+        if event.reason:
+            event_reasons[event.reason] = event_reasons.get(event.reason, 0) + 1
+            if event.stage == "alert" and event.status == "blocked":
+                alert_block_reasons[event.reason] = alert_block_reasons.get(event.reason, 0) + 1
+            if event.stage == "workspace_projection" and event.status == "blocked":
+                workspace_block_reasons[event.reason] = workspace_block_reasons.get(event.reason, 0) + 1
+        if event.stage == "alert" and event.status == "sent":
+            alerts_sent_events += 1
+
+    avg_duration_ms = round(sum(durations) / len(durations), 2) if durations else 0.0
+    rates = {
+        "light_candidate_rate": _rate(cycle_totals["light_candidates"], cycle_totals["total_pairs"]),
+        "deep_promotion_rate": _rate(cycle_totals["deep_candidates"], cycle_totals["light_candidates"]),
+        "deep_completion_rate": _rate(cycle_totals["deep_completed"], cycle_totals["deep_candidates"]),
+        "signal_creation_rate": _rate(cycle_totals["signals_created"], cycle_totals["deep_completed"]),
+        "shortlist_rate": _rate(cycle_totals["shortlist_count"], cycle_totals["signals_created"]),
+        "alert_creation_rate": _rate(cycle_totals["alerts_created"], cycle_totals["shortlist_count"]),
+        "alert_send_rate": _rate(cycle_totals["alerts_sent"], cycle_totals["alerts_created"]),
+        "event_alert_send_rate": _rate(alerts_sent_events, alerts_sent_events + sum(alert_block_reasons.values())),
+    }
+
+    return {
+        "from": normalize_db_datetime(from_time).isoformat(),
+        "to": normalize_db_datetime(to_time).isoformat(),
+        "workspace_id": workspace_id,
+        "exchange": normalized_exchange,
+        "pair": normalized_pair,
+        "cycle_totals": cycle_totals,
+        "avg_cycle_duration_ms": avg_duration_ms,
+        "rates": rates,
+        "event_totals": {
+            "events": len(events),
+            "alerts_sent": alerts_sent_events,
+            "alerts_blocked": sum(alert_block_reasons.values()),
+        },
+        "top_discard_reasons": _top_counts(discard_reasons),
+        "top_block_reasons": _top_counts(block_reasons),
+        "top_event_reasons": _top_counts(event_reasons),
+        "top_alert_block_reasons": _top_counts(alert_block_reasons),
+        "top_workspace_block_reasons": _top_counts(workspace_block_reasons),
+        "stage_distribution": stage_distribution,
+        "status_distribution": status_distribution,
+    }
+
+
 def _summarize_signal_final_state(
     timeline: list[dict],
     *,

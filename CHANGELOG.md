@@ -30,6 +30,7 @@ Convencao deste repositorio:
 - Provider NovaDAX passou a normalizar formatos alternativos de simbolo (`SOLBRL`, `SOL/BRL`, `baseCurrency`/`quoteCurrency`) e a retornar pares BRL ativos mesmo quando a API variar o payload.
 - Campos persistidos de valor de alerta: `alert_worthiness_score`, `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason`.
 - Migration `0015_alert_worthiness_state` adiciona os campos de alerta em oportunidades, snapshots e projecoes por workspace.
+- Endpoint `GET /api/diagnostics/funnel-quality` agrega metricas compactas de qualidade do funil a partir de ciclos e eventos de auditoria.
 
 ### Fixed
 - Dashboard, shortlist, WebSocket e `/api/opportunities` passaram a ocultar ruido tecnico por padrao; registros tecnicos podem ser incluidos explicitamente com `include_technical=true`.

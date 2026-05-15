@@ -142,6 +142,85 @@ def test_runtime_persistence_normalizes_aware_detected_at(monkeypatch):
     asyncio.run(run_test())
 
 
+def test_funnel_quality_metrics_summarize_cycles_and_alert_blocks(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"funnel-quality-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(shared_state, "async_session", session_factory)
+        started_at = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
+        await shared_state.save_signal_pipeline_events(
+            "cycle-quality",
+            [
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "SOL_BRL",
+                    "stage": "light_scan",
+                    "status": "candidate",
+                    "reason": "candidate",
+                    "created_at": started_at,
+                },
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "SOL_BRL",
+                    "stage": "alert",
+                    "status": "blocked",
+                    "reason": "no_state_change",
+                    "workspace_id": "workspace-1",
+                    "created_at": started_at,
+                },
+            ],
+        )
+        await shared_state.save_scanner_cycle_audit(
+            cycle_id="cycle-quality",
+            started_at=started_at,
+            completed_at=started_at,
+            duration_ms=250.0,
+            diagnostics={
+                "total_pairs": 20,
+                "brl_pairs": 20,
+                "light_candidates": 4,
+                "deep_candidates": 2,
+                "deep_completed": 2,
+                "light_discard_reasons": {"volume_below_minimum": 5},
+            },
+            signals_created=2,
+            shortlist_count=1,
+            alerts_created=1,
+            alerts_sent=0,
+            block_reasons={"no_state_change": 1},
+        )
+
+        metrics = await shared_state.get_funnel_quality_metrics(
+            from_time=started_at,
+            to_time=started_at,
+            workspace_id="workspace-1",
+            exchange="novadax",
+            pair="SOL_BRL",
+        )
+
+        assert metrics["cycle_totals"]["cycles"] == 1
+        assert metrics["cycle_totals"]["total_pairs"] == 20
+        assert metrics["rates"]["light_candidate_rate"] == 0.2
+        assert metrics["rates"]["alert_send_rate"] == 0.0
+        assert metrics["top_discard_reasons"] == [{"reason": "volume_below_minimum", "count": 5}]
+        assert metrics["top_alert_block_reasons"] == [{"reason": "no_state_change", "count": 1}]
+        assert metrics["stage_distribution"]["alert"] == 1
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
+
+
 def test_get_near_misses_returns_compact_audit_events(monkeypatch):
     db_dir = Path(__file__).resolve().parent / ".tmp"
     db_dir.mkdir(exist_ok=True)

@@ -114,9 +114,10 @@ Decisoes ja tomadas:
   Criterio de aceite: falso negativo pode ser investigado sem persistir todos os dados brutos do mercado.
   Status: o scanner registra `event_type=near_miss` em `signal_pipeline_events` para descartes proximos de threshold e candidatos bloqueados por limite; `GET /api/diagnostics/near-misses` retorna esses eventos de forma compacta.
 
-- [ ] **Metricas de qualidade do funil**
+- [x] **Metricas de qualidade do funil**
   Medir pares vistos, candidatos, oportunidades publicadas, alertas enviados, alertas uteis, alertas atrasados, bloqueios corretos, falsos positivos e falsos negativos reportados.
   Criterio de aceite: produto consegue acompanhar reducao de ruido e qualidade real dos sinais.
+  Status: `GET /api/diagnostics/funnel-quality` agrega ciclos, taxas de conversao, motivos de descarte/bloqueio, distribuicao por etapa/status e bloqueios de alerta a partir da auditoria compacta existente.
 
 ### Auditoria e Diagnostico
 

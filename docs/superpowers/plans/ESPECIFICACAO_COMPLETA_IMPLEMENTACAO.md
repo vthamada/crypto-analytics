@@ -2840,6 +2840,7 @@ Essa definição deve orientar as próximas implementações.
 - Catalogo: resposta vazia de provider nao substitui mais o ultimo catalogo valido; quando houver catalogo anterior, o sistema marca `stale` com erro explicito.
 - Alertas: `alert_worthiness_score`, `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason` passaram a ser campos persistidos e visiveis no detalhe da oportunidade.
 - Telegram: repeticao do mesmo estado operacional para o mesmo destino/par passa a ser bloqueada como `no_state_change`, reduzindo alertas de moedas paradas na mesma fase.
+- Diagnostico: `GET /api/diagnostics/funnel-quality` passa a consolidar qualidade do funil com pares vistos, candidatos, sinais, shortlist, alertas, taxas de conversao e principais motivos de descarte/bloqueio.
 - Scanner: o funil passou a emitir eventos compactos para scan leve, promocao, analise profunda, ranking e alertas.
 - Persistencia: foram adicionadas as tabelas `scanner_cycle_audits` e `signal_pipeline_events`.
 - API: foi criado `GET /api/diagnostics/missed-signal?exchange=...&pair=...&from=...&to=...`.

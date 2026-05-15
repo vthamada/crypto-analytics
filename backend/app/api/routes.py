@@ -72,6 +72,7 @@ from app.services.pairs import get_available_pairs_catalog, get_pair_exchange_di
 from app.services.exchange_credentials import validate_exchange_credentials
 from app.services.shared_state import (
     create_signal_feedback,
+    get_funnel_quality_metrics,
     get_missed_signal_diagnostic,
     get_near_misses,
     get_scanner_runtime_state,
@@ -1215,6 +1216,25 @@ async def near_misses_diagnostic(
         "count": len(near_misses),
         "near_misses": near_misses,
     }
+
+
+@router.get("/diagnostics/funnel-quality")
+async def funnel_quality_diagnostic(
+    from_time: datetime = Query(alias="from"),
+    to_time: datetime = Query(alias="to"),
+    exchange: Exchange | None = Query(default=None),
+    pair: str | None = Query(default=None),
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
+    return await get_funnel_quality_metrics(
+        from_time=from_time,
+        to_time=to_time,
+        workspace_id=workspace.id,
+        exchange=exchange.value if exchange else None,
+        pair=pair,
+    )
 
 
 @router.get("/config", response_model=ConfigResponse)

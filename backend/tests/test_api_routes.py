@@ -424,6 +424,50 @@ def test_near_misses_diagnostic_endpoint_returns_compact_events(monkeypatch):
     assert captured[0]["pair"] == "SOL_BRL"
 
 
+def test_funnel_quality_endpoint_returns_compact_metrics(monkeypatch):
+    monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
+    captured: list[dict] = []
+
+    async def fake_legacy_session():
+        return UserSession(
+            user_id="user-1",
+            username="admin",
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
+    async def fake_resolve_workspace_context(session_info, workspace_id):
+        return make_workspace(role="owner"), AppConfig(enabled_pairs=["SOL_BRL"])
+
+    async def fake_get_funnel_quality_metrics(**kwargs):
+        captured.append(kwargs)
+        return {
+            "workspace_id": kwargs["workspace_id"],
+            "cycle_totals": {"cycles": 1, "total_pairs": 20, "alerts_sent": 0},
+            "rates": {"light_candidate_rate": 0.2, "alert_send_rate": 0.0},
+            "top_alert_block_reasons": [{"reason": "no_state_change", "count": 1}],
+        }
+
+    monkeypatch.setattr(routes, "legacy_admin_session", fake_legacy_session)
+    monkeypatch.setattr(routes, "resolve_workspace_context", fake_resolve_workspace_context)
+    monkeypatch.setattr(routes, "get_funnel_quality_metrics", fake_get_funnel_quality_metrics)
+
+    client = create_test_client()
+    response = client.get(
+        "/api/diagnostics/funnel-quality?exchange=novadax&pair=SOL_BRL&from=2026-05-08T10:00:00Z&to=2026-05-08T11:00:00Z",
+        headers={"X-Admin-Token": "secret-token"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["workspace_id"] == "workspace-1"
+    assert body["cycle_totals"]["cycles"] == 1
+    assert body["top_alert_block_reasons"][0]["reason"] == "no_state_change"
+    assert captured[0]["exchange"] == "novadax"
+    assert captured[0]["pair"] == "SOL_BRL"
+
+
 def test_config_hides_sensitive_fields(monkeypatch):
     monkeypatch.setattr(routes.settings, "admin_token", "secret-token")
 
