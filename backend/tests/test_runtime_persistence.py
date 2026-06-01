@@ -12,6 +12,7 @@ from app.models.database import (
     OpportunityRecord,
     OpportunitySnapshotRecord,
     ScannerCycleAuditRecord,
+    ScannerPairStateRecord,
     ScannerRuntimeStateRecord,
     SignalPipelineEventRecord,
     TechnicalSignalRecord,
@@ -134,6 +135,54 @@ def test_runtime_persistence_normalizes_aware_detected_at(monkeypatch):
         assert runtime_row.profile_version == "v1"
         assert projection_row.score_version == "v1"
         assert projection_row.executability_version == "v1"
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
+
+
+def test_scanner_pair_state_persistence(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"scanner-pair-state-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(shared_state, "async_session", session_factory)
+
+        now = datetime.now(timezone.utc)
+        saved = await shared_state.save_scanner_pair_states(
+            {
+                "novadax:XRP_BRL": {
+                    "exchange": "novadax",
+                    "pair": "XRP_BRL",
+                    "temperature": "cold",
+                    "last_light_scan_at": now,
+                    "last_deep_scan_at": None,
+                    "failure_count": 2,
+                    "cooldown_until": now,
+                    "last_discard_reason": "ticker_failed",
+                }
+            }
+        )
+        loaded = await shared_state.load_scanner_pair_states()
+
+        async with session_factory() as session:
+            row = await session.get(ScannerPairStateRecord, "novadax:XRP_BRL")
+
+        assert saved == 1
+        assert row is not None
+        assert row.cooldown_until.tzinfo is None
+        assert loaded["novadax:XRP_BRL"]["temperature"] == "cold"
+        assert loaded["novadax:XRP_BRL"]["failure_count"] == 2
+        assert loaded["novadax:XRP_BRL"]["last_discard_reason"] == "ticker_failed"
 
         await engine.dispose()
         if db_path.exists():

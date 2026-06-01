@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from app.models.schemas import AppConfig, Exchange, OrderBook, Ticker
 from app.services.scanner import Scanner
 
@@ -457,6 +459,33 @@ def test_scan_all_applies_cooldown_after_ticker_failure(monkeypatch):
     assert state.failure_count == 1
     assert state.cooldown_until is not None
     assert state.last_discard_reason == "ticker_failed"
+
+
+def test_pair_scan_state_round_trip_preserves_cooldown(monkeypatch):
+    monkeypatch.setattr(Scanner, "_init_providers", lambda self: None)
+
+    scanner = Scanner(AppConfig(enabled_exchanges=[Exchange.BINANCE], enabled_pairs=["FAIL_BRL"]))
+    now = datetime.now(timezone.utc)
+    scanner._record_provider_pair_failure(Exchange.BINANCE, "FAIL_BRL", "ticker_failed", now)
+
+    exported = scanner.export_pair_scan_states()
+    restored = Scanner(AppConfig(enabled_exchanges=[Exchange.BINANCE], enabled_pairs=["FAIL_BRL"]))
+    restored.load_pair_scan_states(exported)
+
+    state = restored._pair_scan_state["binance:FAIL_BRL"]
+    assert state.temperature == "cold"
+    assert state.failure_count == 1
+    assert state.cooldown_until is not None
+    assert state.cooldown_until > now
+    assert state.last_discard_reason == "ticker_failed"
+
+    db_like_payload = dict(exported)
+    db_like_payload["binance:FAIL_BRL"] = {
+        **db_like_payload["binance:FAIL_BRL"],
+        "cooldown_until": (now + timedelta(minutes=5)).replace(tzinfo=None),
+    }
+    restored.load_pair_scan_states(db_like_payload)
+    assert restored._pair_scan_state["binance:FAIL_BRL"].cooldown_until.tzinfo is not None
 
 
 def test_scan_all_captures_lower_slippage_for_deeper_book(monkeypatch, sample_ticker, sample_klines):

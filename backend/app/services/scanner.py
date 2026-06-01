@@ -111,6 +111,48 @@ class Scanner:
         """Restore repetition counts from persistent storage."""
         self._repetition_counts.update(counts)
 
+    @staticmethod
+    def _coerce_aware_utc(value: datetime | str | None) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value)
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def load_pair_scan_states(self, states: dict[str, dict]) -> None:
+        """Restore temperature/cooldown state so restarts do not reset scan pressure."""
+        valid_temperatures = set(PAIR_TEMPERATURE_INTERVAL_SECONDS)
+        for key, payload in states.items():
+            temperature = str(payload.get("temperature") or "warm")
+            if temperature not in valid_temperatures:
+                temperature = "warm"
+            self._pair_scan_state[key] = PairScanState(
+                temperature=temperature,
+                last_light_scan_at=self._coerce_aware_utc(payload.get("last_light_scan_at")),
+                last_deep_scan_at=self._coerce_aware_utc(payload.get("last_deep_scan_at")),
+                failure_count=max(int(payload.get("failure_count") or 0), 0),
+                cooldown_until=self._coerce_aware_utc(payload.get("cooldown_until")),
+                last_discard_reason=payload.get("last_discard_reason"),
+            )
+
+    def export_pair_scan_states(self) -> dict[str, dict]:
+        states: dict[str, dict] = {}
+        for key, state in self._pair_scan_state.items():
+            exchange, _, pair = key.partition(":")
+            states[key] = {
+                "exchange": exchange,
+                "pair": pair,
+                "temperature": state.temperature,
+                "last_light_scan_at": state.last_light_scan_at,
+                "last_deep_scan_at": state.last_deep_scan_at,
+                "failure_count": state.failure_count,
+                "cooldown_until": state.cooldown_until,
+                "last_discard_reason": state.last_discard_reason,
+            }
+        return states
+
     def _init_providers(self) -> None:
         provider_map: dict[Exchange, type[ExchangeProvider]] = {
             Exchange.NOVADAX: NovaDaxProvider,

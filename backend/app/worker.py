@@ -19,10 +19,12 @@ from app.services.shared_state import (
     create_pending_outcomes,
     count_workspace_alerts_sent_since,
     decay_stale_repetitions,
+    load_scanner_pair_states,
     load_repetition_counts,
     run_audit_retention_if_due,
     save_raw_market_observations,
     save_repetition_counts,
+    save_scanner_pair_states,
     save_scanner_cycle_audit,
     save_signal_pipeline_events,
     save_technical_signals,
@@ -55,6 +57,7 @@ async def run_worker() -> None:
 
     scanner: Scanner | None = None
     persisted_reps = await load_repetition_counts()
+    persisted_pair_states = await load_scanner_pair_states()
 
     while True:
         cycle_started = time.perf_counter()
@@ -71,6 +74,7 @@ async def run_worker() -> None:
                 if scanner is not None:
                     await scanner.close()
                 scanner = Scanner(config)
+                scanner.load_pair_scan_states(persisted_pair_states)
 
             scanner.load_repetition_counts(persisted_reps)
             scanner.set_historical_calibration(await get_historical_pair_calibration())
@@ -83,6 +87,8 @@ async def run_worker() -> None:
             # Persist repetition counts
             persisted_reps = dict(scanner._repetition_counts)
             await save_repetition_counts(persisted_reps)
+            persisted_pair_states = scanner.export_pair_scan_states()
+            await save_scanner_pair_states(persisted_pair_states)
             await decay_stale_repetitions(max_age_minutes=30)
 
             # Write shared snapshot for API decoupling

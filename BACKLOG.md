@@ -1,6 +1,6 @@
 # Backlog
 
-Ultima revisao: 2026-05-15
+Ultima revisao: 2026-05-31
 
 Este backlog consolida tudo que ainda precisa ser implementado no sistema a partir da especificacao principal em `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEMENTACAO.md`.
 
@@ -88,8 +88,9 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 - [ ] **Ranking usando outcomes e feedbacks de forma ativa** — refs. 62, 63, 89
   Outcomes e feedback manual ja existem, mas ainda precisam influenciar ranking, calibragem e reducao de falsos positivos/falsos negativos com limites e versao.
 
-- [ ] **Persistencia de cooldown/temperatura por provider/par** — refs. 37, 84, 90
+- [x] **Persistencia de cooldown/temperatura por provider/par** — refs. 37, 84, 90
   Persistir estado `hot`, `warm`, `cold`, falhas recorrentes e cooldown tecnico para sobreviver a restart do worker.
+  Status: `scanner_pair_states` persiste temperatura, ultimo scan leve/profundo, falhas, cooldown e ultimo motivo de descarte por exchange/par; API/worker carregam esse estado ao recriar o scanner e salvam ao fim de cada ciclo.
 
 ### Pendencias De Auditoria, UX E Produto
 
@@ -234,13 +235,15 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 
 ### Persistencia De Estado Operacional
 
-- [ ] **Persistir cooldown por provider/par**
+- [x] **Persistir cooldown por provider/par**
   Hoje parte do cooldown e temperatura ainda depende de memoria do processo. Persistir falhas recorrentes e cooldown para sobreviver a restart.
   Criterio de aceite: apos restart, pares com erro recorrente nao voltam imediatamente ao scan profundo.
+  Status: tabela `scanner_pair_states` salva `failure_count`, `cooldown_until` e `last_discard_reason` por exchange/par.
 
-- [ ] **Persistir temperatura dinamica (`hot`, `warm`, `cold`)**
+- [x] **Persistir temperatura dinamica (`hot`, `warm`, `cold`)**
   Salvar estado de frequencia dinamica por par/exchange de forma compacta.
   Criterio de aceite: o scanner preserva prioridade dinamica entre ciclos e reinicios.
+  Status: `Scanner.load_pair_scan_states()` e `Scanner.export_pair_scan_states()` restauram/persistem temperatura e horarios de scan.
 
 - [ ] **Persistir agregados seletivos de descartes**
   Manter agregados por ciclo/exchange/par sem gravar dados brutos pesados.

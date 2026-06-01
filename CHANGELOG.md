@@ -33,6 +33,8 @@ Convencao deste repositorio:
 - Endpoint `GET /api/diagnostics/funnel-quality` agrega metricas compactas de qualidade do funil a partir de ciclos e eventos de auditoria.
 - Taxonomia operacional expandida inicial com `opportunity_subtype`, cobrindo direcional, faixa, hold/continuidade, rompimento, arbitragem cross-exchange, zona de realizacao, observacao e avoid.
 - Migration `0016_opportunity_subtype` adiciona `opportunity_subtype` em oportunidades e snapshots.
+- Persistencia de temperatura e cooldown por exchange/par em `scanner_pair_states`, mantendo memoria operacional do scanner entre restarts/deploys.
+- Migration `0017_scanner_pair_states` adiciona estado operacional persistido do scanner por par.
 
 ### Fixed
 - Dashboard, shortlist, WebSocket e `/api/opportunities` passaram a ocultar ruido tecnico por padrao; registros tecnicos podem ser incluidos explicitamente com `include_technical=true`.

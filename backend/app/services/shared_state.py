@@ -21,6 +21,7 @@ from app.models.database import (
     RawMarketObservationRecord,
     RepetitionCountRecord,
     ScannerCycleAuditRecord,
+    ScannerPairStateRecord,
     ScannerRuntimeStateRecord,
     SignalPipelineEventRecord,
     SignalFeedbackRecord,
@@ -142,6 +143,55 @@ async def get_scanner_runtime_state() -> dict | None:
             "movement_version": getattr(record, "movement_version", MOVEMENT_VERSION),
             "profile_version": getattr(record, "profile_version", PROFILE_VERSION),
         }
+
+
+async def load_scanner_pair_states() -> dict[str, dict]:
+    async with async_session() as session:
+        result = await session.execute(select(ScannerPairStateRecord))
+        rows = result.scalars().all()
+        return {
+            row.id: {
+                "exchange": row.exchange,
+                "pair": row.pair,
+                "temperature": row.temperature,
+                "last_light_scan_at": row.last_light_scan_at,
+                "last_deep_scan_at": row.last_deep_scan_at,
+                "failure_count": row.failure_count,
+                "cooldown_until": row.cooldown_until,
+                "last_discard_reason": row.last_discard_reason,
+            }
+            for row in rows
+        }
+
+
+async def save_scanner_pair_states(states: dict[str, dict]) -> int:
+    if not states:
+        return 0
+
+    async with async_session() as session:
+        for state_id, payload in states.items():
+            exchange = str(payload.get("exchange") or "").strip()
+            pair = str(payload.get("pair") or "").strip().upper()
+            if not exchange or not pair:
+                continue
+
+            record = await session.get(ScannerPairStateRecord, state_id)
+            if record is None:
+                record = ScannerPairStateRecord(id=state_id, exchange=exchange, pair=pair)
+                session.add(record)
+
+            record.exchange = exchange
+            record.pair = pair
+            record.temperature = str(payload.get("temperature") or "warm")
+            record.last_light_scan_at = normalize_db_datetime(payload.get("last_light_scan_at"))
+            record.last_deep_scan_at = normalize_db_datetime(payload.get("last_deep_scan_at"))
+            record.failure_count = max(int(payload.get("failure_count") or 0), 0)
+            record.cooldown_until = normalize_db_datetime(payload.get("cooldown_until"))
+            record.last_discard_reason = payload.get("last_discard_reason")
+            record.updated_at = utcnow()
+
+        await session.commit()
+    return len(states)
 
 
 # ---------------------------------------------------------------------------

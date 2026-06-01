@@ -246,6 +246,21 @@ class ScannerRuntimeStateRecord(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
+class ScannerPairStateRecord(Base):
+    __tablename__ = "scanner_pair_states"
+
+    id = Column(String, primary_key=True)  # "exchange:pair"
+    exchange = Column(String, nullable=False, index=True)
+    pair = Column(String, nullable=False, index=True)
+    temperature = Column(String, nullable=False, default="warm", index=True)
+    last_light_scan_at = Column(DateTime, nullable=True)
+    last_deep_scan_at = Column(DateTime, nullable=True)
+    failure_count = Column(Integer, nullable=False, default=0)
+    cooldown_until = Column(DateTime, nullable=True, index=True)
+    last_discard_reason = Column(String, nullable=True, index=True)
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
 class ScannerCycleAuditRecord(Base):
     __tablename__ = "scanner_cycle_audits"
 
@@ -815,6 +830,7 @@ async def ensure_schema_compatibility() -> None:
             "signal_outcomes",
             "signal_feedback",
             "repetition_counts",
+            "scanner_pair_states",
         ):
             if table_name in existing_tables:
                 continue
