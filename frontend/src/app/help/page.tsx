@@ -31,6 +31,10 @@ const glossary = [
     text: "Mede se o sinal parece executavel na pratica: liquidez, saida, slippage e risco de ficar preso.",
   },
   {
+    term: "Valor de alerta",
+    text: "Mede se vale interromper o usuario agora. Um ativo pode ser operavel e ainda assim nao merecer Telegram se estiver parado ou sem gatilho.",
+  },
+  {
     term: "Sinal interessante",
     text: "Vale observar, mas ainda pode ser ruim para operar se faltar volume, liquidez ou saida.",
   },
@@ -104,12 +108,12 @@ export default function HelpPage() {
               Como interpretar score
             </CardTitle>
             <CardDescription>
-              Score alto nao e compra automatica. Ele e uma fila de prioridade.
+              Score operacional alto nao e compra automatica. Telegram exige valor de alerta e gatilho.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-muted-foreground">
-            <p>Use o score para decidir o que olhar primeiro.</p>
-            <p>Use operabilidade, volume, liquidez e saida para decidir se vale operar.</p>
+            <p>Use o score operacional para decidir o que olhar primeiro.</p>
+            <p>Use valor de alerta, gatilho, volume, liquidez e saida para decidir se vale interromper a atencao.</p>
           </CardContent>
         </Card>
 

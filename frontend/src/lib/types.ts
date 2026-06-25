@@ -53,12 +53,23 @@ export interface Kline {
   close_time?: string;
 }
 
+export interface OrderSizeSimulation {
+  notional_brl: number;
+  buy_slippage_bps?: number | null;
+  sell_slippage_bps?: number | null;
+  buy_fillable_notional_brl: number;
+  sell_fillable_notional_brl: number;
+  executable: boolean;
+  status: string;
+}
+
 export interface Opportunity {
   id: string;
   exchange: Exchange;
   pair: string;
   score: number;
   technical_score?: number | null;
+  operational_score?: number | null;
   score_version?: string;
   executability_version?: string;
   movement_version?: string;
@@ -69,6 +80,17 @@ export interface Opportunity {
   pipeline_status?: PipelineStatus;
   visibility_reason?: string | null;
   operationally_visible?: boolean;
+  operation_status?: string | null;
+  opportunity_family?: string | null;
+  entry_zone?: string | null;
+  exit_zone?: string | null;
+  suggested_capital_range_brl?: string | null;
+  liquidity_label?: string | null;
+  risk_label?: string | null;
+  main_reason?: string | null;
+  actionability_label?: string | null;
+  requires_limited_order?: boolean;
+  requires_transfer?: boolean;
   executability_score?: number | null;
   executability_band?: string | null;
   interesting_signal?: boolean | null;
@@ -91,6 +113,9 @@ export interface Opportunity {
   estimated_sell_slippage_bps?: number | null;
   fillable_notional_within_slippage_cap?: number | null;
   baseline_order_notional_brl?: number | null;
+  order_size_simulations?: OrderSizeSimulation[];
+  max_operable_order_notional_brl?: number | null;
+  operability_size_label?: string | null;
   movement_type: MovementType;
   movement_regime?: MovementRegime | null;
   movement_phase?: MovementPhase;
@@ -164,9 +189,21 @@ export type OpportunitySummary = Pick<
   | "pair"
   | "score"
   | "technical_score"
+  | "operational_score"
   | "pipeline_status"
   | "visibility_reason"
   | "operationally_visible"
+  | "operation_status"
+  | "opportunity_family"
+  | "entry_zone"
+  | "exit_zone"
+  | "suggested_capital_range_brl"
+  | "liquidity_label"
+  | "risk_label"
+  | "main_reason"
+  | "actionability_label"
+  | "requires_limited_order"
+  | "requires_transfer"
   | "executability_score"
   | "executability_band"
   | "trade_margin_score"
@@ -186,6 +223,9 @@ export type OpportunitySummary = Pick<
   | "estimated_buy_slippage_bps"
   | "estimated_sell_slippage_bps"
   | "fillable_notional_within_slippage_cap"
+  | "order_size_simulations"
+  | "max_operable_order_notional_brl"
+  | "operability_size_label"
   | "last_price"
   | "change_pct"
   | "movement_type"
@@ -278,6 +318,7 @@ export interface HistoryRecord {
   pair: string;
   score: number;
   technical_score?: number | null;
+  operational_score?: number | null;
   score_version?: string;
   executability_version?: string;
   movement_version?: string;
@@ -288,6 +329,17 @@ export interface HistoryRecord {
   pipeline_status?: PipelineStatus;
   visibility_reason?: string | null;
   operationally_visible?: boolean;
+  operation_status?: string | null;
+  opportunity_family?: string | null;
+  entry_zone?: string | null;
+  exit_zone?: string | null;
+  suggested_capital_range_brl?: string | null;
+  liquidity_label?: string | null;
+  risk_label?: string | null;
+  main_reason?: string | null;
+  actionability_label?: string | null;
+  requires_limited_order?: boolean;
+  requires_transfer?: boolean;
   executability_score?: number | null;
   executability_band?: string | null;
   interesting_signal?: boolean | null;
@@ -310,6 +362,9 @@ export interface HistoryRecord {
   estimated_sell_slippage_bps?: number | null;
   fillable_notional_within_slippage_cap?: number | null;
   baseline_order_notional_brl?: number | null;
+  order_size_simulations?: OrderSizeSimulation[];
+  max_operable_order_notional_brl?: number | null;
+  operability_size_label?: string | null;
   movement_type: MovementType;
   movement_regime?: MovementRegime | null;
   movement_phase?: MovementPhase;
@@ -349,12 +404,24 @@ export interface HistorySummaryRecord {
   exchange: Exchange;
   pair: string;
   score: number;
+  operational_score?: number | null;
   executability_score?: number | null;
   trade_margin_score?: number | null;
   estimated_net_trade_edge_pct?: number | null;
   pipeline_status?: PipelineStatus;
   visibility_reason?: string | null;
   operationally_visible?: boolean;
+  operation_status?: string | null;
+  opportunity_family?: string | null;
+  entry_zone?: string | null;
+  exit_zone?: string | null;
+  suggested_capital_range_brl?: string | null;
+  liquidity_label?: string | null;
+  risk_label?: string | null;
+  main_reason?: string | null;
+  actionability_label?: string | null;
+  requires_limited_order?: boolean;
+  requires_transfer?: boolean;
   opportunity_type?: OpportunityType | null;
   opportunity_subtype?: OpportunitySubtype | null;
   spread_pct: number;
@@ -365,6 +432,8 @@ export interface HistorySummaryRecord {
   is_late_entry_risk?: boolean;
   operational_range_margin_pct?: number | null;
   operational_range_quality?: string;
+  max_operable_order_notional_brl?: number | null;
+  operability_size_label?: string | null;
   alert_moment_type?: AlertMomentType;
   alert_reason?: string | null;
   detected_at: string;

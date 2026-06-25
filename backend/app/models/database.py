@@ -39,6 +39,7 @@ class OpportunityRecord(Base):
     exchange = Column(String, nullable=False, index=True)
     pair = Column(String, nullable=False, index=True)
     score = Column(Float, nullable=False, index=True)
+    operational_score = Column(Float, nullable=True, index=True)
     volatility_pct = Column(Float, nullable=False)
     volume_24h = Column(Float, nullable=False)
     quote_volume_24h = Column(Float, nullable=False)
@@ -85,6 +86,9 @@ class OpportunityRecord(Base):
     estimated_sell_slippage_bps = Column(Float, nullable=True)
     fillable_notional_within_slippage_cap = Column(Float, nullable=True)
     baseline_order_notional_brl = Column(Float, nullable=True)
+    order_size_simulations = Column(Text, nullable=True)
+    max_operable_order_notional_brl = Column(Float, nullable=True)
+    operability_size_label = Column(String, nullable=True)
     movement_regime = Column(String, nullable=True)
     movement_phase = Column(String, nullable=True)
     phase_confidence_score = Column(Float, nullable=True)
@@ -313,6 +317,7 @@ class OpportunitySnapshotRecord(Base):
     pair = Column(String, nullable=False, index=True)
     score = Column(Float, nullable=False)
     technical_score = Column(Float, nullable=False)
+    operational_score = Column(Float, nullable=True)
     score_version = Column(String, nullable=False, default="v1")
     executability_version = Column(String, nullable=False, default="v1")
     movement_version = Column(String, nullable=False, default="v1")
@@ -340,6 +345,9 @@ class OpportunitySnapshotRecord(Base):
     estimated_sell_slippage_bps = Column(Float, nullable=True)
     fillable_notional_within_slippage_cap = Column(Float, nullable=True)
     baseline_order_notional_brl = Column(Float, nullable=True)
+    order_size_simulations = Column(Text, nullable=True)
+    max_operable_order_notional_brl = Column(Float, nullable=True)
+    operability_size_label = Column(String, nullable=True)
     movement_type = Column(String, nullable=False)
     movement_regime = Column(String, nullable=True)
     movement_phase = Column(String, nullable=True)
@@ -607,6 +615,7 @@ async def ensure_schema_compatibility() -> None:
         "repetition_score": "FLOAT DEFAULT 0.0",
         "movement_multiplier": "FLOAT DEFAULT 1.0",
         "technical_score": "FLOAT",
+        "operational_score": "FLOAT",
         "score_version": "VARCHAR DEFAULT 'v1'",
         "executability_version": "VARCHAR DEFAULT 'v1'",
         "movement_version": "VARCHAR DEFAULT 'v1'",
@@ -631,6 +640,9 @@ async def ensure_schema_compatibility() -> None:
         "estimated_sell_slippage_bps": "FLOAT",
         "fillable_notional_within_slippage_cap": "FLOAT",
         "baseline_order_notional_brl": "FLOAT",
+        "order_size_simulations": "TEXT",
+        "max_operable_order_notional_brl": "FLOAT",
+        "operability_size_label": "VARCHAR",
         "movement_regime": "VARCHAR",
         "movement_phase": "VARCHAR",
         "phase_confidence_score": "FLOAT",
@@ -670,6 +682,7 @@ async def ensure_schema_compatibility() -> None:
 
     snapshot_columns = {
         "score_version": "VARCHAR DEFAULT 'v1' NOT NULL",
+        "operational_score": "FLOAT",
         "executability_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "movement_version": "VARCHAR DEFAULT 'v1' NOT NULL",
         "profile_version": "VARCHAR DEFAULT 'v1' NOT NULL",
@@ -691,6 +704,9 @@ async def ensure_schema_compatibility() -> None:
         "estimated_sell_slippage_bps": "FLOAT",
         "fillable_notional_within_slippage_cap": "FLOAT",
         "baseline_order_notional_brl": "FLOAT",
+        "order_size_simulations": "TEXT",
+        "max_operable_order_notional_brl": "FLOAT",
+        "operability_size_label": "VARCHAR",
         "movement_regime": "VARCHAR",
         "movement_phase": "VARCHAR",
         "phase_confidence_score": "FLOAT",

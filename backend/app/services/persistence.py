@@ -38,6 +38,27 @@ _SEMANTIC_DEDUP_WINDOW_MINUTES = 30
 _last_history_retention_run: datetime | None = None
 
 
+def _serialize_order_size_simulations(value: object) -> str:
+    simulations = value or []
+    serialized = []
+    for simulation in simulations:
+        if hasattr(simulation, "model_dump"):
+            serialized.append(simulation.model_dump())
+        else:
+            serialized.append(simulation)
+    return json.dumps(serialized)
+
+
+def _deserialize_order_size_simulations(value: str | None) -> list[dict]:
+    if not value:
+        return []
+    try:
+        loaded = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return loaded if isinstance(loaded, list) else []
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -233,6 +254,7 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "pair": record.pair,
         "score": workspace_score,
         "technical_score": getattr(record, "technical_score", None),
+        "operational_score": getattr(record, "operational_score", None) or workspace_score,
         "score_version": getattr(record, "score_version", "v1"),
         "executability_version": getattr(record, "executability_version", "v1"),
         "movement_version": getattr(record, "movement_version", "v1"),
@@ -274,6 +296,9 @@ def serialize_history_record(record: OpportunityRecord, config: AppConfig | None
         "estimated_sell_slippage_bps": workspace_operability.get("estimated_sell_slippage_bps", getattr(record, "estimated_sell_slippage_bps", None)),
         "fillable_notional_within_slippage_cap": getattr(record, "fillable_notional_within_slippage_cap", None),
         "baseline_order_notional_brl": workspace_operability.get("baseline_order_notional_brl", getattr(record, "baseline_order_notional_brl", None)),
+        "order_size_simulations": _deserialize_order_size_simulations(getattr(record, "order_size_simulations", None)),
+        "max_operable_order_notional_brl": getattr(record, "max_operable_order_notional_brl", None),
+        "operability_size_label": getattr(record, "operability_size_label", None),
         "movement_type": record.movement_type,
         "movement_regime": movement_regime,
         "movement_phase": getattr(record, "movement_phase", None) or "neutral",
@@ -443,6 +468,7 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
                 exchange=opp.exchange.value,
                 pair=opp.pair,
                 score=opp.score,
+                operational_score=opp.operational_score if opp.operational_score is not None else opp.score,
                 volatility_pct=opp.volatility_pct,
                 volume_24h=opp.volume_24h,
                 quote_volume_24h=opp.quote_volume_24h,
@@ -493,6 +519,9 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
                 estimated_sell_slippage_bps=opp.estimated_sell_slippage_bps,
                 fillable_notional_within_slippage_cap=opp.fillable_notional_within_slippage_cap,
                 baseline_order_notional_brl=opp.baseline_order_notional_brl,
+                order_size_simulations=_serialize_order_size_simulations(opp.order_size_simulations),
+                max_operable_order_notional_brl=opp.max_operable_order_notional_brl,
+                operability_size_label=opp.operability_size_label,
                 movement_regime=opp.movement_regime.value if opp.movement_regime else None,
                 movement_phase=opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase,
                 phase_confidence_score=opp.phase_confidence_score,
@@ -701,6 +730,7 @@ async def get_history_summary(
             OpportunityRecord.exchange,
             OpportunityRecord.pair,
             OpportunityRecord.score,
+            OpportunityRecord.operational_score,
             OpportunityRecord.executability_score,
             OpportunityRecord.interesting_signal,
             OpportunityRecord.operable_signal,
@@ -717,6 +747,8 @@ async def get_history_summary(
             OpportunityRecord.is_late_entry_risk,
             OpportunityRecord.operational_range_margin_pct,
             OpportunityRecord.operational_range_quality,
+            OpportunityRecord.max_operable_order_notional_brl,
+            OpportunityRecord.operability_size_label,
             OpportunityRecord.alert_moment_type,
             OpportunityRecord.alert_reason,
             OpportunityRecord.alert_worthiness_score,
@@ -753,6 +785,7 @@ async def get_history_summary(
                 "exchange": row["exchange"],
                 "pair": row["pair"],
                 "score": score,
+                "operational_score": row["operational_score"] or score,
                 "executability_score": row["executability_score"],
                 "interesting_signal": row["interesting_signal"],
                 "operable_signal": row["operable_signal"],
@@ -779,6 +812,8 @@ async def get_history_summary(
                 "is_late_entry_risk": row["is_late_entry_risk"] or False,
                 "operational_range_margin_pct": row["operational_range_margin_pct"],
                 "operational_range_quality": row["operational_range_quality"] or "none",
+                "max_operable_order_notional_brl": row["max_operable_order_notional_brl"],
+                "operability_size_label": row["operability_size_label"],
                 "alert_moment_type": row["alert_moment_type"] or "neutral",
                 "alert_reason": row["alert_reason"],
                 "alert_worthiness_score": row["alert_worthiness_score"],

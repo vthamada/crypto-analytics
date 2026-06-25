@@ -228,7 +228,7 @@ const CONFIG_UPDATE_FIELD_LABELS: Record<string, string> = {
   enabled_pairs: "pares",
   scan_interval_seconds: "intervalo do scanner",
   telegram_enabled: "Telegram",
-  telegram_alert_threshold: "score minimo de alerta",
+  telegram_alert_threshold: "valor minimo de alerta",
   telegram_alert_cooldown_seconds: "cooldown de alerta",
   telegram_alert_types: "tipos de alerta",
   telegram_operable_only: "alertas operaveis",
@@ -2703,7 +2703,7 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap gap-2">
                   {[
                     { value: "operable", label: "Operaveis" },
-                    { value: "high_score", label: "Score alto" },
+                    { value: "high_score", label: "Valor de alerta alto" },
                     { value: "arbitrage", label: "Arbitragem" },
                   ].map((alertType) => {
                     const active = (config.telegram_alert_types ?? []).includes(alertType.value);

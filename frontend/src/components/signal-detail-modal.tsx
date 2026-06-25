@@ -27,14 +27,17 @@ import {
   formatBps,
   formatCurrency,
   formatCurrencyCompact,
+  formatOperationStatus,
+  formatOperabilitySizeLabel,
+  formatOpportunityFamily,
   formatSignedPercent,
   getExecutabilityBandLabel,
   getExecutabilityHighlight,
   getExecutabilityScore,
+  getOperationStatusTone,
   getOperabilityFillRatio,
   getOperabilityReasons,
   getReasonToneClasses,
-  getTechnicalScore,
   hasExecutability,
   isInterestingSignal,
   isOperableSignal,
@@ -45,12 +48,6 @@ interface SignalDetailModalProps {
   opportunity: Opportunity | null;
   open: boolean;
   onClose: () => void;
-}
-
-function scoreColor(score: number): string {
-  if (score >= 70) return "bg-emerald-500/15 text-emerald-500 border-emerald-500/20";
-  if (score >= 40) return "bg-yellow-500/15 text-yellow-500 border-yellow-500/20";
-  return "bg-red-500/15 text-red-500 border-red-500/20";
 }
 
 function exchangeLabel(exchange: string): string {
@@ -80,6 +77,10 @@ function subtypeLabel(subtype?: string | null): string {
   return subtype ? (map[subtype] ?? subtype.replaceAll("_", " ")) : "n/d";
 }
 
+function thesisFallback(value?: string | null): string {
+  return value && value.trim().length > 0 ? value : "n/d";
+}
+
 const CHART_GRID_STROKE = "var(--border)";
 const CHART_AXIS_TICK = {
   fill: "var(--muted-foreground)",
@@ -107,7 +108,6 @@ export function SignalDetailModal({
   const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   if (!opportunity) return null;
 
-  const technicalScore = getTechnicalScore(opportunity);
   const executabilityScore = getExecutabilityScore(opportunity);
   const showExecutability = hasExecutability(opportunity);
   const reasons = getOperabilityReasons(opportunity);
@@ -151,9 +151,12 @@ export function SignalDetailModal({
               <div className="flex flex-wrap gap-2">
                 <Badge
                   variant="outline"
-                  className={cn("text-sm font-bold", scoreColor(technicalScore))}
+                  className={cn("text-sm font-bold", getReasonToneClasses(getOperationStatusTone(opportunity.operation_status)))}
                 >
-                  Score tecnico {technicalScore.toFixed(1)}
+                  {formatOperationStatus(opportunity.operation_status)}
+                </Badge>
+                <Badge variant="outline" className="text-sm">
+                  {formatOpportunityFamily(opportunity.opportunity_family)}
                 </Badge>
                 {executabilityScore != null ? (
                   <Badge
@@ -176,9 +179,10 @@ export function SignalDetailModal({
             <div className="rounded-2xl border bg-muted/20 px-4 py-3 text-sm">
               <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Leitura rapida</p>
               <p className="mt-1 font-semibold">
-                {showExecutability
-                  ? `${getExecutabilityBandLabel(opportunity)} • saida ${formatBps(opportunity.estimated_sell_slippage_bps)}`
-                  : "Payload tecnico sem camada de operabilidade"}
+                {opportunity.main_reason ??
+                  (showExecutability
+                    ? `${getExecutabilityBandLabel(opportunity)} - saida ${formatBps(opportunity.estimated_sell_slippage_bps)}`
+                    : "Payload tecnico sem camada de operabilidade")}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Detectado em{" "}
@@ -208,6 +212,23 @@ export function SignalDetailModal({
             ) : null}
           </div>
         </DialogHeader>
+
+        <div className="rounded-2xl border bg-muted/20 p-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <DetailCard label="Entrada provavel" value={thesisFallback(opportunity.entry_zone)} />
+            <DetailCard label="Saida provavel" value={thesisFallback(opportunity.exit_zone)} />
+            <DetailCard label="Tamanho sugerido" value={thesisFallback(opportunity.suggested_capital_range_brl)} />
+            <DetailCard label="Risco" value={thesisFallback(opportunity.risk_label?.replaceAll("_", " "))} />
+            <DetailCard label="Liquidez" value={thesisFallback(opportunity.liquidity_label?.replaceAll("_", " "))} />
+            <DetailCard
+              label="Ordem"
+              value={[
+                opportunity.requires_limited_order ? "usar ordem limitada" : "ordem limitada opcional",
+                opportunity.requires_transfer ? "exige transferencia" : null,
+              ].filter(Boolean).join(" - ")}
+            />
+          </div>
+        </div>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <DetailCard label="Preco" value={formatCurrency(opportunity.last_price)} />
@@ -287,7 +308,7 @@ export function SignalDetailModal({
                 label="Executabilidade"
                 value={
                   executabilityScore != null
-                    ? `${executabilityScore.toFixed(1)} • ${getExecutabilityBandLabel(opportunity)}`
+                    ? `${executabilityScore.toFixed(1)} - ${getExecutabilityBandLabel(opportunity)}`
                     : "n/d"
                 }
               />
@@ -300,6 +321,14 @@ export function SignalDetailModal({
                 }
               />
               <DetailCard
+                label="Capacidade pratica"
+                value={
+                  opportunity.max_operable_order_notional_brl != null
+                    ? `${formatOperabilitySizeLabel(opportunity.operability_size_label)} - ${formatCurrencyCompact(opportunity.max_operable_order_notional_brl)}`
+                    : formatOperabilitySizeLabel(opportunity.operability_size_label)
+                }
+              />
+              <DetailCard
                 label="Cobertura da ordem"
                 value={fillRatio != null ? `${Math.round(fillRatio * 100)}%` : "n/d"}
               />
@@ -308,9 +337,30 @@ export function SignalDetailModal({
                 value={[
                   opportunity.score_version ?? "score n/d",
                   opportunity.executability_version ?? "exec n/d",
-                ].join(" • ")}
+                ].join(" - ")}
               />
             </div>
+
+            {opportunity.order_size_simulations?.length ? (
+              <div className="mt-4 overflow-hidden rounded-2xl border">
+                <div className="grid grid-cols-4 bg-muted/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <span>Tamanho</span>
+                  <span>Entrada</span>
+                  <span>Saida</span>
+                  <span>Status</span>
+                </div>
+                {opportunity.order_size_simulations.map((simulation) => (
+                  <div key={simulation.notional_brl} className="grid grid-cols-4 border-t px-3 py-2 text-xs">
+                    <span className="font-semibold">{formatCurrencyCompact(simulation.notional_brl)}</span>
+                    <span>{formatBps(simulation.buy_slippage_bps)}</span>
+                    <span>{formatBps(simulation.sell_slippage_bps)}</span>
+                    <span className={simulation.executable ? "text-emerald-500" : "text-amber-500"}>
+                      {simulation.executable ? "operavel" : simulation.status.replaceAll("_", " ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="rounded-2xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
@@ -403,10 +453,18 @@ export function SignalDetailModal({
               value={opportunity.alert_reason ?? opportunity.phase_reason ?? "n/d"}
             />
             <DetailCard
+              label="Score operacional"
+              value={
+                opportunity.operational_score != null
+                  ? opportunity.operational_score.toFixed(1)
+                  : opportunity.score.toFixed(1)
+              }
+            />
+            <DetailCard
               label="Valor de alerta"
               value={
                 opportunity.alert_worthiness_score != null
-                  ? `${opportunity.alert_worthiness_score.toFixed(1)}${opportunity.has_actionable_trigger ? " • acionavel" : " • sem gatilho"}`
+                  ? `${opportunity.alert_worthiness_score.toFixed(1)}${opportunity.has_actionable_trigger ? " - acionavel" : " - sem gatilho"}`
                   : "n/d"
               }
               valueClass={opportunity.has_actionable_trigger ? "text-emerald-500" : "text-amber-500"}
@@ -422,7 +480,7 @@ export function SignalDetailModal({
             />
             <DetailCard
               label="Estado alerta"
-              value={opportunity.alert_state_key?.replaceAll("|", " • ") ?? "n/d"}
+              value={opportunity.alert_state_key?.replaceAll("|", " - ") ?? "n/d"}
             />
           </div>
         </div>

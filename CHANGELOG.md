@@ -35,12 +35,19 @@ Convencao deste repositorio:
 - Migration `0016_opportunity_subtype` adiciona `opportunity_subtype` em oportunidades e snapshots.
 - Persistencia de temperatura e cooldown por exchange/par em `scanner_pair_states`, mantendo memoria operacional do scanner entre restarts/deploys.
 - Migration `0017_scanner_pair_states` adiciona estado operacional persistido do scanner por par.
+- Campo explicito `operational_score` em oportunidades, snapshots, API e frontend para separar saude operacional de urgencia de alerta.
+- Migration `0018_operational_score` adiciona `operational_score` com backfill a partir de `score`.
+- Simulacao de tamanhos de ordem em R$ 25, R$ 300, R$ 1.000, R$ 5.000 e R$ 10.000 por oportunidade, com maior tamanho operavel e rótulo operacional.
+- Migration `0019_order_size_simulations` adiciona capacidade operacional por tamanho em oportunidades e snapshots.
+- Tese operacional derivada por oportunidade com status de acao, familia operacional, zona de entrada, zona de saida, tamanho sugerido, liquidez, risco, motivo principal e flags de ordem limitada/transferencia.
 
 ### Fixed
 - Dashboard, shortlist, WebSocket e `/api/opportunities` passaram a ocultar ruido tecnico por padrao; registros tecnicos podem ser incluidos explicitamente com `include_technical=true`.
 - `/api/history` e `/api/history/summary` retornam historico operacional por padrao, mantendo descartes e bloqueios acessiveis apenas na visao tecnica/auditoria.
 - Telegram agora possui uma defesa final para nao enviar sinais nao operacionais, mesmo quando configuracoes de `high_score` ou arbitragem estiverem ativas.
-- Telegram deixou de enviar `accumulation`, `preparation` ou estado neutro sem gatilho acionavel, bloqueando como `accumulation_only`, `preparation_without_trigger`, `no_actionable_trigger` ou `insufficient_alert_worthiness`.
+- Telegram deixou de enviar `accumulation`, `preparation` ou estado neutro sem gatilho acionavel, bloqueando como `accumulation_only`, `preparation_without_trigger`, `no_actionable_operation` ou `insufficient_alert_worthiness`.
+- Elegibilidade e ranking de Telegram agora usam `alert_worthiness_score`, mantendo `operational_score` apenas como contexto operacional.
+- Sinais sem nenhum tamanho minimo executavel passam a ser bloqueados como baixa liquidez.
 - Badges do frontend evitam mostrar combinacoes contraditorias como `Operavel` junto com `Evitar` ou margem negativa.
 - Provider NovaDAX passou a calcular `change_pct_24h` a partir de `open24h` quando a API nao retorna `change24h`, evitando descarte total dos pares por erro de ticker no scan leve.
 - Catalogo de pares deixou de cachear resposta totalmente vazia como estado valido; quando um provider retorna vazio apos sucesso anterior, o sistema usa o ultimo catalogo valido e marca status `stale`.
@@ -48,6 +55,7 @@ Convencao deste repositorio:
 - Watchlist de pares deixou de limitar dashboard, historico e universo de scan; o scanner agora avalia o catalogo BRL descoberto e usa pares selecionados apenas como destaque/diagnostico.
 - Configuracao `pair_universe_mode` permite escolher entre monitorar todos os pares BRL das exchanges habilitadas ou restringir scan/dashboard/historico apenas a watchlist.
 - O detalhe do sinal agora mostra o subtipo operacional, preparando a UI para separar movimentos direcionais, faixas, spread interno e arbitragem.
+- Dashboard, detalhe de oportunidade e Telegram passaram a priorizar a leitura operacional pratica em vez de score tecnico: o usuario ve por que olhar, onde entrar/sair, quanto cabe operar e qual risco principal.
 - Migration `0014_revoke_public_execute` remove permissao herdada de `PUBLIC` na funcao `public.rls_auto_enable()` sem bloquear deploys quando o usuario do app nao e dono da funcao.
 
 ## [2026-05-07]

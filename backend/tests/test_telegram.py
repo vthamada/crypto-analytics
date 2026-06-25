@@ -49,6 +49,16 @@ def _make_opportunity() -> Opportunity:
         bid_notional_top_n=48000,
         estimated_buy_slippage_bps=25,
         estimated_sell_slippage_bps=30,
+        operation_status="vale_olhar_agora",
+        opportunity_family="rompimento",
+        entry_zone="R$ 123,000 - R$ 124,000",
+        exit_zone="R$ 128,000 - R$ 130,000",
+        suggested_capital_range_brl="ate R$ 1.0K",
+        liquidity_label="liquidez_boa",
+        risk_label="baixo",
+        main_reason="rompimento com volume e liquidez suficientes",
+        actionability_label="Vale olhar agora",
+        requires_limited_order=True,
         spread_pct=0.12,
     )
 
@@ -77,6 +87,11 @@ def test_send_telegram_alert_uses_html_parse_mode_and_escapes_dynamic_values(mon
     assert recorded["json"]["parse_mode"] == "HTML"
     assert "mercado_bitcoin" in recorded["json"]["text"]
     assert "BTC_BRL" in recorded["json"]["text"]
+    assert "Entrada provavel" in recorded["json"]["text"]
+    assert "Saida provavel" in recorded["json"]["text"]
+    assert "Tamanho sugerido" in recorded["json"]["text"]
+    assert "rompimento com volume e liquidez suficientes" in recorded["json"]["text"]
+    assert "exige ordem limitada" in recorded["json"]["text"]
     assert "*Crypto Analytics" not in recorded["json"]["text"]
     assert "<b>Crypto Analytics - Novas Oportunidades</b>" in recorded["json"]["text"]
 

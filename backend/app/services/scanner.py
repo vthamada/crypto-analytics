@@ -33,6 +33,8 @@ from app.filters.executability import (
     classify_executability_band,
     estimate_fillable_notional,
     estimate_slippage_bps,
+    simulate_order_size_buckets,
+    summarize_order_size_simulations,
 )
 from app.filters.liquidity import (
     calculate_liquidity,
@@ -905,6 +907,12 @@ class Scanner:
                 None if estimated_sell_slippage_bps == float("inf") else round(estimated_sell_slippage_bps, 2)
             )
             serialized_fillable_notional = round(fillable_notional_within_slippage_cap, 2)
+            order_size_simulations = simulate_order_size_buckets(
+                order_book,
+                max_entry_slippage_bps=trading_profile.max_entry_slippage_bps,
+                max_exit_slippage_bps=trading_profile.max_exit_slippage_bps,
+            )
+            order_size_summary = summarize_order_size_simulations(order_size_simulations)
             executability_score = calculate_executability_score(
                 bid_notional_top_n=bid_notional_top_n,
                 ask_notional_top_n=ask_notional_top_n,
@@ -992,6 +1000,7 @@ class Scanner:
                 pair=pair,
                 score=score,
                 technical_score=technical_score,
+                operational_score=score,
                 score_version=SCORE_VERSION,
                 executability_version=EXECUTABILITY_VERSION,
                 movement_version=MOVEMENT_VERSION,
@@ -1019,6 +1028,9 @@ class Scanner:
                 estimated_sell_slippage_bps=serialized_sell_slippage,
                 fillable_notional_within_slippage_cap=serialized_fillable_notional,
                 baseline_order_notional_brl=trading_profile.order_notional_brl,
+                order_size_simulations=order_size_simulations,
+                max_operable_order_notional_brl=order_size_summary["max_operable_order_notional_brl"],
+                operability_size_label=str(order_size_summary["operability_size_label"]),
                 movement_type=movement_type,
                 movement_regime=movement_regime,
                 movement_phase=phase_metrics["movement_phase"],
@@ -1065,6 +1077,7 @@ class Scanner:
                 details={
                     "score": opportunity.score,
                     "technical_score": opportunity.technical_score,
+                    "operational_score": opportunity.operational_score,
                     "executability_score": opportunity.executability_score,
                     "opportunity_type": opportunity.opportunity_type,
                     "movement_phase": (

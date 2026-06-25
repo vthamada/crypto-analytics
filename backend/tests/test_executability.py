@@ -7,6 +7,8 @@ from app.filters.executability import (
     classify_opportunity_type,
     estimate_fillable_notional,
     estimate_slippage_bps,
+    simulate_order_size_buckets,
+    summarize_order_size_simulations,
 )
 from app.filters.liquidity import (
     calculate_depth_ratio_by_distance,
@@ -102,6 +104,35 @@ def test_estimate_slippage_returns_inf_when_book_cannot_fill_notional():
 
     assert estimate_slippage_bps(book, "buy", 1_000.0) == float("inf")
     assert estimate_slippage_bps(book, "sell", 1_000.0) == float("inf")
+
+
+def test_order_size_simulation_classifies_largest_operable_size():
+    deep_book = _make_order_book(
+        pair="SOL_BRL",
+        bids=[(99.95, 80), (99.80, 60), (99.50, 50)],
+        asks=[(100.00, 80), (100.20, 60), (100.50, 50)],
+    )
+    shallow_book = _make_order_book(
+        pair="LAB_BRL",
+        bids=[(0.99, 200), (0.95, 100)],
+        asks=[(1.00, 200), (1.08, 100)],
+    )
+
+    deep_simulations = simulate_order_size_buckets(
+        deep_book,
+        max_entry_slippage_bps=300,
+        max_exit_slippage_bps=300,
+    )
+    shallow_simulations = simulate_order_size_buckets(
+        shallow_book,
+        max_entry_slippage_bps=300,
+        max_exit_slippage_bps=300,
+    )
+
+    assert summarize_order_size_simulations(deep_simulations)["operability_size_label"] == "large_operation"
+    assert summarize_order_size_simulations(shallow_simulations)["operability_size_label"] == "small_test_only"
+    assert any(sim["notional_brl"] == 10_000.0 and sim["executable"] is True for sim in deep_simulations)
+    assert any(sim["notional_brl"] == 1_000.0 and sim["executable"] is False for sim in shallow_simulations)
 
 
 def test_calculate_executability_score_rewards_depth_and_low_exit_friction():

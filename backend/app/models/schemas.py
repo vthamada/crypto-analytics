@@ -82,6 +82,16 @@ class OrderBook(BaseModel):
     timestamp: datetime = Field(default_factory=utcnow)
 
 
+class OrderSizeSimulation(BaseModel):
+    notional_brl: float
+    buy_slippage_bps: float | None = None
+    sell_slippage_bps: float | None = None
+    buy_fillable_notional_brl: float = 0.0
+    sell_fillable_notional_brl: float = 0.0
+    executable: bool = False
+    status: str = "not_operable"
+
+
 class Trade(BaseModel):
     exchange: Exchange
     pair: str
@@ -107,6 +117,7 @@ class Opportunity(BaseModel):
     pair: str
     score: float = Field(ge=0, le=100)
     technical_score: float | None = None
+    operational_score: float | None = None
     score_version: str = "v1"
     executability_version: str = "v1"
     movement_version: str = "v1"
@@ -128,6 +139,17 @@ class Opportunity(BaseModel):
     ] = "evaluated_signal"
     visibility_reason: str | None = None
     operationally_visible: bool = False
+    operation_status: str | None = None
+    opportunity_family: str | None = None
+    entry_zone: str | None = None
+    exit_zone: str | None = None
+    suggested_capital_range_brl: str | None = None
+    liquidity_label: str | None = None
+    risk_label: str | None = None
+    main_reason: str | None = None
+    actionability_label: str | None = None
+    requires_limited_order: bool = False
+    requires_transfer: bool = False
     executability_score: float | None = None
     executability_band: str | None = None
     interesting_signal: bool | None = None
@@ -150,6 +172,9 @@ class Opportunity(BaseModel):
     estimated_sell_slippage_bps: float | None = None
     fillable_notional_within_slippage_cap: float | None = None
     baseline_order_notional_brl: float | None = None
+    order_size_simulations: list[OrderSizeSimulation] = Field(default_factory=list)
+    max_operable_order_notional_brl: float | None = None
+    operability_size_label: str | None = None
     movement_type: MovementType
     movement_regime: MovementRegime | None = None
     movement_phase: MovementPhase = MovementPhase.NEUTRAL
@@ -171,6 +196,8 @@ class Opportunity(BaseModel):
     operational_range_quality: str = "none"
     alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
     alert_reason: str | None = None
+    max_operable_order_notional_brl: float | None = None
+    operability_size_label: str | None = None
     alert_worthiness_score: float | None = None
     alert_trigger_type: str | None = None
     has_actionable_trigger: bool = False
@@ -278,6 +305,7 @@ class OpportunitySummary(BaseModel):
     pair: str
     score: float
     technical_score: float | None = None
+    operational_score: float | None = None
     executability_score: float | None = None
     trade_margin_score: float | None = None
     estimated_net_trade_edge_pct: float | None = None
@@ -296,6 +324,17 @@ class OpportunitySummary(BaseModel):
     ] = "evaluated_signal"
     visibility_reason: str | None = None
     operationally_visible: bool = False
+    operation_status: str | None = None
+    opportunity_family: str | None = None
+    entry_zone: str | None = None
+    exit_zone: str | None = None
+    suggested_capital_range_brl: str | None = None
+    liquidity_label: str | None = None
+    risk_label: str | None = None
+    main_reason: str | None = None
+    actionability_label: str | None = None
+    requires_limited_order: bool = False
+    requires_transfer: bool = False
     opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
     opportunity_subtype: OpportunitySubtype | None = None
     interesting_signal: bool | None = None
@@ -311,6 +350,9 @@ class OpportunitySummary(BaseModel):
     estimated_buy_slippage_bps: float | None = None
     estimated_sell_slippage_bps: float | None = None
     fillable_notional_within_slippage_cap: float | None = None
+    order_size_simulations: list[OrderSizeSimulation] = Field(default_factory=list)
+    max_operable_order_notional_brl: float | None = None
+    operability_size_label: str | None = None
     last_price: float
     change_pct: float
     movement_type: MovementType
@@ -351,6 +393,7 @@ class HistoryRecord(BaseModel):
     pair: str
     score: float
     technical_score: float | None = None
+    operational_score: float | None = None
     score_version: str = "v1"
     executability_version: str = "v1"
     movement_version: str = "v1"
@@ -372,6 +415,17 @@ class HistoryRecord(BaseModel):
     ] = "evaluated_signal"
     visibility_reason: str | None = None
     operationally_visible: bool = False
+    operation_status: str | None = None
+    opportunity_family: str | None = None
+    entry_zone: str | None = None
+    exit_zone: str | None = None
+    suggested_capital_range_brl: str | None = None
+    liquidity_label: str | None = None
+    risk_label: str | None = None
+    main_reason: str | None = None
+    actionability_label: str | None = None
+    requires_limited_order: bool = False
+    requires_transfer: bool = False
     executability_score: float | None = None
     executability_band: str | None = None
     interesting_signal: bool | None = None
@@ -394,6 +448,9 @@ class HistoryRecord(BaseModel):
     estimated_sell_slippage_bps: float | None = None
     fillable_notional_within_slippage_cap: float | None = None
     baseline_order_notional_brl: float | None = None
+    order_size_simulations: list[OrderSizeSimulation] = Field(default_factory=list)
+    max_operable_order_notional_brl: float | None = None
+    operability_size_label: str | None = None
     movement_type: MovementType
     movement_regime: MovementRegime | None = None
     movement_phase: MovementPhase = MovementPhase.NEUTRAL
@@ -443,6 +500,7 @@ class HistorySummaryRecord(BaseModel):
     exchange: Exchange
     pair: str
     score: float
+    operational_score: float | None = None
     executability_score: float | None = None
     trade_margin_score: float | None = None
     estimated_net_trade_edge_pct: float | None = None
@@ -460,6 +518,17 @@ class HistorySummaryRecord(BaseModel):
     ] = "evaluated_signal"
     visibility_reason: str | None = None
     operationally_visible: bool = False
+    operation_status: str | None = None
+    opportunity_family: str | None = None
+    entry_zone: str | None = None
+    exit_zone: str | None = None
+    suggested_capital_range_brl: str | None = None
+    liquidity_label: str | None = None
+    risk_label: str | None = None
+    main_reason: str | None = None
+    actionability_label: str | None = None
+    requires_limited_order: bool = False
+    requires_transfer: bool = False
     opportunity_type: Literal["trade", "hold", "observe", "avoid"] | None = None
     opportunity_subtype: OpportunitySubtype | None = None
     spread_pct: float
@@ -470,6 +539,8 @@ class HistorySummaryRecord(BaseModel):
     is_late_entry_risk: bool = False
     operational_range_margin_pct: float | None = None
     operational_range_quality: str = "none"
+    max_operable_order_notional_brl: float | None = None
+    operability_size_label: str | None = None
     alert_moment_type: Literal["preparation", "early_breakout", "continuation", "extended", "profit_zone", "neutral"] = "neutral"
     alert_reason: str | None = None
     alert_worthiness_score: float | None = None

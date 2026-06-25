@@ -208,6 +208,8 @@ async def scan_loop() -> None:
                             workspace_id=workspace_id,
                             details={
                                 "score": projected.score,
+                                "operational_score": projected.operational_score,
+                                "alert_worthiness_score": projected.alert_worthiness_score,
                                 "opportunity_type": projected.opportunity_type,
                                 "operable_signal": projected.operable_signal,
                             },
@@ -230,7 +232,7 @@ async def scan_loop() -> None:
                             "reweighting_version": projected.reweighting_version,
                             "visible": True,
                             "alert_eligible": (
-                                projected.score >= alert_threshold
+                                (projected.alert_worthiness_score or 0.0) >= alert_threshold
                                 and opportunity_matches_alert_scope(projected, workspace_config)
                                 and is_telegram_alertable(projected)
                             ),
@@ -350,7 +352,7 @@ async def scan_loop() -> None:
                         continue
                     matches_alert_type = (
                         ("operable" in alert_types and bool(opp.operable_signal))
-                        or ("high_score" in alert_types and opp.score >= alert_threshold)
+                        or ("high_score" in alert_types and (opp.alert_worthiness_score or 0.0) >= alert_threshold)
                         or ("arbitrage" in alert_types and opp.arbitrage_available)
                     )
                     if not matches_alert_type:
@@ -365,6 +367,8 @@ async def scan_loop() -> None:
                                 workspace_id=workspace_id,
                                 details={
                                     "score": opp.score,
+                                    "operational_score": opp.operational_score,
+                                    "alert_worthiness_score": opp.alert_worthiness_score,
                                     "threshold": alert_threshold,
                                     "alert_types": sorted(alert_types),
                                 },

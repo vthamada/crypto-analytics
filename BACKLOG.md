@@ -1,6 +1,6 @@
 # Backlog
 
-Ultima revisao: 2026-05-31
+Ultima revisao: 2026-06-25
 
 Este backlog consolida tudo que ainda precisa ser implementado no sistema a partir da especificacao principal em `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEMENTACAO.md`.
 
@@ -54,6 +54,7 @@ Decisoes ja tomadas:
 - [x] Cache vazio de provider deixou de ser catalogo valido; ultimo catalogo bom e reaproveitado como `stale`.
 - [x] Metricas compactas de qualidade do funil em `GET /api/diagnostics/funnel-quality`.
 - [x] Primeira camada da taxonomia operacional expandida com `opportunity_subtype`, mantendo `opportunity_type` compativel.
+- [x] Primeira camada de tese operacional para dashboard, detalhe e Telegram: status de acao, familia da oportunidade, entrada, saida, tamanho sugerido, liquidez, risco e motivo principal.
 
 ---
 
@@ -79,8 +80,9 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 - [ ] **Thresholds contextuais por tipo de oportunidade** — refs. 10, 11, 12, 74, 102
   Substituir cortes rigidos globais por reguas contextuais considerando ativo, liquidez, tamanho de ordem, fase do movimento, tipo de oportunidade e risco de execucao.
 
-- [ ] **Simulacao de multiplos tamanhos de ordem** — refs. 102.3, 102.4
+- [~] **Simulacao de multiplos tamanhos de ordem** — refs. 102.3, 102.4
   Simular R$ 25, R$ 300, R$ 1.000, R$ 5.000 e R$ 10.000, classificando capacidade operacional por tamanho.
+  Status: primeira versao calcula slippage de entrada/saida por bucket, status de executabilidade, maior tamanho operavel e `operability_size_label`, persistindo em oportunidades/snapshots e exibindo no detalhe. Ainda falta calibrar por subtipo operacional, taxa real por exchange e regras especificas de spread/arbitragem.
 
 - [ ] **Refino de lateralizacao + rompimento** — refs. 50, 59, 60, 61
   Melhorar deteccao de compressao, rompimento, continuacao, faixa operacional reaproveitavel, zona de compra/venda e risco de movimento esticado.
@@ -138,17 +140,22 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 - [x] **Bloquear moedas paradas no Telegram**
   Separar ativo operacionalmente saudavel de alerta acionavel.
   Criterio de aceite: `accumulation`, `preparation` ou estado neutro sem gatilho real nao geram Telegram, mesmo com score/executabilidade altos.
-  Status: `classify_alert_worthiness()` bloqueia `accumulation_only`, `preparation_without_trigger`, `no_actionable_trigger` e `insufficient_alert_worthiness`.
+  Status: `classify_alert_worthiness()` bloqueia `accumulation_only`, `preparation_without_trigger`, `no_actionable_operation` e `insufficient_alert_worthiness`.
 
 - [x] **Separar score operacional de score de alerta**
   Criar `alert_worthiness_score` independente do score operacional.
   Criterio de aceite: ativo parado pode ter score operacional alto e `alert_worthiness_score` baixo.
-  Status: score calculado, persistido em oportunidades/projecoes e exibido no detalhe da oportunidade.
+  Status: `operational_score` agora e campo explicito em oportunidades/snapshots/API/frontend, enquanto `alert_worthiness_score` mede urgencia do Telegram.
 
 - [x] **Gatilhos acionaveis de alerta**
   Exigir gatilho claro para Telegram: rompimento inicial, continuacao com margem, momentum direcional com volume, arbitragem/spread acionavel ou faixa operacional com margem.
   Criterio de aceite: todo alerta enviado tem `alert_trigger_type` e motivo compreensivel.
   Status: primeira versao cobre `early_breakout`, `continuation`, `directional_momentum`, `range_trade` e `cross_exchange_arbitrage`, persistindo `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason`.
+
+- [x] **Tese operacional minima para usuario final**
+  Traduzir sinais tecnicos em leitura pratica: vale olhar agora, observar, aguardar gatilho, evitar, sem liquidez ou passou do ponto.
+  Criterio de aceite: dashboard, detalhe e Telegram mostram entrada provavel, saida provavel, tamanho sugerido, liquidez, risco, motivo principal e necessidade de ordem limitada/transferencia quando aplicavel.
+  Status: backend deriva `operation_status`, `opportunity_family`, `entry_zone`, `exit_zone`, `suggested_capital_range_brl`, `liquidity_label`, `risk_label`, `main_reason`, `actionability_label`, `requires_limited_order` e `requires_transfer`; frontend e Telegram passaram a priorizar essa tese.
 
 - [x] **Cooldown por fase/estado**
   Evitar alertas repetidos da mesma fase para o mesmo par.
@@ -218,7 +225,7 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 - [~] **Completar motivos de bloqueio de alerta**
   Adicionar eventos para `not_in_top_shortlist`, `lower_than_competing_signals`, `opportunity_type_not_alertable`, `movement_too_late`, `high_late_entry_risk`, `insufficient_operational_margin`, `telegram_send_failed`.
   Criterio de aceite: todo sinal elegivel que nao foi alertado possui `alert_block_reason`.
-  Status: implementados `lower_than_competing_signals`, `opportunity_type_not_alertable`, `exchange_not_in_alert_scope`, `pair_not_in_alert_scope`, `not_operable_for_alert_scope`, `below_min_executability`, `below_alert_threshold`, `telegram_disabled`, `telegram_not_configured`, `cooldown_active`, `accumulation_only`, `preparation_without_trigger`, `no_actionable_trigger` e `insufficient_alert_worthiness`.
+  Status: implementados `lower_than_competing_signals`, `opportunity_type_not_alertable`, `exchange_not_in_alert_scope`, `pair_not_in_alert_scope`, `not_operable_for_alert_scope`, `below_min_executability`, `below_alert_threshold`, `telegram_disabled`, `telegram_not_configured`, `cooldown_active`, `accumulation_only`, `preparation_without_trigger`, `no_actionable_operation` e `insufficient_alert_worthiness`.
 
 - [x] **Limite diario de alertas por workspace**
   Implementar limite configuravel por workspace para evitar excesso de notificacoes.
@@ -359,9 +366,10 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 
 ## P1 - Produto E UX Operacional
 
-- [ ] **Dashboard como lista de oportunidades operacionais**
+- [~] **Dashboard como lista de oportunidades operacionais**
   Redesenhar a tela principal para responder "o que merece atencao agora?", nao "tudo que o scanner viu".
   Criterio de aceite: a primeira tela mostra shortlist limpa, motivo resumido, score operacional, liquidez, margem, fase e risco.
+  Status: lista e modal passaram a exibir status operacional, familia, motivo, entrada, saida, tamanho sugerido, liquidez e risco. Ainda falta reorganizar a tela em blocos separados por tipo de oportunidade e auditoria.
 
 - [ ] **Filtros de visibilidade operacional**
   Adicionar filtros: Oportunidades, Candidatos, Observaveis, Alertados, Descartados, Bloqueados e Auditoria.

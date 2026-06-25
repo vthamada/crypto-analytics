@@ -26,10 +26,15 @@ import {
   formatBps,
   formatCurrency,
   formatCurrencyCompact,
+  formatOperationStatus,
+  formatOperabilitySizeLabel,
+  formatOpportunityFamily,
   formatNotionalOrFallback,
   formatSignedPercent,
   getExecutabilityHighlight,
   getExecutabilityScore,
+  getOperationalScore,
+  getOperationStatusTone,
   getOperabilityReasons,
   getReasonToneClasses,
   getSortValue,
@@ -46,12 +51,6 @@ interface OpportunitiesTableProps {
   opportunities: OpportunityListItem[];
   loading?: boolean;
   onSelect?: (opportunity: OpportunityListItem) => void;
-}
-
-function scoreColor(score: number): string {
-  if (score >= 70) return "bg-emerald-500/15 text-emerald-500 border-emerald-500/20";
-  if (score >= 40) return "bg-yellow-500/15 text-yellow-500 border-yellow-500/20";
-  return "bg-red-500/15 text-red-500 border-red-500/20";
 }
 
 function movementBadge(type: string) {
@@ -128,7 +127,7 @@ function sortLabel(sortBy: OpportunitySortMode): string {
       return "spread";
     case "score":
     default:
-      return "score tecnico";
+      return "score operacional";
   }
 }
 
@@ -153,7 +152,7 @@ export function OpportunitiesTable({
     if (deferredSearch && !opportunity.pair.toLowerCase().includes(deferredSearch.toLowerCase())) return false;
     if (exchangeFilter !== "all" && opportunity.exchange !== exchangeFilter) return false;
     if (movementFilter !== "all" && opportunity.movement_type !== movementFilter) return false;
-    if (Number(minScore) > 0 && getTechnicalScore(opportunity) < Number(minScore)) return false;
+    if (Number(minScore) > 0 && getOperationalScore(opportunity) < Number(minScore)) return false;
     if (arbitrageOnly && !opportunity.arbitrage_available) return false;
     if (operableOnly && !isOperableSignal(opportunity)) return false;
     return true;
@@ -188,7 +187,7 @@ export function OpportunitiesTable({
     operableOnly,
   ].filter(Boolean).length;
 
-  const topTechnicalScore = sorted[0] ? getTechnicalScore(sorted[0]) : 0;
+  const topOperationalScore = sorted[0] ? getOperationalScore(sorted[0]) : 0;
   const topExecutabilityScore = sorted[0] ? getExecutabilityScore(sorted[0]) : null;
   const operableCount = opportunities.filter(isOperableSignal).length;
   const interestingCount = opportunities.filter(isInterestingSignal).length;
@@ -202,10 +201,10 @@ export function OpportunitiesTable({
             <p className="text-sm text-muted-foreground">
               {loading
                 ? "Atualizando sinais em tempo real..."
-                : `${sorted.length} sinais visiveis • ordenado por ${sortLabel(sortBy)}${
+                : `${sorted.length} sinais visiveis - ordenado por ${sortLabel(sortBy)}${
                     sortBy === "executability" && topExecutabilityScore != null
-                      ? ` • melhor operabilidade ${topExecutabilityScore.toFixed(1)}`
-                      : ` • melhor score ${topTechnicalScore.toFixed(1)}`
+                      ? ` - melhor operabilidade ${topExecutabilityScore.toFixed(1)}`
+                      : ` - melhor score operacional ${topOperationalScore.toFixed(1)}`
                   }`}
             </p>
           </div>
@@ -230,7 +229,7 @@ export function OpportunitiesTable({
                   variant={sortBy === "score" ? "default" : "outline"}
                   onClick={() => setSortBy("score")}
                 >
-                  Score tecnico
+                  Score operacional
                 </Button>
                 <Button
                   type="button"
@@ -309,7 +308,7 @@ export function OpportunitiesTable({
                   <SelectValue placeholder="Ordenar" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="score">Score tecnico</SelectItem>
+                  <SelectItem value="score">Score operacional</SelectItem>
                   <SelectItem value="executability" disabled={!executabilityAvailable}>
                     Operabilidade
                   </SelectItem>
@@ -369,9 +368,9 @@ export function OpportunitiesTable({
             </div>
           ) : (
             sorted.map((opportunity) => {
-              const technicalScore = getTechnicalScore(opportunity);
               const executabilityScore = getExecutabilityScore(opportunity);
               const reasons = getOperabilityReasons(opportunity);
+              const statusTone = getOperationStatusTone(opportunity.operation_status);
 
               return (
                 <button
@@ -380,8 +379,9 @@ export function OpportunitiesTable({
                   data-testid={`opportunity-${opportunity.id}`}
                   className={cn(
                     "w-full rounded-2xl border p-4 text-left transition-colors",
-                    technicalScore >= 70 && "bg-emerald-500/5 hover:bg-emerald-500/10",
-                    technicalScore >= 40 && technicalScore < 70 && "bg-yellow-500/5 hover:bg-yellow-500/10",
+                    statusTone === "positive" && "bg-emerald-500/5 hover:bg-emerald-500/10",
+                    statusTone === "warning" && "bg-amber-500/5 hover:bg-amber-500/10",
+                    statusTone === "negative" && "bg-red-500/5 hover:bg-red-500/10",
                     opportunity.arbitrage_available && "ring-1 ring-blue-500/20",
                   )}
                   onClick={() => onSelect?.(opportunity)}
@@ -390,6 +390,12 @@ export function OpportunitiesTable({
                     <div className="space-y-1">
                       <p className="text-lg font-semibold leading-none">{opportunity.pair.replace("_", "/")}</p>
                       <p className="text-sm text-muted-foreground">{exchangeLabel(opportunity.exchange)}</p>
+                      <Badge
+                        variant="outline"
+                        className={cn("w-fit border px-2 py-0.5 text-xs", getReasonToneClasses(getOperationStatusTone(opportunity.operation_status)))}
+                      >
+                        {formatOperationStatus(opportunity.operation_status)}
+                      </Badge>
                       <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
                         Detectado{" "}
                         {new Date(opportunity.detected_at).toLocaleTimeString("pt-BR", {
@@ -399,11 +405,8 @@ export function OpportunitiesTable({
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                      <Badge
-                        variant="outline"
-                        className={cn("rounded-full px-2.5 py-1 font-bold tabular-nums", scoreColor(technicalScore))}
-                      >
-                        Tec {technicalScore.toFixed(1)}
+                      <Badge variant="outline" className="rounded-full px-2.5 py-1">
+                        {formatOpportunityFamily(opportunity.opportunity_family)}
                       </Badge>
                       {executabilityScore != null ? (
                         <Badge
@@ -417,6 +420,14 @@ export function OpportunitiesTable({
                         </Badge>
                       ) : null}
                     </div>
+                  </div>
+
+                  <div className="mt-3 rounded-2xl border bg-muted/20 p-3 text-sm">
+                    <p className="font-medium">{opportunity.main_reason ?? "Ativo em observacao"}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Entrada: {opportunity.entry_zone ?? "n/d"} - Saida: {opportunity.exit_zone ?? "n/d"} - Tamanho:{" "}
+                      {opportunity.suggested_capital_range_brl ?? "n/d"}
+                    </p>
                   </div>
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -449,6 +460,14 @@ export function OpportunitiesTable({
                     />
                     <MobileMetric label="Volume 24h" value={formatCurrencyCompact(opportunity.quote_volume_24h)} />
                     <MobileMetric label="Liquidez" value={formatNotionalOrFallback(opportunity)} />
+                    <MobileMetric
+                      label="Capacidade"
+                      value={
+                        opportunity.max_operable_order_notional_brl != null
+                          ? `${formatOperabilitySizeLabel(opportunity.operability_size_label)} - ${formatCurrencyCompact(opportunity.max_operable_order_notional_brl)}`
+                          : formatOperabilitySizeLabel(opportunity.operability_size_label)
+                      }
+                    />
                     <MobileMetric label="Spread" value={`${opportunity.spread_pct.toFixed(4)}%`} />
                     <MobileMetric
                       label="Faixa operacional"
@@ -483,11 +502,11 @@ export function OpportunitiesTable({
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-28">Ranking</TableHead>
+                  <TableHead className="w-44">Status</TableHead>
                   <TableHead>Par</TableHead>
                   <TableHead>Exchange</TableHead>
-                  <TableHead>Preco</TableHead>
-                  <TableHead>Variacao</TableHead>
+                  <TableHead>Tese operacional</TableHead>
+                  <TableHead>Entrada / Saida</TableHead>
                   <TableHead>Volume 24h</TableHead>
                   <TableHead>Liquidez</TableHead>
                   <TableHead>Spread</TableHead>
@@ -514,9 +533,9 @@ export function OpportunitiesTable({
                   </TableRow>
                 ) : (
                   sorted.map((opportunity) => {
-                    const technicalScore = getTechnicalScore(opportunity);
                     const executabilityScore = getExecutabilityScore(opportunity);
                     const reasons = getOperabilityReasons(opportunity);
+                    const statusTone = getOperationStatusTone(opportunity.operation_status);
 
                     return (
                       <TableRow
@@ -524,34 +543,43 @@ export function OpportunitiesTable({
                         data-testid={`opportunity-${opportunity.id}`}
                         className={cn(
                           "cursor-pointer transition-colors",
-                          technicalScore >= 70 && "bg-emerald-500/5 hover:bg-emerald-500/10",
-                          technicalScore >= 40 && technicalScore < 70 && "hover:bg-yellow-500/5",
+                          statusTone === "positive" && "bg-emerald-500/5 hover:bg-emerald-500/10",
+                          statusTone === "warning" && "hover:bg-amber-500/5",
+                          statusTone === "negative" && "hover:bg-red-500/5",
                           opportunity.arbitrage_available && "ring-1 ring-blue-500/20",
                         )}
                         onClick={() => onSelect?.(opportunity)}
                       >
                         <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <Badge variant="outline" className={cn("font-bold tabular-nums", scoreColor(technicalScore))}>
-                              {technicalScore.toFixed(1)}
+                          <div className="flex flex-col gap-1.5">
+                            <Badge
+                              variant="outline"
+                              className={cn("w-fit font-semibold", getReasonToneClasses(getOperationStatusTone(opportunity.operation_status)))}
+                            >
+                              {formatOperationStatus(opportunity.operation_status)}
                             </Badge>
-                            <span className="text-[11px] text-muted-foreground">Tec</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {formatOpportunityFamily(opportunity.opportunity_family)}
+                            </span>
                           </div>
                         </TableCell>
                         <TableCell className="font-medium">{opportunity.pair}</TableCell>
                         <TableCell className="text-muted-foreground">
                           {exchangeLabel(opportunity.exchange)}
                         </TableCell>
-                        <TableCell className="tabular-nums">{formatCurrency(opportunity.last_price)}</TableCell>
                         <TableCell>
-                          <span
-                            className={cn(
-                              "tabular-nums font-medium",
-                              opportunity.change_pct >= 0 ? "text-emerald-500" : "text-red-500",
-                            )}
-                          >
-                            {formatSignedPercent(opportunity.change_pct)}
-                          </span>
+                          <div className="max-w-[280px]">
+                            <p className="text-sm font-medium">{opportunity.main_reason ?? "Ativo em observacao"}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              Risco {opportunity.risk_label ?? "n/d"} - {opportunity.liquidity_label?.replaceAll("_", " ") ?? "liquidez n/d"}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col text-xs">
+                            <span>Entrada: {opportunity.entry_zone ?? "n/d"}</span>
+                            <span className="text-muted-foreground">Saida: {opportunity.exit_zone ?? "n/d"}</span>
+                          </div>
                         </TableCell>
                         <TableCell className="tabular-nums">
                           <div className="flex flex-col">
@@ -580,8 +608,14 @@ export function OpportunitiesTable({
                                 {executabilityScore.toFixed(1)}
                               </Badge>
                               <span className="text-[11px] text-muted-foreground">
-                                {isOperableSignal(opportunity) ? "Operavel" : "Monitorar"} • saida{" "}
+                                {isOperableSignal(opportunity) ? "Operavel" : "Monitorar"} - saida{" "}
                                 {formatBps(opportunity.estimated_sell_slippage_bps)}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">
+                                {formatOperabilitySizeLabel(opportunity.operability_size_label)}
+                                {opportunity.max_operable_order_notional_brl != null
+                                  ? ` ate ${formatCurrencyCompact(opportunity.max_operable_order_notional_brl)}`
+                                  : ""}
                               </span>
                             </div>
                           ) : (

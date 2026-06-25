@@ -127,7 +127,9 @@ def test_runtime_persistence_normalizes_aware_detected_at(monkeypatch):
         assert history_row.movement_version == "v1"
         assert history_row.profile_version == "v1"
         assert history_row.executability_score == 61.4
+        assert history_row.operational_score == opportunity.score
         assert snapshot_row.executability_version == "v1"
+        assert snapshot_row.operational_score == opportunity.score
         assert snapshot_row.bid_notional_top_n == 22000.0
         assert signal_row.executability_version == "v1"
         assert runtime_row.executability_version == "v1"

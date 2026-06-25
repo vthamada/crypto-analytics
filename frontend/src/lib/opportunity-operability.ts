@@ -27,6 +27,10 @@ export function getTechnicalScore(opportunity: OpportunityListItem): number {
   return opportunity.technical_score ?? opportunity.score;
 }
 
+export function getOperationalScore(opportunity: OpportunityListItem): number {
+  return opportunity.operational_score ?? opportunity.score;
+}
+
 export function getExecutabilityScore(opportunity: OpportunityListItem): number | null {
   return typeof opportunity.executability_score === "number"
     ? opportunity.executability_score
@@ -136,7 +140,7 @@ export function getOperationalRankValue(opportunity: OpportunityListItem): numbe
     avoid: -12,
   };
   return (
-    getTechnicalScore(opportunity) +
+    getOperationalScore(opportunity) +
     (getExecutabilityScore(opportunity) ?? 0) * 0.12 +
     (opportunity.trade_margin_score ?? 0) * 0.08 +
     clamp(opportunity.operational_range_margin_pct ?? 0, 0, 20) * 0.3 +
@@ -182,6 +186,76 @@ export function formatNotionalOrFallback(opportunity: OpportunityListItem): stri
     return formatCurrencyCompact(opportunity.total_notional_top_n);
   }
   return `${opportunity.liquidity_units.toLocaleString("pt-BR")} un.`;
+}
+
+export function formatOperabilitySizeLabel(label?: string | null): string {
+  switch (label) {
+    case "large_operation":
+      return "Opera maior";
+    case "medium_operation":
+      return "Opera medio";
+    case "small_test_only":
+      return "So teste pequeno";
+    case "not_operable":
+      return "Nao operavel";
+    default:
+      return "Capacidade n/d";
+  }
+}
+
+export function formatOperationStatus(status?: string | null): string {
+  switch (status) {
+    case "vale_olhar_agora":
+      return "Vale olhar agora";
+    case "so_observar":
+      return "So observar";
+    case "aguardando_gatilho":
+      return "Aguardando gatilho";
+    case "evitar":
+      return "Evitar";
+    case "sem_liquidez":
+      return "Sem liquidez";
+    case "ja_passou_do_ponto":
+      return "Ja passou do ponto";
+    default:
+      return "So observar";
+  }
+}
+
+export function getOperationStatusTone(status?: string | null): ReasonTone {
+  switch (status) {
+    case "vale_olhar_agora":
+      return "positive";
+    case "aguardando_gatilho":
+    case "so_observar":
+    case "ja_passou_do_ponto":
+      return "warning";
+    case "evitar":
+    case "sem_liquidez":
+      return "negative";
+    default:
+      return "neutral";
+  }
+}
+
+export function formatOpportunityFamily(family?: string | null): string {
+  switch (family) {
+    case "faixa_operacional":
+      return "Faixa operacional";
+    case "spread_interno":
+      return "Spread interno";
+    case "arbitragem":
+      return "Arbitragem";
+    case "rompimento":
+      return "Rompimento";
+    case "mudanca_de_regime":
+      return "Mudanca de regime";
+    case "realizacao":
+      return "Realizacao";
+    case "observacao":
+    default:
+      return "Observacao";
+  }
 }
 
 export function getOperabilityReasons(opportunity: OpportunityListItem): OpportunityReason[] {
@@ -275,6 +349,12 @@ export function getOperabilityReasons(opportunity: OpportunityListItem): Opportu
     } else if (totalNotional >= 10_000) {
       reasons.push({ label: "Book profundo", tone: "positive" });
     }
+  }
+
+  if (opportunity.operability_size_label === "small_test_only") {
+    reasons.push({ label: "So teste pequeno", tone: "warning" });
+  } else if (opportunity.operability_size_label === "not_operable") {
+    reasons.push({ label: "Sem tamanho operavel", tone: "negative" });
   }
 
   const deduped: OpportunityReason[] = [];

@@ -5,6 +5,8 @@ from app.services.operational_visibility import (
     classify_alert_worthiness,
     classify_opportunity_subtype,
     classify_pipeline_visibility,
+    enrich_alert_worthiness,
+    enrich_operational_visibility,
     is_telegram_alertable,
 )
 
@@ -19,6 +21,8 @@ def make_opportunity(**overrides) -> Opportunity:
         "interesting_signal": True,
         "operable_signal": True,
         "estimated_net_trade_edge_pct": 0.8,
+        "max_operable_order_notional_brl": 1_000.0,
+        "operability_size_label": "medium_operation",
         "trade_margin_score": 45.0,
         "opportunity_type": "trade",
         "volatility_pct": 3.5,
@@ -44,6 +48,22 @@ def test_trade_signal_is_operational_and_alertable():
     assert visible is True
     assert is_telegram_alertable(make_opportunity()) is True
     assert classify_opportunity_subtype(make_opportunity()) == "breakout_trade"
+
+
+def test_operational_score_is_separate_from_alert_worthiness():
+    opportunity = make_opportunity(
+        operational_score=86.0,
+        movement_phase=MovementPhase.NEUTRAL,
+        alert_moment_type="neutral",
+    )
+
+    alertable, block_reason, details = classify_alert_worthiness(opportunity)
+
+    assert alertable is False
+    assert block_reason == "no_actionable_operation"
+    assert details["operational_score"] == 86.0
+    assert details["alert_worthiness_score"] > 0
+    assert details["has_actionable_trigger"] is False
 
 
 def test_range_signal_gets_range_trade_subtype():
@@ -105,6 +125,34 @@ def test_actionable_alert_has_trigger_and_state_key():
     assert details["alert_state_key"].startswith("early_breakout|early_breakout|early_breakout")
 
 
+def test_actionable_alert_builds_operator_thesis():
+    opportunity = enrich_alert_worthiness(enrich_operational_visibility(make_opportunity()))
+
+    assert opportunity.operation_status == "vale_olhar_agora"
+    assert opportunity.actionability_label == "Vale olhar agora"
+    assert opportunity.opportunity_family == "rompimento"
+    assert opportunity.entry_zone == "R$ 10.00"
+    assert opportunity.suggested_capital_range_brl is not None
+    assert opportunity.main_reason
+
+
+def test_preparation_alert_builds_waiting_thesis():
+    opportunity = enrich_alert_worthiness(
+        enrich_operational_visibility(
+            make_opportunity(
+                movement_phase=MovementPhase.ACCUMULATION,
+                alert_moment_type="preparation",
+                alert_reason="ativo em possivel preparacao/lateralizacao",
+            )
+        )
+    )
+
+    assert opportunity.operation_status == "aguardando_gatilho"
+    assert opportunity.actionability_label == "Aguardando gatilho"
+    assert opportunity.alert_block_reason == "accumulation_only"
+    assert opportunity.main_reason == "ativo monitoravel, mas ainda sem gatilho operacional"
+
+
 def test_avoid_signal_is_blocked_even_when_score_is_high():
     opportunity = make_opportunity(
         score=99.0,
@@ -131,6 +179,16 @@ def test_negative_margin_stays_in_audit_not_dashboard():
 
     assert status == "blocked_signal"
     assert reason == "insufficient_operational_margin"
+    assert visible is False
+
+
+def test_not_operable_order_size_blocks_operational_visibility():
+    opportunity = make_opportunity(operability_size_label="not_operable")
+
+    status, reason, visible = classify_pipeline_visibility(opportunity)
+
+    assert status == "blocked_signal"
+    assert reason == "insufficient_liquidity"
     assert visible is False
 
 

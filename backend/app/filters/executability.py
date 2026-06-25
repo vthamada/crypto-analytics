@@ -6,6 +6,7 @@ from typing import Literal
 from app.models.schemas import OrderBook
 
 OpportunityType = Literal["trade", "hold", "observe", "avoid"]
+DEFAULT_ORDER_SIZE_BUCKETS_BRL = (25.0, 300.0, 1_000.0, 5_000.0, 10_000.0)
 
 
 def _get_entries(order_book: OrderBook, side: Literal["buy", "sell"]):
@@ -90,6 +91,93 @@ def estimate_fillable_notional(
         fillable += entry.price * entry.quantity
 
     return fillable
+
+
+def _finite_or_none(value: float) -> float | None:
+    if not math.isfinite(value):
+        return None
+    return round(value, 2)
+
+
+def simulate_order_size(
+    order_book: OrderBook,
+    *,
+    order_notional_brl: float,
+    max_entry_slippage_bps: float,
+    max_exit_slippage_bps: float,
+) -> dict[str, float | bool | str | None]:
+    """Simulate if a BRL order size can enter and exit within slippage caps."""
+    buy_slippage = estimate_slippage_bps(order_book, "buy", order_notional_brl)
+    sell_slippage = estimate_slippage_bps(order_book, "sell", order_notional_brl)
+    buy_fillable = estimate_fillable_notional(order_book, max_entry_slippage_bps, "buy")
+    sell_fillable = estimate_fillable_notional(order_book, max_exit_slippage_bps, "sell")
+    buy_slippage_serialized = _finite_or_none(buy_slippage)
+    sell_slippage_serialized = _finite_or_none(sell_slippage)
+    executable = (
+        buy_slippage_serialized is not None
+        and sell_slippage_serialized is not None
+        and buy_slippage_serialized <= max_entry_slippage_bps
+        and sell_slippage_serialized <= max_exit_slippage_bps
+        and order_notional_brl <= buy_fillable
+        and order_notional_brl <= sell_fillable
+    )
+    if executable:
+        status = "operable"
+    elif buy_slippage_serialized is None or sell_slippage_serialized is None:
+        status = "insufficient_depth"
+    elif buy_slippage_serialized > max_entry_slippage_bps or sell_slippage_serialized > max_exit_slippage_bps:
+        status = "slippage_too_high"
+    else:
+        status = "not_fillable_within_cap"
+
+    return {
+        "notional_brl": float(order_notional_brl),
+        "buy_slippage_bps": buy_slippage_serialized,
+        "sell_slippage_bps": sell_slippage_serialized,
+        "buy_fillable_notional_brl": round(buy_fillable, 2),
+        "sell_fillable_notional_brl": round(sell_fillable, 2),
+        "executable": executable,
+        "status": status,
+    }
+
+
+def simulate_order_size_buckets(
+    order_book: OrderBook,
+    *,
+    max_entry_slippage_bps: float,
+    max_exit_slippage_bps: float,
+    buckets: tuple[float, ...] = DEFAULT_ORDER_SIZE_BUCKETS_BRL,
+) -> list[dict[str, float | bool | str | None]]:
+    return [
+        simulate_order_size(
+            order_book,
+            order_notional_brl=notional,
+            max_entry_slippage_bps=max_entry_slippage_bps,
+            max_exit_slippage_bps=max_exit_slippage_bps,
+        )
+        for notional in buckets
+    ]
+
+
+def summarize_order_size_simulations(simulations: list[dict[str, float | bool | str | None]]) -> dict[str, float | str]:
+    operable_sizes = [
+        float(simulation["notional_brl"])
+        for simulation in simulations
+        if simulation.get("executable") is True and simulation.get("notional_brl") is not None
+    ]
+    max_operable = max(operable_sizes, default=0.0)
+    if max_operable >= 10_000:
+        label = "large_operation"
+    elif max_operable >= 1_000:
+        label = "medium_operation"
+    elif max_operable >= 25:
+        label = "small_test_only"
+    else:
+        label = "not_operable"
+    return {
+        "max_operable_order_notional_brl": round(max_operable, 2),
+        "operability_size_label": label,
+    }
 
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:

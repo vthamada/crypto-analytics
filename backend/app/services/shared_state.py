@@ -47,6 +47,27 @@ _PIPELINE_EVENT_RETENTION_DAYS = 14
 _SCANNER_CYCLE_AUDIT_RETENTION_DAYS = 90
 
 
+def _serialize_order_size_simulations(value: object) -> str:
+    simulations = value or []
+    serialized = []
+    for simulation in simulations:
+        if hasattr(simulation, "model_dump"):
+            serialized.append(simulation.model_dump())
+        else:
+            serialized.append(simulation)
+    return json.dumps(serialized)
+
+
+def _deserialize_order_size_simulations(value: str | None) -> list[dict]:
+    if not value:
+        return []
+    try:
+        loaded = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return loaded if isinstance(loaded, list) else []
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -777,6 +798,7 @@ async def write_opportunity_snapshots(
                 pair=opp.pair,
                 score=opp.score,
                 technical_score=technical_score,
+                operational_score=opp.operational_score if opp.operational_score is not None else opp.score,
                 score_version=SCORE_VERSION,
                 executability_version=opp.executability_version,
                 movement_version=opp.movement_version,
@@ -804,6 +826,9 @@ async def write_opportunity_snapshots(
                 estimated_sell_slippage_bps=opp.estimated_sell_slippage_bps,
                 fillable_notional_within_slippage_cap=opp.fillable_notional_within_slippage_cap,
                 baseline_order_notional_brl=opp.baseline_order_notional_brl,
+                order_size_simulations=_serialize_order_size_simulations(opp.order_size_simulations),
+                max_operable_order_notional_brl=opp.max_operable_order_notional_brl,
+                operability_size_label=opp.operability_size_label,
                 movement_type=opp.movement_type.value,
                 movement_regime=opp.movement_regime.value if opp.movement_regime else None,
                 movement_phase=opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase,
@@ -871,6 +896,7 @@ async def read_opportunity_snapshots() -> list[dict]:
                 "pair": r.pair,
                 "score": r.score,
                 "technical_score": r.technical_score,
+                "operational_score": getattr(r, "operational_score", None) or r.score,
                 "score_version": r.score_version,
                 "executability_version": getattr(r, "executability_version", EXECUTABILITY_VERSION),
                 "movement_version": getattr(r, "movement_version", MOVEMENT_VERSION),
@@ -910,6 +936,9 @@ async def read_opportunity_snapshots() -> list[dict]:
                 "estimated_sell_slippage_bps": getattr(r, "estimated_sell_slippage_bps", None),
                 "fillable_notional_within_slippage_cap": getattr(r, "fillable_notional_within_slippage_cap", None),
                 "baseline_order_notional_brl": getattr(r, "baseline_order_notional_brl", None),
+                "order_size_simulations": _deserialize_order_size_simulations(getattr(r, "order_size_simulations", None)),
+                "max_operable_order_notional_brl": getattr(r, "max_operable_order_notional_brl", None),
+                "operability_size_label": getattr(r, "operability_size_label", None),
                 "movement_type": r.movement_type,
                 "movement_regime": getattr(r, "movement_regime", None),
                 "movement_phase": getattr(r, "movement_phase", None) or "neutral",

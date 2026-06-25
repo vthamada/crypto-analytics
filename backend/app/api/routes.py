@@ -242,6 +242,7 @@ def project_workspace_opportunity(opportunity: Opportunity, config: AppConfig) -
     )
     if opportunity.is_late_entry_risk:
         data["score"] = min(max(round(data["score"] * 0.9, 1), 0), 100)
+    data["operational_score"] = data["score"]
     operability = get_workspace_operability_fields(
         bid_notional_top_n=opportunity.bid_notional_top_n,
         ask_notional_top_n=opportunity.ask_notional_top_n,
@@ -804,6 +805,7 @@ def _summarize_opportunity(opportunity: Opportunity) -> OpportunitySummary:
         pair=opportunity.pair,
         score=opportunity.score,
         technical_score=opportunity.technical_score,
+        operational_score=opportunity.operational_score if opportunity.operational_score is not None else opportunity.score,
         executability_score=opportunity.executability_score,
         executability_band=opportunity.executability_band,
         trade_margin_score=opportunity.trade_margin_score,
@@ -811,6 +813,17 @@ def _summarize_opportunity(opportunity: Opportunity) -> OpportunitySummary:
         pipeline_status=opportunity.pipeline_status,
         visibility_reason=opportunity.visibility_reason,
         operationally_visible=opportunity.operationally_visible,
+        operation_status=opportunity.operation_status,
+        opportunity_family=opportunity.opportunity_family,
+        entry_zone=opportunity.entry_zone,
+        exit_zone=opportunity.exit_zone,
+        suggested_capital_range_brl=opportunity.suggested_capital_range_brl,
+        liquidity_label=opportunity.liquidity_label,
+        risk_label=opportunity.risk_label,
+        main_reason=opportunity.main_reason,
+        actionability_label=opportunity.actionability_label,
+        requires_limited_order=opportunity.requires_limited_order,
+        requires_transfer=opportunity.requires_transfer,
         opportunity_type=opportunity.opportunity_type,
         opportunity_subtype=opportunity.opportunity_subtype,
         interesting_signal=opportunity.interesting_signal,
@@ -826,6 +839,9 @@ def _summarize_opportunity(opportunity: Opportunity) -> OpportunitySummary:
         estimated_buy_slippage_bps=opportunity.estimated_buy_slippage_bps,
         estimated_sell_slippage_bps=opportunity.estimated_sell_slippage_bps,
         fillable_notional_within_slippage_cap=opportunity.fillable_notional_within_slippage_cap,
+        order_size_simulations=opportunity.order_size_simulations,
+        max_operable_order_notional_brl=opportunity.max_operable_order_notional_brl,
+        operability_size_label=opportunity.operability_size_label,
         last_price=opportunity.last_price,
         change_pct=opportunity.change_pct,
         movement_type=opportunity.movement_type,

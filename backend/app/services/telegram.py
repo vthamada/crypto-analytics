@@ -55,36 +55,25 @@ def _escape_html(value: object) -> str:
 
 
 def _format_opportunity(opp: Opportunity) -> str:
-    score_label = "ALTA" if opp.score >= 70 else "MEDIA" if opp.score >= 40 else "BAIXA"
-    operable_label = "sim" if opp.operable_signal else "nao"
-    phase_label = opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase
-    late_label = " | risco de entrada tardia" if opp.is_late_entry_risk else ""
-    range_label = opp.operational_range_quality or "none"
-    alert_label = opp.alert_moment_type or "neutral"
-    range_margin = (
-        f"{opp.operational_range_margin_pct:.2f}%"
-        if opp.operational_range_margin_pct is not None
-        else "indisponivel"
-    )
-    capacity = (
-        f"R$ {opp.capital_capacity_estimate_brl:,.0f}"
-        if opp.capital_capacity_estimate_brl is not None
-        else "indisponivel"
-    )
+    status = opp.actionability_label or "Vale olhar agora"
+    family = (opp.opportunity_family or "observacao").replace("_", " ")
+    entry = opp.entry_zone or "n/d"
+    exit_zone = opp.exit_zone or "n/d"
+    size = opp.suggested_capital_range_brl or "n/d"
+    risk = opp.risk_label or "n/d"
+    reason = opp.main_reason or opp.alert_reason or "gatilho operacional detectado"
+    order_note = " | exige ordem limitada" if opp.requires_limited_order else ""
+    transfer_note = " | depende de transferencia" if opp.requires_transfer else ""
 
     return (
-        f"<b>{_escape_html(score_label)}</b> | Score {_escape_html(opp.score)} | {_escape_html(opp.pair)}\n"
+        f"<b>{_escape_html(opp.pair)} - {_escape_html(status)}</b>\n"
         f"   Exchange: {_escape_html(opp.exchange.value)}\n"
-        f"   Movimento: {_escape_html(opp.movement_type.value)} | Fase: {_escape_html(phase_label)}{_escape_html(late_label)}\n"
-        f"   Momento: {_escape_html(alert_label)} | Motivo: {_escape_html(opp.alert_reason or 'n/d')}\n"
-        f"   Operavel: {_escape_html(operable_label)} | Exec: {_escape_html(f'{opp.executability_score or 0:.1f}')}\n"
-        f"   Preco: R$ {_escape_html(f'{opp.last_price:,.2f}')}\n"
-        f"   Variacao: {_escape_html(f'{opp.change_pct:+.2f}%')} | Volatilidade: {_escape_html(f'{opp.volatility_pct:.2f}%')}\n"
-        f"   Volume 24h: R$ {_escape_html(f'{opp.quote_volume_24h:,.0f}')}\n"
-        f"   Compra/Venda topo: R$ {_escape_html(f'{opp.ask_notional_top_n or 0:,.0f}')} / R$ {_escape_html(f'{opp.bid_notional_top_n or 0:,.0f}')}\n"
-        f"   Faixa operacional: {_escape_html(range_label)} | Margem {_escape_html(range_margin)} | Capacidade {_escape_html(capacity)}\n"
-        f"   Slippage entrada/saida: {_escape_html(_format_slippage(opp.estimated_buy_slippage_bps))} / {_escape_html(_format_slippage(opp.estimated_sell_slippage_bps))}\n"
-        f"   Spread: {_escape_html(f'{opp.spread_pct:.4f}%')}"
+        f"   Tipo: {_escape_html(family)}{_escape_html(order_note)}{_escape_html(transfer_note)}\n"
+        f"   Entrada provavel: {_escape_html(entry)}\n"
+        f"   Saida provavel: {_escape_html(exit_zone)}\n"
+        f"   Tamanho sugerido: {_escape_html(size)}\n"
+        f"   Risco: {_escape_html(risk)}\n"
+        f"   Motivo: {_escape_html(reason)}"
     )
 
 
@@ -108,8 +97,9 @@ def rank_telegram_opportunity(opp: Opportunity) -> float:
         "none": 0.0,
     }
     type_bonus = {"trade": 5.0, "hold": 4.0, "observe": -2.0, "avoid": -12.0}
+    base_score = opp.alert_worthiness_score if opp.alert_worthiness_score is not None else opp.score
     return (
-        opp.score
+        base_score
         + ((opp.executability_score or 0.0) * 0.12)
         + ((opp.trade_margin_score or 0.0) * 0.08)
         + min(max(opp.operational_range_margin_pct or 0.0, 0.0), 20.0) * 0.3
@@ -137,13 +127,14 @@ def _opportunity_alert_state(opp: Opportunity) -> str:
     if opp.alert_state_key:
         return opp.alert_state_key
     phase = opp.movement_phase.value if hasattr(opp.movement_phase, "value") else opp.movement_phase
+    operational_score = opp.operational_score if opp.operational_score is not None else opp.score
     return "|".join(
         [
             opp.alert_trigger_type or "no_trigger",
             str(phase or "neutral"),
             str(opp.alert_moment_type or "neutral"),
             str(opp.opportunity_type or "unknown"),
-            f"score_{int((opp.score or 0) // 10) * 10}",
+            f"score_{int((operational_score or 0) // 10) * 10}",
         ]
     )
 

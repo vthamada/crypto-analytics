@@ -76,6 +76,9 @@ def test_scan_all_returns_opportunities(monkeypatch, sample_ticker, sample_order
     assert opportunities[0].capital_capacity_estimate_brl is not None
     assert opportunities[0].movement_persistence_score is not None
     assert opportunities[0].baseline_order_notional_brl is not None
+    assert [item.notional_brl for item in opportunities[0].order_size_simulations] == [25.0, 300.0, 1000.0, 5000.0, 10000.0]
+    assert opportunities[0].max_operable_order_notional_brl is not None
+    assert opportunities[0].operability_size_label in {"not_operable", "small_test_only", "medium_operation", "large_operation"}
     assert opportunities[0].duration_minutes > 0
 
 
