@@ -49,7 +49,21 @@ services:
       - key: SCANNER_ENABLED
         value: "true"
       - key: SCAN_INTERVAL_SECONDS
+        value: "300"
+      - key: HISTORY_RETENTION_DAYS
         value: "30"
+      - key: PIPELINE_AUDIT_MODE
+        value: compact
+      - key: PIPELINE_EVENT_RETENTION_DAYS
+        value: "7"
+      - key: SCANNER_CYCLE_AUDIT_RETENTION_DAYS
+        value: "30"
+      - key: RAW_MARKET_OBSERVATIONS_ENABLED
+        value: "false"
+      - key: REPETITION_PERSIST_INTERVAL_SECONDS
+        value: "300"
+      - key: SCANNER_STATE_PERSIST_INTERVAL_SECONDS
+        value: "300"
       - key: LOG_LEVEL
         value: INFO
       - key: TELEGRAM_BOT_TOKEN

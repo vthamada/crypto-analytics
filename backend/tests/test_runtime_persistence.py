@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import uuid
 
@@ -20,6 +20,177 @@ from app.models.database import (
 )
 from app.models.schemas import Exchange, MovementType, Opportunity
 from app.services import persistence, shared_state
+
+
+def test_pipeline_audit_compact_mode_filters_common_discards(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"pipeline-compact-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(shared_state, "async_session", session_factory)
+        monkeypatch.setattr(shared_state.settings, "pipeline_audit_enabled", True)
+        monkeypatch.setattr(shared_state.settings, "pipeline_audit_mode", "compact")
+
+        created_at = datetime.now(timezone.utc)
+        saved = await shared_state.save_signal_pipeline_events(
+            "cycle-compact",
+            [
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "QUIET_BRL",
+                    "stage": "light_scan",
+                    "status": "discarded",
+                    "reason": "volume_below_minimum",
+                    "created_at": created_at,
+                },
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "SOL_BRL",
+                    "stage": "light_scan",
+                    "status": "candidate",
+                    "reason": "candidate",
+                    "created_at": created_at,
+                },
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "WBTC_BRL",
+                    "stage": "deep_scan",
+                    "status": "near_miss",
+                    "reason": "insufficient_volume",
+                    "event_type": "near_miss",
+                    "created_at": created_at,
+                },
+            ],
+        )
+
+        async with session_factory() as session:
+            rows = (await session.execute(SignalPipelineEventRecord.__table__.select())).fetchall()
+
+        assert saved == 2
+        assert [row.pair for row in rows] == ["SOL_BRL", "WBTC_BRL"]
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
+
+
+def test_pipeline_audit_can_be_disabled(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"pipeline-disabled-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(shared_state, "async_session", session_factory)
+        monkeypatch.setattr(shared_state.settings, "pipeline_audit_enabled", False)
+
+        saved = await shared_state.save_signal_pipeline_events(
+            "cycle-disabled",
+            [
+                {
+                    "exchange": Exchange.NOVADAX,
+                    "pair": "SOL_BRL",
+                    "stage": "light_scan",
+                    "status": "candidate",
+                    "reason": "candidate",
+                    "created_at": datetime.now(timezone.utc),
+                }
+            ],
+        )
+
+        async with session_factory() as session:
+            rows = (await session.execute(SignalPipelineEventRecord.__table__.select())).fetchall()
+
+        assert saved == 0
+        assert rows == []
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
+
+
+def test_audit_retention_uses_configured_windows(monkeypatch):
+    db_dir = Path(__file__).resolve().parent / ".tmp"
+    db_dir.mkdir(exist_ok=True)
+    db_path = db_dir / f"audit-retention-{uuid.uuid4().hex}.db"
+
+    async def run_test():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        monkeypatch.setattr(shared_state, "async_session", session_factory)
+        monkeypatch.setattr(shared_state.settings, "pipeline_event_retention_days", 1)
+        monkeypatch.setattr(shared_state.settings, "scanner_cycle_audit_retention_days", 2)
+
+        now = datetime.now(timezone.utc)
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    SignalPipelineEventRecord(
+                        cycle_id="old-event",
+                        exchange="novadax",
+                        pair="SOL_BRL",
+                        stage="light_scan",
+                        status="candidate",
+                        created_at=now - timedelta(days=2),
+                    ),
+                    SignalPipelineEventRecord(
+                        cycle_id="new-event",
+                        exchange="novadax",
+                        pair="WBTC_BRL",
+                        stage="light_scan",
+                        status="candidate",
+                        created_at=now,
+                    ),
+                    ScannerCycleAuditRecord(
+                        cycle_id="old-cycle",
+                        status="completed",
+                        started_at=now - timedelta(days=3),
+                        created_at=now - timedelta(days=3),
+                    ),
+                    ScannerCycleAuditRecord(
+                        cycle_id="new-cycle",
+                        status="completed",
+                        started_at=now,
+                        created_at=now,
+                    ),
+                ]
+            )
+            await session.commit()
+
+        await shared_state.run_audit_retention_if_due(now=now)
+
+        async with session_factory() as session:
+            event_rows = (await session.execute(SignalPipelineEventRecord.__table__.select())).fetchall()
+            cycle_rows = (await session.execute(ScannerCycleAuditRecord.__table__.select())).fetchall()
+
+        assert [row.cycle_id for row in event_rows] == ["new-event"]
+        assert [row.cycle_id for row in cycle_rows] == ["new-cycle"]
+
+        await engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+    asyncio.run(run_test())
 
 
 def test_runtime_persistence_normalizes_aware_detected_at(monkeypatch):

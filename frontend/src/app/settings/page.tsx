@@ -31,6 +31,7 @@ import {
   getConfig,
   getMissedSignalDiagnostic,
   getPairDiagnostic,
+  getWorkspaceStatus,
   getStoredAuthToken,
   getStoredWorkspaceId,
   listInvites,
@@ -56,6 +57,7 @@ import type {
   MissedSignalDiagnostic,
   PairExchangeDiagnostic,
   UserRecord,
+  WorkspaceStatus,
   WorkspaceSummary,
 } from "@/lib/types";
 import {
@@ -370,6 +372,7 @@ export default function SettingsPage() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [adminSession, setAdminSession] = useState<AdminSessionInfo | null>(null);
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
+  const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceStatus | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [invites, setInvites] = useState<InviteRecord[]>([]);
@@ -432,12 +435,14 @@ export default function SettingsPage() {
   const canManageActiveWorkspace = isWorkspaceAdminRole(activeWorkspaceRole);
   const canManageWorkspaceMembers = isWorkspaceOwnerRole(activeWorkspaceRole);
   const canCreateWorkspaces = adminSession?.role === "admin";
+  const durableStorageEnabled = workspaceStatus?.durable_storage_enabled ?? true;
 
   function clearWorkspaceManagementState() {
     setConfig(null);
     setConfiguredSecrets({});
     setEditingSecrets({});
     setAuditLog([]);
+    setWorkspaceStatus(null);
     setUsers([]);
     setInvites([]);
     setCredentialValidationResults([]);
@@ -511,20 +516,30 @@ export default function SettingsPage() {
 
     setUsersLoading(true);
     try {
-      const [data, audit, workspaceUsers, workspaceInvites] = await Promise.all([
+      const [data, status] = await Promise.all([
         getConfig(token),
-        getAdminAuditLog(40, token),
-        listUsers(token),
-        listInvites(token),
+        getWorkspaceStatus(token),
       ]);
       setConfig(data.config);
       setConfiguredSecrets(data.configured_secrets);
       setEditingSecrets({});
       lastSavedOperationalConfigRef.current = serializeOperationalConfig(data.config);
       setAutoSaveStatus("idle");
-      setAuditLog(audit);
-      setUsers(workspaceUsers);
-      setInvites(workspaceInvites);
+      setWorkspaceStatus(status);
+      if (status.durable_storage_enabled) {
+        const [auditEntries, workspaceUsers, workspaceInvites] = await Promise.all([
+          getAdminAuditLog(40, token),
+          listUsers(token),
+          listInvites(token),
+        ]);
+        setAuditLog(auditEntries);
+        setUsers(workspaceUsers);
+        setInvites(workspaceInvites);
+      } else {
+        setAuditLog([]);
+        setUsers([]);
+        setInvites([]);
+      }
       setAuthError(null);
       return data.config;
     } catch (error) {
@@ -583,6 +598,7 @@ export default function SettingsPage() {
     setConfig(null);
     setAdminSession(null);
     setAuditLog([]);
+    setWorkspaceStatus(null);
     setWorkspaces([]);
     setUsers([]);
     setInvites([]);
@@ -722,6 +738,10 @@ export default function SettingsPage() {
   }
 
   async function handleChangePassword() {
+    if (!durableStorageEnabled) {
+      setAuthError("Troca de senha exige storage duravel. No modo sem banco, use as credenciais de ambiente.");
+      return;
+    }
     if (!adminToken) {
       setAuthError("Sessão autenticada ausente.");
       return;
@@ -757,7 +777,7 @@ export default function SettingsPage() {
   }
 
   async function handleCreateWorkspace() {
-    if (!adminToken || !newWorkspaceName.trim() || !canCreateWorkspaces) return;
+    if (!adminToken || !newWorkspaceName.trim() || !canCreateWorkspaces || !durableStorageEnabled) return;
 
     setCreatingWorkspace(true);
     try {
@@ -793,7 +813,7 @@ export default function SettingsPage() {
   }
 
   async function handleCreateUser() {
-    if (!adminToken || !canManageWorkspaceMembers) return;
+    if (!adminToken || !canManageWorkspaceMembers || !durableStorageEnabled) return;
     if (!newUserName.trim()) {
       setAuthError("Informe o usuário da nova conta.");
       return;
@@ -826,7 +846,7 @@ export default function SettingsPage() {
   }
 
   async function handleToggleUser(user: UserRecord) {
-    if (!adminToken || !canManageWorkspaceMembers) return;
+    if (!adminToken || !canManageWorkspaceMembers || !durableStorageEnabled) return;
 
     setUserActionId(`toggle-${user.id}`);
     try {
@@ -840,7 +860,7 @@ export default function SettingsPage() {
   }
 
   async function handleResetPassword(user: UserRecord) {
-    if (!adminToken || !canManageWorkspaceMembers) return;
+    if (!adminToken || !canManageWorkspaceMembers || !durableStorageEnabled) return;
 
     setUserActionId(`reset-${user.id}`);
     try {
@@ -864,7 +884,7 @@ export default function SettingsPage() {
   }
 
   async function handleCreateInvite() {
-    if (!adminToken || !canManageWorkspaceMembers) return;
+    if (!adminToken || !canManageWorkspaceMembers || !durableStorageEnabled) return;
     if (!inviteEmail.trim()) {
       setAuthError("Informe o email do convite.");
       return;
@@ -1302,6 +1322,23 @@ export default function SettingsPage() {
         </div>
       ) : null}
 
+      {!durableStorageEnabled ? (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="space-y-2 p-4 text-sm">
+            <div className="flex items-center gap-2 font-semibold text-amber-600 dark:text-amber-300">
+              <Info className="h-4 w-4" />
+              Modo sem banco ativo
+            </div>
+            <p className="text-muted-foreground">
+              <code>STORAGE_MODE={workspaceStatus?.storage_mode ?? "memory"}</code> mantem scanner, dashboard,
+              Telegram, configuracoes em memoria e auditoria recente. Usuarios, convites, troca de senha, log
+              administrativo, historico longo, outcomes e analytics persistidos ficam indisponiveis ate usar
+              <code> postgres</code> ou <code>sqlite</code>.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {adminSession.must_change_password ? (
         <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
           Esta conta está usando uma senha temporária. Troque a senha agora para encerrar o fluxo de primeiro acesso.
@@ -1394,7 +1431,7 @@ export default function SettingsPage() {
                 onChange={(event) => setNewWorkspaceName(event.target.value)}
                 placeholder="Novo workspace"
               />
-              <Button onClick={handleCreateWorkspace} disabled={creatingWorkspace} className="gap-2">
+              <Button onClick={handleCreateWorkspace} disabled={creatingWorkspace || !durableStorageEnabled} className="gap-2">
                 {creatingWorkspace ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
                 Criar
               </Button>
@@ -1433,7 +1470,7 @@ export default function SettingsPage() {
               placeholder="Confirmar nova senha"
             />
           </div>
-          <Button onClick={handleChangePassword} disabled={passwordSaving} className="gap-2">
+          <Button onClick={handleChangePassword} disabled={passwordSaving || !durableStorageEnabled} className="gap-2">
             {passwordSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
             Atualizar senha
           </Button>
@@ -1476,7 +1513,7 @@ export default function SettingsPage() {
               />
               <Button
                 onClick={handleCreateInvite}
-                disabled={creatingInvite}
+                disabled={creatingInvite || !durableStorageEnabled}
                 className="w-full gap-2 md:w-auto md:justify-self-start"
                 data-testid="settings-create-invite-button"
               >
@@ -1574,7 +1611,7 @@ export default function SettingsPage() {
               </select>
               <Button
                 onClick={handleCreateUser}
-                disabled={userActionId === "create-user"}
+                disabled={userActionId === "create-user" || !durableStorageEnabled}
                 className="w-full gap-2 md:w-auto md:justify-self-start"
                 data-testid="settings-create-user-button"
               >
@@ -1650,7 +1687,7 @@ export default function SettingsPage() {
                                 size="sm"
                                 variant="outline"
                                 onClick={() => handleResetPassword(user)}
-                                disabled={userActionId === toggleActionId || userActionId === resetActionId}
+                                disabled={!durableStorageEnabled || userActionId === toggleActionId || userActionId === resetActionId}
                                 className="gap-2"
                               >
                                 {userActionId === resetActionId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
@@ -1660,7 +1697,7 @@ export default function SettingsPage() {
                                 size="sm"
                                 variant={user.is_active ? "destructive" : "outline"}
                                 onClick={() => handleToggleUser(user)}
-                                disabled={isSelf || userActionId === toggleActionId || userActionId === resetActionId}
+                                disabled={isSelf || !durableStorageEnabled || userActionId === toggleActionId || userActionId === resetActionId}
                               >
                                 {userActionId === toggleActionId ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

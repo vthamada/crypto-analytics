@@ -139,16 +139,60 @@ export function getOperationalRankValue(opportunity: OpportunityListItem): numbe
     observe: -2,
     avoid: -12,
   };
+  const quoteVolume = Math.max(opportunity.quote_volume_24h || 0, 1);
+  const totalNotional = opportunity.total_notional_top_n ?? 0;
+  const maxOrder = opportunity.max_operable_order_notional_brl ?? 0;
+  const exitLiquidityBonus = clamp(Math.log10(quoteVolume / 1_000) * 5, -8, 14);
+  const bookDepthBonus = clamp(totalNotional / 5_000, 0, 10) + clamp(maxOrder / 1_000, 0, 8);
+  const marginBonus = clamp((opportunity.estimated_net_trade_edge_pct ?? 0) * 8, 0, 12);
+  const slippagePenalty = clamp((opportunity.estimated_sell_slippage_bps ?? 0) / 20, 0, 12);
+  const spreadPenalty = clamp((opportunity.spread_pct ?? 0) * 4, 0, 10);
+  const noTriggerPenalty = opportunity.has_actionable_trigger ? 0 : -10;
+  const poorSizePenalty = opportunity.operability_size_label === "not_operable" ? -12 : 0;
+
   return (
     getOperationalScore(opportunity) +
-    (getExecutabilityScore(opportunity) ?? 0) * 0.12 +
-    (opportunity.trade_margin_score ?? 0) * 0.08 +
+    (getExecutabilityScore(opportunity) ?? 0) * 0.18 +
+    (opportunity.trade_margin_score ?? 0) * 0.1 +
     clamp(opportunity.operational_range_margin_pct ?? 0, 0, 20) * 0.3 +
+    exitLiquidityBonus +
+    bookDepthBonus +
+    marginBonus +
     (phaseBonus[opportunity.movement_phase ?? "neutral"] ?? 0) +
     (rangeBonus[opportunity.operational_range_quality ?? "none"] ?? 0) +
     (typeBonus[opportunity.opportunity_type ?? "observe"] ?? 0) -
-    (opportunity.is_late_entry_risk ? 8 : 0)
+    (opportunity.is_late_entry_risk ? 8 : 0) +
+    noTriggerPenalty +
+    poorSizePenalty -
+    slippagePenalty -
+    spreadPenalty
   );
+}
+
+export type OperationalDashboardBucket = "now" | "observe" | "audit";
+
+export function getOperationalDashboardBucket(opportunity: OpportunityListItem): OperationalDashboardBucket {
+  const status = opportunity.operation_status;
+  if (
+    status === "vale_olhar_agora" &&
+    Boolean(opportunity.has_actionable_trigger) &&
+    Boolean(opportunity.entry_zone) &&
+    Boolean(opportunity.exit_zone) &&
+    Boolean(opportunity.suggested_capital_range_brl) &&
+    opportunity.risk_label !== "alto"
+  ) {
+    return "now";
+  }
+  if (
+    status === "evitar" ||
+    status === "sem_liquidez" ||
+    status === "ja_passou_do_ponto" ||
+    opportunity.pipeline_status === "blocked_signal" ||
+    opportunity.opportunity_type === "avoid"
+  ) {
+    return "audit";
+  }
+  return "observe";
 }
 
 export function formatCurrency(value: number, digits = 2): string {

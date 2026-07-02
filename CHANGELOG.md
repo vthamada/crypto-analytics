@@ -40,6 +40,27 @@ Convencao deste repositorio:
 - Simulacao de tamanhos de ordem em R$ 25, R$ 300, R$ 1.000, R$ 5.000 e R$ 10.000 por oportunidade, com maior tamanho operavel e rótulo operacional.
 - Migration `0019_order_size_simulations` adiciona capacidade operacional por tamanho em oportunidades e snapshots.
 - Tese operacional derivada por oportunidade com status de acao, familia operacional, zona de entrada, zona de saida, tamanho sugerido, liquidez, risco, motivo principal e flags de ordem limitada/transferencia.
+- Guardrail central de tese operacional concreta para alertas, exigindo entrada, saida, tamanho sugerido, risco, motivo, gatilho acionavel e liquidez minima antes do Telegram.
+- Tela dedicada `/diagnostics` para investigar "por que nao alertou?" em modo geral por periodo/workspace ou por exchange/par/janela, com conclusao operacional, proximo passo, workspace, catalogo, qualidade do funil, gargalos agregados, near misses, ciclos e timeline.
+- Endpoint administrativo `GET /api/analytics/outcomes` para agregar outcomes por exchange, par, tipo, subtipo, fase, faixa operacional, momento do alerta e bucket de score.
+- Historico passou a exibir, sob demanda, o bloco "Outcomes por bucket" com taxa de acerto e retorno medio para calibrar ruido e falsos positivos.
+- Modo runtime memory-first via `STORAGE_MODE=memory|noop`, permitindo API/scanner funcionarem sem banco com snapshots atuais, cooldowns/repeticao, config de ambiente e auditoria recente em memoria.
+- `/api/health` passou a expor `storage_mode`, `durable_storage_enabled`, `scanner_enabled`, status dos buffers em memoria e avisos de configuracao.
+
+### Changed
+- Worker passou a ter modo economico de persistencia: auditoria de pipeline em modo `compact`, `raw_market_observations` desativado por padrao e persistencia de repeticoes/estado do scanner em cadencia configuravel.
+- `render.yaml` passou a usar `SCAN_INTERVAL_SECONDS=300`, `HISTORY_RETENTION_DAYS=30`, auditoria compacta por 7 dias e ciclos de auditoria por 30 dias para reduzir pressao em banco gratuito/baixo custo.
+- Retencao de auditoria deixou de usar constantes fixas e passou a respeitar `PIPELINE_EVENT_RETENTION_DAYS` e `SCANNER_CYCLE_AUDIT_RETENTION_DAYS`.
+- Prioridade da proxima sprint foi ajustada para produto/UX operacional: reducao de ruido, bloqueio de preparation/accumulation sem gatilho, tese operacional completa, ranking por volume/liquidez/margem/saida, dashboard em tres blocos e tela simples de "por que nao alertou?". Arbitragem/spread ficam para etapa posterior.
+- Dashboard principal passou a separar oportunidades em `Oportunidades agora`, `So observar` e `Auditoria/Evitar`, reduzindo mistura entre oportunidade acionavel e registro tecnico.
+- Ranking operacional de API/frontend passou a ponderar mais volume em BRL, profundidade de book, tamanho maximo operavel, margem liquida, slippage de venda, spread e gatilho acionavel.
+- Navegacao principal passou a incluir `Diagnostico`, tirando a investigacao de sinal perdido do uso exclusivo dentro de Configuracoes.
+- Historico passou a ter filtros operacionais por exchange, par, score minimo, estado do pipeline, tipo operacional, fase do movimento, risco, motivo de bloqueio, outcome e feedback.
+- Ranking/calibragem por par passou a combinar outcomes medidos e feedback manual em `historical_confidence`, com impacto conservador e `reweighting_version=v2_outcome_feedback`.
+- Rotulos de outcome no frontend foram alinhados ao classificador real do backend (`excellent`, `good`, `late`, `false_positive`, `neutral`).
+- Endpoints administrativos que dependem de storage duravel agora retornam `409` em modo `memory/noop` em vez de falhar silenciosamente ou tentar acessar banco indisponivel.
+- Tela de Configuracoes passou a mostrar aviso de modo sem banco e desabilitar usuarios, convites, criacao de workspace e troca de senha quando nao ha storage duravel.
+- Tela de Historico passou a avisar que historico persistente, outcomes e analytics longos ficam indisponiveis em modo sem banco.
 
 ### Fixed
 - Dashboard, shortlist, WebSocket e `/api/opportunities` passaram a ocultar ruido tecnico por padrao; registros tecnicos podem ser incluidos explicitamente com `include_technical=true`.
@@ -56,6 +77,7 @@ Convencao deste repositorio:
 - Configuracao `pair_universe_mode` permite escolher entre monitorar todos os pares BRL das exchanges habilitadas ou restringir scan/dashboard/historico apenas a watchlist.
 - O detalhe do sinal agora mostra o subtipo operacional, preparando a UI para separar movimentos direcionais, faixas, spread interno e arbitragem.
 - Dashboard, detalhe de oportunidade e Telegram passaram a priorizar a leitura operacional pratica em vez de score tecnico: o usuario ve por que olhar, onde entrar/sair, quanto cabe operar e qual risco principal.
+- Telegram passou a bloquear sinais sem tese operacional completa como `incomplete_operational_thesis`, `no_actionable_operation`, `insufficient_exit_liquidity` ou `high_operational_risk`, mesmo quando o score tecnico for alto.
 - Migration `0014_revoke_public_execute` remove permissao herdada de `PUBLIC` na funcao `public.rls_auto_enable()` sem bloquear deploys quando o usuario do app nao e dono da funcao.
 
 ## [2026-05-07]

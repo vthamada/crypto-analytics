@@ -16,6 +16,7 @@ export function useOpportunities(filters?: {
   sort_by?: OpportunitySortMode;
 }) {
   const [opportunities, setOpportunities] = useState<OpportunityListItem[]>([]);
+  const [auditOpportunities, setAuditOpportunities] = useState<OpportunityListItem[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,8 +45,12 @@ export function useOpportunities(filters?: {
   const fetchData = useCallback(async () => {
     try {
       if (!filtersRef.current) {
-        const dashboard = await getDashboardSummary({ limit: 50 });
+        const [dashboard, technical] = await Promise.all([
+          getDashboardSummary({ limit: 50 }),
+          getOpportunities({ include_technical: true, sort_by: "score", limit: 50 }),
+        ]);
         setOpportunities(dashboard.shortlist);
+        setAuditOpportunities(technical.filter((opportunity) => !isOperationallyVisible(opportunity)));
         setStats(dashboard.stats);
       } else {
         const [opps, dashStats] = await Promise.all([
@@ -53,6 +58,7 @@ export function useOpportunities(filters?: {
           getStats(),
         ]);
         setOpportunities(opps);
+        setAuditOpportunities([]);
         setStats(dashStats);
       }
       setError(null);
@@ -83,5 +89,5 @@ export function useOpportunities(filters?: {
     };
   }, [deriveStats, fetchData]);
 
-  return { opportunities, stats, loading, error, refetch: fetchData };
+  return { opportunities, auditOpportunities, stats, loading, error, refetch: fetchData };
 }

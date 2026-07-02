@@ -190,6 +190,7 @@ export type OpportunitySummary = Pick<
   | "score"
   | "technical_score"
   | "operational_score"
+  | "reweighting_version"
   | "pipeline_status"
   | "visibility_reason"
   | "operationally_visible"
@@ -436,6 +437,13 @@ export interface HistorySummaryRecord {
   operability_size_label?: string | null;
   alert_moment_type?: AlertMomentType;
   alert_reason?: string | null;
+  alert_worthiness_score?: number | null;
+  alert_trigger_type?: string | null;
+  has_actionable_trigger?: boolean;
+  alert_state_key?: string | null;
+  alert_block_reason?: string | null;
+  outcome_label?: string | null;
+  feedback_label?: string | null;
   detected_at: string;
 }
 
@@ -458,6 +466,38 @@ export interface Analytics {
   arbitrage_count: number;
   avg_cross_exchange_gap_pct: number;
   profile_distribution?: Record<string, number>;
+}
+
+export interface OutcomeBucketRow {
+  bucket: string;
+  count: number;
+  success_rate: number;
+  label_distribution: Record<string, number>;
+  avg_return_15m_pct?: number | null;
+  avg_return_1h_pct?: number | null;
+  avg_return_4h_pct?: number | null;
+  avg_return_24h_pct?: number | null;
+  avg_mfe_pct?: number | null;
+  avg_mae_pct?: number | null;
+  avg_volume_after_signal?: number | null;
+}
+
+export interface OutcomeBucketAnalytics {
+  from?: string | null;
+  to: string;
+  total_outcomes: number;
+  label_distribution: Record<string, number>;
+  buckets: Record<
+    | "exchange"
+    | "pair"
+    | "opportunity_type"
+    | "opportunity_subtype"
+    | "movement_phase"
+    | "operational_range_quality"
+    | "alert_moment_type"
+    | "score_bucket",
+    OutcomeBucketRow[]
+  >;
 }
 
 export interface WorkspaceSummary {
@@ -698,6 +738,48 @@ export interface NearMissesDiagnostic {
   near_misses: NearMissRecord[];
 }
 
+export interface FunnelReasonCount {
+  reason: string;
+  count: number;
+}
+
+export interface FunnelCycleTotals {
+  cycles: number;
+  total_pairs: number;
+  brl_pairs: number;
+  light_candidates: number;
+  deep_candidates: number;
+  deep_completed: number;
+  signals_created: number;
+  shortlist_count: number;
+  alerts_created: number;
+  alerts_sent: number;
+  provider_errors: number;
+}
+
+export interface FunnelQualityDiagnostic {
+  from: string;
+  to: string;
+  workspace_id?: string | null;
+  exchange?: Exchange | string | null;
+  pair?: string | null;
+  cycle_totals: FunnelCycleTotals;
+  avg_cycle_duration_ms: number;
+  rates: Record<string, number>;
+  event_totals: {
+    events: number;
+    alerts_sent: number;
+    alerts_blocked: number;
+  };
+  top_discard_reasons: FunnelReasonCount[];
+  top_block_reasons: FunnelReasonCount[];
+  top_event_reasons: FunnelReasonCount[];
+  top_alert_block_reasons: FunnelReasonCount[];
+  top_workspace_block_reasons: FunnelReasonCount[];
+  stage_distribution: Record<string, number>;
+  status_distribution: Record<string, number>;
+}
+
 export interface AuditLogEntry {
   id: string;
   actor_user_id?: string | null;
@@ -742,6 +824,36 @@ export interface WorkspaceStatus {
   telegram_configured: boolean;
   exchange_credentials_configured: Record<Exchange, boolean>;
   onboarding_completed_at?: string | null;
+  storage_mode: string;
+  durable_storage_enabled: boolean;
+  degraded_features: string[];
+}
+
+export interface RuntimeMemoryStatus {
+  runtime_state: boolean;
+  pair_states: number;
+  repetition_counts: number;
+  opportunity_snapshots: number;
+  pipeline_events: number;
+  cycle_audits: number;
+  event_limit: number;
+  cycle_limit: number;
+}
+
+export interface HealthStatus {
+  status: string;
+  mode: "scanner" | "api_only" | string;
+  storage_mode: string;
+  durable_storage_enabled: boolean;
+  scanner_enabled: boolean;
+  memory_runtime: RuntimeMemoryStatus;
+  warnings: string[];
+  last_scan: string | null;
+  opportunities_count: number;
+  scanner?: unknown;
+  scanner_state?: unknown;
+  websocket_connections?: number;
+  scan_configured_exchanges?: Exchange[];
 }
 
 export interface ExchangeCredentialValidationResult {

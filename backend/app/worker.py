@@ -5,6 +5,7 @@ import logging
 import time
 
 from app.api.routes import get_scan_config, set_scan_config, update_state, project_workspace_opportunity
+from app.config import settings
 from app.models.database import init_db
 from app.services.monitoring import scan_monitor
 from app.services.auth import ensure_admin_bootstrap
@@ -58,9 +59,13 @@ async def run_worker() -> None:
     scanner: Scanner | None = None
     persisted_reps = await load_repetition_counts()
     persisted_pair_states = await load_scanner_pair_states()
+    last_repetition_persist_at = 0.0
+    last_pair_state_persist_at = 0.0
+    last_raw_observation_persist_at = 0.0
 
     while True:
         cycle_started = time.perf_counter()
+        wall_clock_started = time.time()
         cycle_id = f"cycle-{int(time.time())}"
         cycle_started_at = utcnow()
         scan_monitor.begin_cycle()
@@ -84,16 +89,26 @@ async def run_worker() -> None:
             now = utcnow()
             update_state(opportunities, now)
 
-            # Persist repetition counts
+            # Persist runtime counters at a slower cadence to avoid write amplification.
             persisted_reps = dict(scanner._repetition_counts)
-            await save_repetition_counts(persisted_reps)
             persisted_pair_states = scanner.export_pair_scan_states()
-            await save_scanner_pair_states(persisted_pair_states)
+            if wall_clock_started - last_repetition_persist_at >= max(settings.repetition_persist_interval_seconds, 1):
+                await save_repetition_counts(persisted_reps)
+                last_repetition_persist_at = wall_clock_started
+            if wall_clock_started - last_pair_state_persist_at >= max(settings.scanner_state_persist_interval_seconds, 1):
+                await save_scanner_pair_states(persisted_pair_states)
+                last_pair_state_persist_at = wall_clock_started
             await decay_stale_repetitions(max_age_minutes=30)
 
             # Write shared snapshot for API decoupling
             await write_opportunity_snapshots(opportunities, cycle_id)
-            await save_raw_market_observations(opportunities, cycle_id)
+            if (
+                settings.raw_market_observations_enabled
+                and wall_clock_started - last_raw_observation_persist_at
+                >= max(settings.raw_market_observation_min_interval_seconds, 1)
+            ):
+                await save_raw_market_observations(opportunities, cycle_id)
+                last_raw_observation_persist_at = wall_clock_started
 
             # Technical signals dual-write
             signal_map: dict[str, str] = {}

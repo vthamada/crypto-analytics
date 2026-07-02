@@ -11,11 +11,20 @@ import { useHasAuthenticatedWorkspace } from "@/hooks/use-has-authenticated-work
 import { useOpportunities } from "@/hooks/use-opportunities";
 import { getOpportunity } from "@/lib/api";
 import type { Opportunity } from "@/lib/types";
-import type { OpportunityListItem } from "@/lib/opportunity-operability";
+import {
+  getOperationalDashboardBucket,
+  type OpportunityListItem,
+} from "@/lib/opportunity-operability";
 
 function DashboardContent() {
-  const { opportunities, stats, loading, error, refetch } = useOpportunities();
+  const { opportunities, auditOpportunities, stats, loading, error, refetch } = useOpportunities();
   const [selected, setSelected] = useState<Opportunity | null>(null);
+  const nowOpportunities = opportunities.filter((opportunity) => getOperationalDashboardBucket(opportunity) === "now");
+  const observeOpportunities = opportunities.filter((opportunity) => getOperationalDashboardBucket(opportunity) === "observe");
+  const visibleAuditOpportunities = opportunities.filter((opportunity) => getOperationalDashboardBucket(opportunity) === "audit");
+  const auditSectionOpportunities = [...visibleAuditOpportunities, ...auditOpportunities]
+    .filter((opportunity, index, all) => all.findIndex((item) => item.id === opportunity.id) === index)
+    .slice(0, 20);
 
   async function openOpportunityDetail(opportunity: OpportunityListItem) {
     try {
@@ -42,8 +51,31 @@ function DashboardContent() {
       <OnboardingChecklist />
 
       <OpportunitiesTable
-        opportunities={opportunities}
+        title="Oportunidades agora"
+        description="Somente sinais com tese operacional concreta: entrada, saida, tamanho, risco e motivo para agir."
+        emptyMessage="Nenhuma oportunidade acionavel agora. Isso e melhor do que alertar ruido."
+        opportunities={nowOpportunities}
         loading={loading}
+        onSelect={(opportunity) => void openOpportunityDetail(opportunity)}
+      />
+
+      <OpportunitiesTable
+        title="So observar"
+        description="Ativos saudaveis ou em preparacao, mas ainda sem gatilho suficiente para alerta."
+        emptyMessage="Nenhum ativo relevante apenas para observacao no momento."
+        opportunities={observeOpportunities}
+        loading={loading}
+        compact
+        onSelect={(opportunity) => void openOpportunityDetail(opportunity)}
+      />
+
+      <OpportunitiesTable
+        title="Auditoria / Evitar"
+        description="Sinais bloqueados, sem liquidez, atrasados ou tecnicamente vistos mas fora da oportunidade principal."
+        emptyMessage="Nenhum item de auditoria recente carregado."
+        opportunities={auditSectionOpportunities}
+        loading={loading}
+        compact
         onSelect={(opportunity) => void openOpportunityDetail(opportunity)}
       />
 

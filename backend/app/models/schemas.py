@@ -306,6 +306,7 @@ class OpportunitySummary(BaseModel):
     score: float
     technical_score: float | None = None
     operational_score: float | None = None
+    reweighting_version: str = "v1"
     executability_score: float | None = None
     trade_margin_score: float | None = None
     estimated_net_trade_edge_pct: float | None = None
@@ -374,6 +375,8 @@ class OpportunitySummary(BaseModel):
     has_actionable_trigger: bool = False
     alert_state_key: str | None = None
     alert_block_reason: str | None = None
+    outcome_label: str | None = None
+    feedback_label: str | None = None
     detected_at: datetime
     cross_exchange_gap_pct: float = 0.0
     cross_exchange_reference_exchange: Exchange | None = None
@@ -717,6 +720,9 @@ class WorkspaceStatusResponse(BaseModel):
     telegram_configured: bool
     exchange_credentials_configured: dict[str, bool]
     onboarding_completed_at: datetime | None = None
+    storage_mode: str = "postgres"
+    durable_storage_enabled: bool = True
+    degraded_features: list[str] = Field(default_factory=list)
 
 
 class ExchangeCredentialValidationResult(BaseModel):

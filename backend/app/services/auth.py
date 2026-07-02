@@ -213,6 +213,9 @@ async def record_audit_event(
     status: str = "success",
     details: dict | None = None,
 ) -> None:
+    if not settings.durable_storage_enabled:
+        return
+
     async with async_session() as session:
         session.add(
             AuditLogRecord(
@@ -275,6 +278,17 @@ async def _list_workspace_rows_for_user(user_id: str) -> list[tuple[WorkspaceRec
 
 
 async def list_user_workspaces(user_id: str) -> list[WorkspaceSummary]:
+    if not settings.durable_storage_enabled:
+        return [
+            WorkspaceSummary(
+                id="default",
+                slug="default",
+                name="Default Workspace",
+                role="owner",
+                is_active=True,
+            )
+        ]
+
     rows = await _list_workspace_rows_for_user(user_id)
     return [
         WorkspaceSummary(
@@ -289,6 +303,17 @@ async def list_user_workspaces(user_id: str) -> list[WorkspaceSummary]:
 
 
 async def get_workspace_for_user(user_id: str, workspace_id: str) -> WorkspaceSummary | None:
+    if not settings.durable_storage_enabled:
+        if workspace_id == "default":
+            return WorkspaceSummary(
+                id="default",
+                slug="default",
+                name="Default Workspace",
+                role="owner",
+                is_active=True,
+            )
+        return None
+
     workspaces = await list_user_workspaces(user_id)
     for workspace in workspaces:
         if workspace.id == workspace_id:
@@ -374,6 +399,9 @@ async def _default_workspace_config() -> AppConfig:
 
 
 async def ensure_admin_bootstrap() -> None:
+    if not settings.durable_storage_enabled:
+        return
+
     if not settings.admin_username or not settings.admin_password:
         return
 
@@ -420,6 +448,22 @@ async def ensure_admin_bootstrap() -> None:
 
 
 async def authenticate_admin_credentials(username: str, password: str) -> UserSession | None:
+    if not settings.durable_storage_enabled:
+        if settings.admin_username and settings.admin_password:
+            valid_env_login = hmac.compare_digest(username, settings.admin_username) and hmac.compare_digest(
+                password,
+                settings.admin_password,
+            )
+            if valid_env_login:
+                return UserSession(
+                    user_id="env-admin",
+                    username=username,
+                    role="admin",
+                    auth_mode="environment",
+                    token_version=0,
+                )
+        return None
+
     user = await get_user_by_login(username)
     if user is not None and user.is_active and verify_password(password, user.password_hash):
         return UserSession(
@@ -526,6 +570,14 @@ async def verify_access_token(token: str) -> UserSession | None:
         return None
     if token_type != "access":
         return None
+    if not settings.durable_storage_enabled:
+        return UserSession(
+            user_id=user_id,
+            username=username,
+            role=role,
+            auth_mode=auth_mode,
+            token_version=token_version,
+        )
 
     user = await get_user_by_id(user_id)
     if user is None or not user.is_active or int(user.token_version) != token_version:
@@ -546,6 +598,15 @@ def validate_legacy_admin_token(token: str | None) -> bool:
 
 async def legacy_admin_session() -> UserSession | None:
     username = settings.admin_username or "legacy-admin"
+    if not settings.durable_storage_enabled:
+        return UserSession(
+            user_id="legacy-admin",
+            username=username,
+            role="admin",
+            auth_mode="legacy_token",
+            token_version=0,
+        )
+
     user = await get_user_by_username(username)
     if user is not None:
         return UserSession(
@@ -663,6 +724,30 @@ async def create_workspace_for_user(actor: UserSession, name: str) -> WorkspaceS
 
 
 async def get_user_session_metadata(session_info: UserSession) -> dict:
+    if not settings.durable_storage_enabled:
+        workspaces = await list_user_workspaces(session_info.user_id)
+        return {
+            "user_id": session_info.user_id,
+            "username": session_info.username,
+            "email": None,
+            "role": session_info.role,
+            "auth_mode": session_info.auth_mode,
+            "token_version": session_info.token_version,
+            "password_last_changed_at": None,
+            "must_change_password": False,
+            "onboarding_completed_at": None,
+            "organization": {
+                "id": "default-org",
+                "name": "Default Organization",
+                "slug": "default-org",
+                "plan": "memory",
+                "stripe_customer_id": None,
+                "subscription_status": "active",
+                "trial_ends_at": None,
+            },
+            "workspaces": [workspace.model_dump() for workspace in workspaces],
+        }
+
     user = await get_user_by_id(session_info.user_id)
     workspaces = await list_user_workspaces(session_info.user_id)
 

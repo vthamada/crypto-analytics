@@ -16,6 +16,7 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.database import (
     OpportunitySnapshotRecord,
     RawMarketObservationRecord,
@@ -41,10 +42,84 @@ SCORE_VERSION = "v1"
 EXECUTABILITY_VERSION = "v1"
 MOVEMENT_VERSION = "v1"
 PROFILE_VERSION = "v1"
-REWEIGHTING_VERSION = "v1"
+REWEIGHTING_VERSION = "v2_outcome_feedback"
 _DEDUP_SIGNAL_WINDOW_MINUTES = 5
-_PIPELINE_EVENT_RETENTION_DAYS = 14
-_SCANNER_CYCLE_AUDIT_RETENTION_DAYS = 90
+
+_COMPACT_AUDIT_STATUSES = {"candidate", "near_miss", "opportunity", "visible", "blocked", "sent", "error", "failed"}
+_COMPACT_AUDIT_EVENT_TYPES = {"near_miss", "alert"}
+_COMPACT_AUDIT_STAGES = {"catalog", "promotion", "ranking", "workspace_projection", "alert"}
+_COMPACT_AUDIT_REASONS = {
+    "candidate",
+    "cache_empty",
+    "provider_error",
+    "provider_timeout",
+    "missing_ticker",
+    "missing_order_book",
+    "missing_candles",
+    "candidate_limit_lower_priority",
+    "entered_cycle_ranking",
+    "config_match",
+    "telegram_sent",
+    "telegram_send_failed",
+    "telegram_disabled",
+    "telegram_not_configured",
+    "below_alert_threshold",
+    "lower_than_competing_signals",
+    "daily_alert_limit_reached",
+    "no_state_change",
+}
+
+_memory_runtime_state: dict | None = None
+_memory_pair_states: dict[str, dict] = {}
+_memory_repetition_counts: dict[str, int] = {}
+_memory_opportunity_snapshots: list[dict] = []
+_memory_pipeline_events: list[dict] = []
+_memory_cycle_audits: list[dict] = []
+
+
+def durable_storage_enabled() -> bool:
+    return settings.durable_storage_enabled
+
+
+def _trim_memory_buffers() -> None:
+    event_limit = max(int(settings.runtime_memory_event_limit or 2000), 1)
+    cycle_limit = max(int(settings.runtime_memory_cycle_limit or 200), 1)
+    del _memory_pipeline_events[:-event_limit]
+    del _memory_cycle_audits[:-cycle_limit]
+
+
+def get_runtime_memory_status() -> dict:
+    return {
+        "runtime_state": _memory_runtime_state is not None,
+        "pair_states": len(_memory_pair_states),
+        "repetition_counts": len(_memory_repetition_counts),
+        "opportunity_snapshots": len(_memory_opportunity_snapshots),
+        "pipeline_events": len(_memory_pipeline_events),
+        "cycle_audits": len(_memory_cycle_audits),
+        "event_limit": max(int(settings.runtime_memory_event_limit or 2000), 1),
+        "cycle_limit": max(int(settings.runtime_memory_cycle_limit or 200), 1),
+    }
+
+
+def _normalize_event_for_memory(cycle_id: str, event: dict) -> dict:
+    exchange = event.get("exchange")
+    if hasattr(exchange, "value"):
+        exchange = exchange.value
+    created_at = normalize_db_datetime(event.get("created_at") or utcnow())
+    return {
+        "cycle_id": event.get("cycle_id") or cycle_id,
+        "exchange": exchange,
+        "pair": event.get("pair"),
+        "stage": event.get("stage"),
+        "status": event.get("status"),
+        "reason": event.get("reason"),
+        "event_type": event.get("event_type", "scanner"),
+        "workspace_id": event.get("workspace_id"),
+        "technical_signal_id": event.get("technical_signal_id"),
+        "opportunity_id": event.get("opportunity_id"),
+        "details": event.get("details", {}),
+        "created_at": created_at,
+    }
 
 
 def _serialize_order_size_simulations(value: object) -> str:
@@ -109,6 +184,33 @@ async def update_scanner_runtime_state(
     opportunities_count: int | None = None,
     scan_diagnostics: dict | None = None,
 ) -> None:
+    global _memory_runtime_state
+    if not durable_storage_enabled():
+        current = _memory_runtime_state or {}
+        if started_at is not None:
+            current["last_cycle_started_at"] = normalize_db_datetime(started_at)
+        if completed_at is not None:
+            current["last_cycle_completed_at"] = normalize_db_datetime(completed_at)
+        if duration_ms is not None:
+            current["last_cycle_duration_ms"] = duration_ms
+        if error is not None:
+            current["last_cycle_error"] = error
+        elif completed_at is not None:
+            current["last_cycle_error"] = None
+        if success_at is not None:
+            current["last_success_at"] = normalize_db_datetime(success_at)
+        if opportunities_count is not None:
+            current["opportunities_count"] = opportunities_count
+        if scan_diagnostics is not None:
+            current["last_scan_diagnostics"] = scan_diagnostics
+        current["score_version"] = SCORE_VERSION
+        current["executability_version"] = EXECUTABILITY_VERSION
+        current["movement_version"] = MOVEMENT_VERSION
+        current["profile_version"] = PROFILE_VERSION
+        current["updated_at"] = utcnow()
+        _memory_runtime_state = current
+        return
+
     async with async_session() as session:
         record = await session.get(ScannerRuntimeStateRecord, "singleton")
         if record is None:
@@ -141,6 +243,32 @@ async def update_scanner_runtime_state(
 
 
 async def get_scanner_runtime_state() -> dict | None:
+    if not durable_storage_enabled():
+        if _memory_runtime_state is None:
+            return None
+        return {
+            "last_cycle_started_at": (
+                _memory_runtime_state.get("last_cycle_started_at").isoformat()
+                if _memory_runtime_state.get("last_cycle_started_at") else None
+            ),
+            "last_cycle_completed_at": (
+                _memory_runtime_state.get("last_cycle_completed_at").isoformat()
+                if _memory_runtime_state.get("last_cycle_completed_at") else None
+            ),
+            "last_cycle_duration_ms": _memory_runtime_state.get("last_cycle_duration_ms"),
+            "last_cycle_error": _memory_runtime_state.get("last_cycle_error"),
+            "last_success_at": (
+                _memory_runtime_state.get("last_success_at").isoformat()
+                if _memory_runtime_state.get("last_success_at") else None
+            ),
+            "opportunities_count": _memory_runtime_state.get("opportunities_count"),
+            "last_scan_diagnostics": _memory_runtime_state.get("last_scan_diagnostics", {}),
+            "score_version": _memory_runtime_state.get("score_version", SCORE_VERSION),
+            "executability_version": _memory_runtime_state.get("executability_version", EXECUTABILITY_VERSION),
+            "movement_version": _memory_runtime_state.get("movement_version", MOVEMENT_VERSION),
+            "profile_version": _memory_runtime_state.get("profile_version", PROFILE_VERSION),
+        }
+
     async with async_session() as session:
         record = await session.get(ScannerRuntimeStateRecord, "singleton")
         if record is None:
@@ -167,6 +295,9 @@ async def get_scanner_runtime_state() -> dict | None:
 
 
 async def load_scanner_pair_states() -> dict[str, dict]:
+    if not durable_storage_enabled():
+        return dict(_memory_pair_states)
+
     async with async_session() as session:
         result = await session.execute(select(ScannerPairStateRecord))
         rows = result.scalars().all()
@@ -188,6 +319,10 @@ async def load_scanner_pair_states() -> dict[str, dict]:
 async def save_scanner_pair_states(states: dict[str, dict]) -> int:
     if not states:
         return 0
+    if not durable_storage_enabled():
+        _memory_pair_states.clear()
+        _memory_pair_states.update(states)
+        return len(states)
 
     async with async_session() as session:
         for state_id, payload in states.items():
@@ -246,13 +381,44 @@ def _count_provider_errors(diagnostics: dict) -> int:
     return int(light_errors + deep_errors)
 
 
+def _should_persist_pipeline_event(event: dict) -> bool:
+    if not settings.pipeline_audit_enabled:
+        return False
+
+    mode = (settings.pipeline_audit_mode or "compact").strip().lower()
+    if mode == "off":
+        return False
+    if mode == "full":
+        return True
+
+    status = str(event.get("status") or "")
+    event_type = str(event.get("event_type") or "scanner")
+    stage = str(event.get("stage") or "")
+    reason = str(event.get("reason") or "")
+
+    return (
+        event_type in _COMPACT_AUDIT_EVENT_TYPES
+        or status in _COMPACT_AUDIT_STATUSES
+        or stage in _COMPACT_AUDIT_STAGES
+        or reason in _COMPACT_AUDIT_REASONS
+    )
+
+
 async def save_signal_pipeline_events(cycle_id: str, events: list[dict]) -> int:
     """Persist compact per-pair/per-workspace audit events for missed-signal diagnosis."""
     if not events:
         return 0
 
+    filtered_events = [event for event in events if _should_persist_pipeline_event(event)]
+    if not filtered_events:
+        return 0
+    if not durable_storage_enabled():
+        _memory_pipeline_events.extend(_normalize_event_for_memory(cycle_id, event) for event in filtered_events)
+        _trim_memory_buffers()
+        return len(filtered_events)
+
     async with async_session() as session:
-        for event in events:
+        for event in filtered_events:
             exchange = event.get("exchange")
             if hasattr(exchange, "value"):
                 exchange = exchange.value
@@ -274,10 +440,21 @@ async def save_signal_pipeline_events(cycle_id: str, events: list[dict]) -> int:
                 )
             )
         await session.commit()
-    return len(events)
+    return len(filtered_events)
 
 
 async def count_workspace_alerts_sent_since(workspace_id: str, since: datetime) -> int:
+    if not durable_storage_enabled():
+        normalized_since = normalize_db_datetime(since)
+        return sum(
+            1
+            for event in _memory_pipeline_events
+            if event.get("workspace_id") == workspace_id
+            and event.get("stage") == "alert"
+            and event.get("status") == "sent"
+            and event.get("created_at") >= normalized_since
+        )
+
     async with async_session() as session:
         result = await session.execute(
             select(func.count())
@@ -313,6 +490,32 @@ async def save_scanner_cycle_audit(
         **diagnostics.get("deep_discard_reasons", {}),
         **diagnostics.get("skip_reasons", {}),
     }
+    if not durable_storage_enabled():
+        _memory_cycle_audits.append(
+            {
+                "cycle_id": cycle_id,
+                "status": status,
+                "started_at": normalize_db_datetime(started_at) or utcnow(),
+                "completed_at": normalize_db_datetime(completed_at),
+                "duration_ms": duration_ms,
+                "total_pairs": int(diagnostics.get("total_pairs", 0) or 0),
+                "brl_pairs": int(diagnostics.get("brl_pairs", diagnostics.get("total_pairs", 0)) or 0),
+                "light_candidates": int(diagnostics.get("light_candidates", 0) or 0),
+                "deep_candidates": int(diagnostics.get("deep_candidates", 0) or 0),
+                "deep_completed": int(diagnostics.get("deep_completed", 0) or 0),
+                "signals_created": signals_created,
+                "shortlist_count": shortlist_count,
+                "alerts_created": alerts_created,
+                "alerts_sent": alerts_sent,
+                "provider_errors": _count_provider_errors(diagnostics),
+                "discard_reasons": discard_reasons,
+                "block_reasons": block_reasons or {},
+                "diagnostics": diagnostics,
+                "error": error,
+            }
+        )
+        _trim_memory_buffers()
+        return
 
     async with async_session() as session:
         result = await session.execute(
@@ -357,6 +560,89 @@ async def get_missed_signal_diagnostic(
 ) -> dict:
     normalized_exchange = exchange.value if hasattr(exchange, "value") else str(exchange)
     normalized_pair = pair.upper().replace("/", "_")
+    if not durable_storage_enabled():
+        start = normalize_db_datetime(from_time)
+        end = normalize_db_datetime(to_time)
+        memory_events = [
+            event
+            for event in _memory_pipeline_events
+            if event.get("exchange") == normalized_exchange
+            and event.get("pair") == normalized_pair
+            and start <= event.get("created_at") <= end
+        ][:500]
+        memory_events.sort(key=lambda event: event.get("created_at") or utcnow())
+        cycle_ids = sorted({event["cycle_id"] for event in memory_events})
+        memory_cycles = [cycle for cycle in _memory_cycle_audits if cycle.get("cycle_id") in cycle_ids]
+        timeline = [
+            {
+                "cycle_id": event.get("cycle_id"),
+                "exchange": event.get("exchange"),
+                "pair": event.get("pair"),
+                "stage": event.get("stage"),
+                "status": event.get("status"),
+                "reason": event.get("reason"),
+                "event_type": event.get("event_type"),
+                "workspace_id": event.get("workspace_id"),
+                "technical_signal_id": event.get("technical_signal_id"),
+                "opportunity_id": event.get("opportunity_id"),
+                "details": event.get("details", {}),
+                "created_at": event.get("created_at").isoformat() if event.get("created_at") else None,
+            }
+            for event in memory_events
+        ]
+        cycle_summaries = [
+            {
+                "cycle_id": cycle.get("cycle_id"),
+                "status": cycle.get("status"),
+                "started_at": cycle.get("started_at").isoformat() if cycle.get("started_at") else None,
+                "completed_at": cycle.get("completed_at").isoformat() if cycle.get("completed_at") else None,
+                "duration_ms": cycle.get("duration_ms"),
+                "total_pairs": cycle.get("total_pairs", 0),
+                "brl_pairs": cycle.get("brl_pairs", 0),
+                "light_candidates": cycle.get("light_candidates", 0),
+                "deep_candidates": cycle.get("deep_candidates", 0),
+                "deep_completed": cycle.get("deep_completed", 0),
+                "signals_created": cycle.get("signals_created", 0),
+                "shortlist_count": cycle.get("shortlist_count", 0),
+                "alerts_created": cycle.get("alerts_created", 0),
+                "alerts_sent": cycle.get("alerts_sent", 0),
+                "provider_errors": cycle.get("provider_errors", 0),
+                "discard_reasons": cycle.get("discard_reasons", {}),
+                "block_reasons": cycle.get("block_reasons", {}),
+                "error": cycle.get("error"),
+            }
+            for cycle in memory_cycles
+        ]
+        final_state, root_cause_event = _summarize_signal_final_state(
+            timeline,
+            workspace_id=workspace_id,
+            catalog_status=catalog_status,
+        )
+        return {
+            "exchange": normalized_exchange,
+            "pair": normalized_pair,
+            "from": start.isoformat(),
+            "to": end.isoformat(),
+            "status": "events_found" if timeline else "insufficient_audit_data",
+            "final_state": final_state,
+            "root_cause_stage": root_cause_event.get("stage") if root_cause_event else None,
+            "root_cause_reason": root_cause_event.get("reason") if root_cause_event else None,
+            "workspace_status": _build_workspace_signal_status(
+                exchange=normalized_exchange,
+                pair=normalized_pair,
+                workspace_id=workspace_id,
+                config=workspace_config,
+                timeline=timeline,
+            ),
+            "catalog_status": catalog_status,
+            "message": (
+                "Linha do tempo em memoria encontrada para o par no intervalo."
+                if timeline
+                else "Nenhum evento em memoria encontrado; no modo sem banco a auditoria e limitada ao ring buffer recente."
+            ),
+            "timeline": timeline,
+            "cycle_summaries": cycle_summaries,
+        }
 
     async with async_session() as session:
         events_result = await session.execute(
@@ -474,6 +760,31 @@ async def get_near_misses(
         normalized_exchange = exchange.value if hasattr(exchange, "value") else str(exchange)
     normalized_pair = pair.upper().replace("/", "_") if pair else None
     safe_limit = max(1, min(limit, 500))
+    if not durable_storage_enabled():
+        start = normalize_db_datetime(from_time)
+        end = normalize_db_datetime(to_time)
+        events = [
+            event
+            for event in _memory_pipeline_events
+            if event.get("event_type") == "near_miss"
+            and start <= event.get("created_at") <= end
+            and (not normalized_exchange or event.get("exchange") == normalized_exchange)
+            and (not normalized_pair or event.get("pair") == normalized_pair)
+        ]
+        events.sort(key=lambda event: event.get("created_at") or utcnow(), reverse=True)
+        return [
+            {
+                "cycle_id": event.get("cycle_id"),
+                "exchange": event.get("exchange"),
+                "pair": event.get("pair"),
+                "stage": event.get("stage"),
+                "status": event.get("status"),
+                "reason": event.get("reason"),
+                "details": event.get("details", {}),
+                "created_at": event.get("created_at").isoformat() if event.get("created_at") else None,
+            }
+            for event in events[:safe_limit]
+        ]
 
     async with async_session() as session:
         query = (
@@ -546,6 +857,99 @@ async def get_funnel_quality_metrics(
     """
     normalized_exchange = exchange.value if hasattr(exchange, "value") else str(exchange) if exchange else None
     normalized_pair = pair.upper().replace("/", "_") if pair else None
+    if not durable_storage_enabled():
+        start = normalize_db_datetime(from_time)
+        end = normalize_db_datetime(to_time)
+        cycles = [
+            cycle
+            for cycle in _memory_cycle_audits
+            if start <= cycle.get("started_at") <= end
+        ]
+        events = [
+            event
+            for event in _memory_pipeline_events
+            if start <= event.get("created_at") <= end
+            and (not normalized_exchange or event.get("exchange") == normalized_exchange)
+            and (not normalized_pair or event.get("pair") == normalized_pair)
+            and (not workspace_id or event.get("workspace_id") in (None, workspace_id))
+        ]
+        discard_reasons: dict[str, int] = {}
+        block_reasons: dict[str, int] = {}
+        cycle_totals = {
+            "cycles": len(cycles),
+            "total_pairs": 0,
+            "brl_pairs": 0,
+            "light_candidates": 0,
+            "deep_candidates": 0,
+            "deep_completed": 0,
+            "signals_created": 0,
+            "shortlist_count": 0,
+            "alerts_created": 0,
+            "alerts_sent": 0,
+            "provider_errors": 0,
+        }
+        durations = []
+        for cycle in cycles:
+            for key in cycle_totals:
+                if key != "cycles":
+                    cycle_totals[key] += int(cycle.get(key) or 0)
+            if cycle.get("duration_ms") is not None:
+                durations.append(float(cycle["duration_ms"]))
+            _merge_count_dict(discard_reasons, cycle.get("discard_reasons", {}))
+            _merge_count_dict(block_reasons, cycle.get("block_reasons", {}))
+
+        stage_distribution: dict[str, int] = {}
+        status_distribution: dict[str, int] = {}
+        event_reasons: dict[str, int] = {}
+        alert_block_reasons: dict[str, int] = {}
+        workspace_block_reasons: dict[str, int] = {}
+        alerts_sent_events = 0
+        for event in events:
+            stage = str(event.get("stage") or "")
+            status = str(event.get("status") or "")
+            reason = str(event.get("reason") or "")
+            stage_distribution[stage] = stage_distribution.get(stage, 0) + 1
+            status_distribution[status] = status_distribution.get(status, 0) + 1
+            if reason:
+                event_reasons[reason] = event_reasons.get(reason, 0) + 1
+                if stage == "alert" and status == "blocked":
+                    alert_block_reasons[reason] = alert_block_reasons.get(reason, 0) + 1
+                if stage == "workspace_projection" and status == "blocked":
+                    workspace_block_reasons[reason] = workspace_block_reasons.get(reason, 0) + 1
+            if stage == "alert" and status == "sent":
+                alerts_sent_events += 1
+
+        return {
+            "from": start.isoformat(),
+            "to": end.isoformat(),
+            "workspace_id": workspace_id,
+            "exchange": normalized_exchange,
+            "pair": normalized_pair,
+            "cycle_totals": cycle_totals,
+            "avg_cycle_duration_ms": round(sum(durations) / len(durations), 2) if durations else 0.0,
+            "rates": {
+                "light_candidate_rate": _rate(cycle_totals["light_candidates"], cycle_totals["total_pairs"]),
+                "deep_promotion_rate": _rate(cycle_totals["deep_candidates"], cycle_totals["light_candidates"]),
+                "deep_completion_rate": _rate(cycle_totals["deep_completed"], cycle_totals["deep_candidates"]),
+                "signal_creation_rate": _rate(cycle_totals["signals_created"], cycle_totals["deep_completed"]),
+                "shortlist_rate": _rate(cycle_totals["shortlist_count"], cycle_totals["signals_created"]),
+                "alert_creation_rate": _rate(cycle_totals["alerts_created"], cycle_totals["shortlist_count"]),
+                "alert_send_rate": _rate(cycle_totals["alerts_sent"], cycle_totals["alerts_created"]),
+                "event_alert_send_rate": _rate(alerts_sent_events, alerts_sent_events + sum(alert_block_reasons.values())),
+            },
+            "event_totals": {
+                "events": len(events),
+                "alerts_sent": alerts_sent_events,
+                "alerts_blocked": sum(alert_block_reasons.values()),
+            },
+            "top_discard_reasons": _top_counts(discard_reasons),
+            "top_block_reasons": _top_counts(block_reasons),
+            "top_event_reasons": _top_counts(event_reasons),
+            "top_alert_block_reasons": _top_counts(alert_block_reasons),
+            "top_workspace_block_reasons": _top_counts(workspace_block_reasons),
+            "stage_distribution": stage_distribution,
+            "status_distribution": status_distribution,
+        }
 
     async with async_session() as session:
         cycle_result = await session.execute(
@@ -760,9 +1164,15 @@ def _build_workspace_signal_status(
 
 async def run_audit_retention_if_due(now: datetime | None = None) -> None:
     """Keep audit useful for diagnostics without turning it into raw market storage."""
+    if not durable_storage_enabled():
+        _trim_memory_buffers()
+        return
+
     now = normalize_db_datetime(now or utcnow()) or utcnow()
-    event_cutoff = now - timedelta(days=_PIPELINE_EVENT_RETENTION_DAYS)
-    cycle_cutoff = now - timedelta(days=_SCANNER_CYCLE_AUDIT_RETENTION_DAYS)
+    event_retention_days = max(settings.pipeline_event_retention_days, 1)
+    cycle_retention_days = max(settings.scanner_cycle_audit_retention_days, 1)
+    event_cutoff = now - timedelta(days=event_retention_days)
+    cycle_cutoff = now - timedelta(days=cycle_retention_days)
     async with async_session() as session:
         await session.execute(delete(SignalPipelineEventRecord).where(SignalPipelineEventRecord.created_at < event_cutoff))
         await session.execute(delete(ScannerCycleAuditRecord).where(ScannerCycleAuditRecord.created_at < cycle_cutoff))
@@ -778,6 +1188,12 @@ async def write_opportunity_snapshots(
     cycle_id: str,
 ) -> None:
     """Replace the current snapshot with the latest scan cycle results."""
+    if not durable_storage_enabled():
+        _memory_opportunity_snapshots.clear()
+        _memory_opportunity_snapshots.extend(opp.model_dump(mode="json") for opp in opportunities)
+        logger.info("snapshot_written_memory cycle_id=%s count=%s", cycle_id, len(opportunities))
+        return
+
     async with async_session() as session:
         # Clear previous snapshots
         await session.execute(delete(OpportunitySnapshotRecord))
@@ -884,6 +1300,9 @@ async def write_opportunity_snapshots(
 
 async def read_opportunity_snapshots() -> list[dict]:
     """Read the current opportunity snapshots from shared state."""
+    if not durable_storage_enabled():
+        return list(_memory_opportunity_snapshots)
+
     async with async_session() as session:
         result = await session.execute(
             select(OpportunitySnapshotRecord).order_by(OpportunitySnapshotRecord.score.desc())
@@ -993,6 +1412,8 @@ async def save_technical_signals(opportunities: list[Opportunity]) -> dict[str, 
     """Persist technical signals and return mapping of opp.id -> signal_id."""
     if not opportunities:
         return {}
+    if not durable_storage_enabled():
+        return {opp.id: opp.technical_signal_id or str(uuid.uuid4()) for opp in opportunities if opp.id}
 
     signal_map: dict[str, str] = {}
 
@@ -1088,6 +1509,8 @@ async def save_technical_signals(opportunities: list[Opportunity]) -> dict[str, 
 async def save_raw_market_observations(opportunities: list[Opportunity], cycle_id: str) -> int:
     if not opportunities:
         return 0
+    if not durable_storage_enabled():
+        return 0
 
     async with async_session() as session:
         for opp in opportunities:
@@ -1181,6 +1604,8 @@ async def save_workspace_projections_batch(
     """
     if not projections:
         return 0
+    if not durable_storage_enabled():
+        return 0
 
     async with async_session() as session:
         for proj in projections:
@@ -1220,6 +1645,8 @@ async def create_pending_outcomes(signals: list[dict]) -> int:
     """
     if not signals:
         return 0
+    if not durable_storage_enabled():
+        return 0
 
     async with async_session() as session:
         for sig in signals:
@@ -1245,6 +1672,9 @@ async def get_pending_outcomes(
     limit: int = 100,
 ) -> list[dict]:
     """Get outcomes that haven't been fully evaluated yet."""
+    if not durable_storage_enabled():
+        return []
+
     now = utcnow()
     min_age_cutoff = now - timedelta(minutes=min_age_minutes)
     max_age_cutoff = now - timedelta(hours=max_age_hours)
@@ -1301,6 +1731,9 @@ async def update_outcome(
     late_signal_detected: bool | None = None,
 ) -> None:
     """Update an outcome with price observations."""
+    if not durable_storage_enabled():
+        return
+
     async with async_session() as session:
         record = await session.get(SignalOutcomeRecord, outcome_id)
         if record is None:
@@ -1441,6 +1874,18 @@ async def create_signal_feedback(
     feedback_label: str,
     feedback_note: str | None = None,
 ) -> dict:
+    if not durable_storage_enabled():
+        return {
+            "id": str(uuid.uuid4()),
+            "signal_id": signal_id,
+            "opportunity_id": opportunity_id,
+            "user_id": user_id,
+            "workspace_id": workspace_id,
+            "feedback_label": feedback_label,
+            "feedback_note": feedback_note,
+            "created_at": utcnow(),
+        }
+
     async with async_session() as session:
         record = SignalFeedbackRecord(
             signal_id=signal_id,
@@ -1471,6 +1916,9 @@ async def create_signal_feedback(
 
 async def load_repetition_counts() -> dict[str, int]:
     """Load all repetition counts from database."""
+    if not durable_storage_enabled():
+        return dict(_memory_repetition_counts)
+
     async with async_session() as session:
         result = await session.execute(select(RepetitionCountRecord))
         rows = result.scalars().all()
@@ -1480,6 +1928,10 @@ async def load_repetition_counts() -> dict[str, int]:
 async def save_repetition_counts(counts: dict[str, int]) -> None:
     """Persist repetition counts, upserting each key."""
     if not counts:
+        return
+    if not durable_storage_enabled():
+        _memory_repetition_counts.clear()
+        _memory_repetition_counts.update(counts)
         return
 
     async with async_session() as session:
@@ -1508,6 +1960,9 @@ async def save_repetition_counts(counts: dict[str, int]) -> None:
 
 async def decay_stale_repetitions(*, max_age_minutes: int = 30) -> int:
     """Reduce counts for keys not seen recently. Returns number removed."""
+    if not durable_storage_enabled():
+        return 0
+
     cutoff = utcnow() - timedelta(minutes=max_age_minutes)
     async with async_session() as session:
         result = await session.execute(

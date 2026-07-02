@@ -11,6 +11,8 @@ import type {
   DashboardSummaryPayload,
   Exchange,
   ExchangeCredentialValidationResponse,
+  FunnelQualityDiagnostic,
+  HealthStatus,
   HistoryRecord,
   HistorySummaryRecord,
   HistoryVisibility,
@@ -20,6 +22,7 @@ import type {
   NearMissesDiagnostic,
   Opportunity,
   OpportunitySummary,
+  OutcomeBucketAnalytics,
   PairExchangeDiagnostic,
   SignalFeedbackLabel,
   SignalFeedbackResponse,
@@ -445,6 +448,21 @@ export function getOperationalAnalytics(params?: {
   return fetchJSON(`/analytics/operational${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
 }
 
+export function getOutcomeBucketAnalytics(params?: {
+  exchange?: string;
+  pair?: string;
+  hours?: number;
+}): Promise<OutcomeBucketAnalytics> {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") query.set(k, String(v));
+    });
+  }
+  const qs = query.toString();
+  return fetchJSON(`/analytics/outcomes${qs ? `?${qs}` : ""}`, { headers: sessionHeaders() });
+}
+
 export function getPairDiagnostic(exchange: Exchange, pair: string): Promise<PairExchangeDiagnostic> {
   return fetchJSON(`/pairs/diagnostics/${exchange}/${encodeURIComponent(pair)}`, { headers: sessionHeaders() });
 }
@@ -479,6 +497,21 @@ export function getNearMissesDiagnostic(params: {
   if (params.pair) query.set("pair", params.pair);
   if (params.limit !== undefined) query.set("limit", String(params.limit));
   return fetchJSON(`/diagnostics/near-misses?${query.toString()}`, { headers: sessionHeaders() });
+}
+
+export function getFunnelQualityDiagnostic(params: {
+  from: string;
+  to: string;
+  exchange?: Exchange;
+  pair?: string;
+}): Promise<FunnelQualityDiagnostic> {
+  const query = new URLSearchParams({
+    from: params.from,
+    to: params.to,
+  });
+  if (params.exchange) query.set("exchange", params.exchange);
+  if (params.pair) query.set("pair", params.pair);
+  return fetchJSON(`/diagnostics/funnel-quality?${query.toString()}`, { headers: sessionHeaders() });
 }
 
 // Config
@@ -660,10 +693,6 @@ export function sendTelegramTestMessage(
 }
 
 // Health
-export function getHealth(): Promise<{
-  status: string;
-  last_scan: string | null;
-  opportunities_count: number;
-}> {
+export function getHealth(): Promise<HealthStatus> {
   return fetchJSON("/health");
 }

@@ -51,6 +51,10 @@ interface OpportunitiesTableProps {
   opportunities: OpportunityListItem[];
   loading?: boolean;
   onSelect?: (opportunity: OpportunityListItem) => void;
+  title?: string;
+  description?: string;
+  emptyMessage?: string;
+  compact?: boolean;
 }
 
 function movementBadge(type: string) {
@@ -135,6 +139,10 @@ export function OpportunitiesTable({
   opportunities,
   loading,
   onSelect,
+  title = "Oportunidades Detectadas",
+  description,
+  emptyMessage = "Nenhuma oportunidade encontrada",
+  compact = false,
 }: OpportunitiesTableProps) {
   const [search, setSearch] = useState("");
   const [exchangeFilter, setExchangeFilter] = useState<string>("all");
@@ -192,20 +200,23 @@ export function OpportunitiesTable({
   const operableCount = opportunities.filter(isOperableSignal).length;
   const interestingCount = opportunities.filter(isInterestingSignal).length;
 
+  const tableHeight = compact ? "h-[360px]" : "h-[540px]";
+
   return (
     <Card className="rounded-2xl">
       <CardHeader className="space-y-4 pb-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-1">
-            <CardTitle className="text-lg">Oportunidades Detectadas</CardTitle>
+            <CardTitle className="text-lg">{title}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              {loading
-                ? "Atualizando sinais em tempo real..."
-                : `${sorted.length} sinais visiveis - ordenado por ${sortLabel(sortBy)}${
-                    sortBy === "executability" && topExecutabilityScore != null
-                      ? ` - melhor operabilidade ${topExecutabilityScore.toFixed(1)}`
-                      : ` - melhor score operacional ${topOperationalScore.toFixed(1)}`
-                  }`}
+              {description ??
+                (loading
+                  ? "Atualizando sinais em tempo real..."
+                  : `${sorted.length} sinais visiveis - ordenado por ${sortLabel(sortBy)}${
+                      sortBy === "executability" && topExecutabilityScore != null
+                        ? ` - melhor operabilidade ${topExecutabilityScore.toFixed(1)}`
+                        : ` - melhor score operacional ${topOperationalScore.toFixed(1)}`
+                    }`)}
             </p>
           </div>
 
@@ -364,7 +375,7 @@ export function OpportunitiesTable({
             ))
           ) : sorted.length === 0 ? (
             <div className="flex h-32 items-center justify-center text-center text-sm text-muted-foreground">
-              Nenhuma oportunidade encontrada
+              {emptyMessage}
             </div>
           ) : (
             sorted.map((opportunity) => {
@@ -498,7 +509,7 @@ export function OpportunitiesTable({
         </div>
 
         <div className="hidden sm:block">
-          <ScrollArea className="h-[540px]">
+          <ScrollArea className={tableHeight}>
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -528,7 +539,7 @@ export function OpportunitiesTable({
                 ) : sorted.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
-                      Nenhuma oportunidade encontrada
+                      {emptyMessage}
                     </TableCell>
                   </TableRow>
                 ) : (

@@ -70,6 +70,42 @@ def ensure_utc_datetime(value: datetime) -> datetime:
 
 
 DEFAULT_WORKSPACE_ID = "default"
+_memory_workspace_configs: dict[str, AppConfig] = {}
+
+
+def durable_storage_enabled() -> bool:
+    return settings.durable_storage_enabled
+
+
+def config_from_environment() -> AppConfig:
+    """Build a runtime config from env/defaults for memory/noop storage modes."""
+    return AppConfig(
+        thresholds={
+            "min_volatility_pct": settings.min_volatility_pct,
+            "min_volume_brl": settings.min_volume_brl,
+            "min_volume_brl_small": settings.min_volume_brl_small,
+            "min_liquidity_units": settings.min_liquidity_units,
+            "max_spread_pct": settings.max_spread_pct,
+        },
+        weights={
+            "volatility": settings.weight_volatility,
+            "volume": settings.weight_volume,
+            "liquidity": settings.weight_liquidity,
+            "spread": settings.weight_spread,
+            "repetition": settings.weight_repetition,
+        },
+        scan_interval_seconds=settings.scan_interval_seconds,
+        telegram_bot_token=settings.telegram_bot_token,
+        telegram_chat_id=settings.telegram_chat_id,
+        telegram_enabled=bool(settings.telegram_bot_token and settings.telegram_chat_id),
+        telegram_alert_cooldown_seconds=settings.telegram_alert_cooldown_seconds,
+        novadax_api_key=settings.novadax_api_key,
+        novadax_api_secret=settings.novadax_api_secret,
+        mb_api_key=settings.mb_api_key,
+        mb_api_secret=settings.mb_api_secret,
+        binance_api_key=settings.binance_api_key,
+        binance_api_secret=settings.binance_api_secret,
+    )
 
 
 MOVEMENT_MODIFIERS = {
@@ -440,6 +476,8 @@ async def save_opportunities(opportunities: list[Opportunity]) -> None:
     """
     if not opportunities:
         return
+    if not durable_storage_enabled():
+        return
 
     async with async_session() as session:
         cutoff = utcnow() - timedelta(minutes=_SEMANTIC_DEDUP_WINDOW_MINUTES)
@@ -598,6 +636,9 @@ async def purge_history_older_than(*, retention_days: int, now: datetime | None 
 async def run_history_retention_if_due(*, now: datetime | None = None) -> int:
     global _last_history_retention_run
 
+    if not durable_storage_enabled():
+        return 0
+
     if settings.history_retention_days <= 0:
         return 0
 
@@ -625,6 +666,9 @@ async def get_history(
     visibility: str = "all",
 ) -> list[dict]:
     """Retrieve opportunity history from the database."""
+    if not durable_storage_enabled():
+        return []
+
     async with async_session() as session:
         query = select(OpportunityRecord).order_by(desc(OpportunityRecord.detected_at))
 
@@ -724,6 +768,9 @@ async def get_history_summary(
     visibility: str = "all",
 ) -> list[dict]:
     """Retrieve a reduced history payload for list views."""
+    if not durable_storage_enabled():
+        return []
+
     async with async_session() as session:
         query = select(
             OpportunityRecord.id,
@@ -756,6 +803,7 @@ async def get_history_summary(
             OpportunityRecord.has_actionable_trigger,
             OpportunityRecord.alert_state_key,
             OpportunityRecord.alert_block_reason,
+            OpportunityRecord.technical_signal_id,
             OpportunityRecord.detected_at,
             OpportunityRecord.arbitrage_available,
             OpportunityRecord.volatility_score,
@@ -772,6 +820,45 @@ async def get_history_summary(
 
         result = await session.execute(query)
         rows = [dict(row) for row in result.mappings().all()]
+
+        technical_signal_ids = sorted({row["technical_signal_id"] for row in rows if row.get("technical_signal_id")})
+        opportunity_ids = sorted({row["id"] for row in rows if row.get("id")})
+
+        outcome_labels_by_signal: dict[str, str] = {}
+        if technical_signal_ids:
+            outcome_result = await session.execute(
+                select(SignalOutcomeRecord.technical_signal_id, SignalOutcomeRecord.outcome_label)
+                .where(SignalOutcomeRecord.technical_signal_id.in_(technical_signal_ids))
+                .where(SignalOutcomeRecord.outcome_label.is_not(None))
+                .order_by(desc(SignalOutcomeRecord.evaluated_at), desc(SignalOutcomeRecord.created_at))
+            )
+            for signal_id, outcome_label in outcome_result.all():
+                if signal_id and outcome_label and signal_id not in outcome_labels_by_signal:
+                    outcome_labels_by_signal[str(signal_id)] = str(outcome_label)
+
+        feedback_labels_by_opportunity: dict[str, str] = {}
+        feedback_labels_by_signal: dict[str, str] = {}
+        if opportunity_ids or technical_signal_ids:
+            feedback_query = select(
+                SignalFeedbackRecord.opportunity_id,
+                SignalFeedbackRecord.signal_id,
+                SignalFeedbackRecord.feedback_label,
+            ).order_by(desc(SignalFeedbackRecord.created_at))
+            if opportunity_ids and technical_signal_ids:
+                feedback_query = feedback_query.where(
+                    (SignalFeedbackRecord.opportunity_id.in_(opportunity_ids))
+                    | (SignalFeedbackRecord.signal_id.in_(technical_signal_ids))
+                )
+            elif opportunity_ids:
+                feedback_query = feedback_query.where(SignalFeedbackRecord.opportunity_id.in_(opportunity_ids))
+            else:
+                feedback_query = feedback_query.where(SignalFeedbackRecord.signal_id.in_(technical_signal_ids))
+            feedback_result = await session.execute(feedback_query)
+            for opportunity_id, signal_id, feedback_label in feedback_result.all():
+                if opportunity_id and feedback_label and opportunity_id not in feedback_labels_by_opportunity:
+                    feedback_labels_by_opportunity[str(opportunity_id)] = str(feedback_label)
+                if signal_id and feedback_label and signal_id not in feedback_labels_by_signal:
+                    feedback_labels_by_signal[str(signal_id)] = str(feedback_label)
 
     summaries = []
     for row in rows:
@@ -821,6 +908,9 @@ async def get_history_summary(
                 "has_actionable_trigger": row["has_actionable_trigger"] or False,
                 "alert_state_key": row["alert_state_key"],
                 "alert_block_reason": row["alert_block_reason"],
+                "outcome_label": outcome_labels_by_signal.get(str(row["technical_signal_id"])),
+                "feedback_label": feedback_labels_by_opportunity.get(str(row["id"]))
+                or feedback_labels_by_signal.get(str(row["technical_signal_id"])),
                 "detected_at": detected_at.isoformat(),
                 "arbitrage_available": row["arbitrage_available"] or False,
             }
@@ -839,6 +929,28 @@ async def get_filtered_analytics(
     workspace_config: AppConfig | None = None,
 ) -> dict:
     """Get aggregated analytics from history with the same filters used by /history."""
+    if not durable_storage_enabled():
+        return {
+            "total_records": 0,
+            "top_pairs": [],
+            "avg_score_by_exchange": [],
+            "score_distribution": {"0-20": 0, "20-40": 0, "40-60": 0, "60-80": 0, "80-100": 0},
+            "executability_distribution": {"0-40": 0, "40-60": 0, "60-80": 0, "80-100": 0},
+            "movement_distribution": {},
+            "movement_regime_distribution": {},
+            "movement_phase_distribution": {},
+            "operational_range_distribution": {},
+            "alert_moment_distribution": {},
+            "feedback_distribution": {},
+            "opportunity_type_distribution": {"trade": 0, "hold": 0, "observe": 0, "avoid": 0},
+            "opportunity_subtype_distribution": {},
+            "avg_net_trade_edge_by_type": {},
+            "hourly_distribution": {str(hour): 0 for hour in range(24)},
+            "arbitrage_count": 0,
+            "avg_cross_exchange_gap_pct": 0,
+            "profile_distribution": {},
+        }
+
     async with async_session() as session:
         query = select(
             OpportunityRecord.pair,
@@ -1002,8 +1114,209 @@ async def get_filtered_analytics(
     }
 
 
+_OUTCOME_SUCCESS_LABELS = {"excellent", "good"}
+_OUTCOME_NEGATIVE_LABELS = {"late", "false_positive"}
+
+
+def _score_bucket(score: float | None) -> str:
+    if score is None:
+        return "sem_score"
+    if score < 20:
+        return "0-20"
+    if score < 40:
+        return "20-40"
+    if score < 60:
+        return "40-60"
+    if score < 80:
+        return "60-80"
+    return "80-100"
+
+
+def _source_value(outcome: SignalOutcomeRecord, opportunity: OpportunityRecord | None, field: str, default: str) -> str:
+    value = getattr(opportunity, field, None) if opportunity is not None else None
+    if value is None and hasattr(outcome, field):
+        value = getattr(outcome, field)
+    return str(value or default)
+
+
+def _outcome_success(outcome: SignalOutcomeRecord) -> bool:
+    if outcome.outcome_label in _OUTCOME_SUCCESS_LABELS:
+        return True
+    if outcome.outcome_label in _OUTCOME_NEGATIVE_LABELS:
+        return False
+    return any(
+        (value or 0) > 0
+        for value in (
+            outcome.outcome_pct_15m,
+            outcome.outcome_pct_1h,
+            outcome.outcome_pct_4h,
+            outcome.outcome_pct_24h,
+        )
+    )
+
+
+def _add_outcome_bucket(bucket: dict, outcome: SignalOutcomeRecord) -> None:
+    bucket["count"] += 1
+    if _outcome_success(outcome):
+        bucket["success_count"] += 1
+    label = outcome.outcome_label or "pending"
+    bucket["label_distribution"][label] = bucket["label_distribution"].get(label, 0) + 1
+
+    metrics = {
+        "avg_return_15m_pct": outcome.outcome_pct_15m,
+        "avg_return_1h_pct": outcome.outcome_pct_1h,
+        "avg_return_4h_pct": outcome.outcome_pct_4h,
+        "avg_return_24h_pct": outcome.outcome_pct_24h,
+        "avg_mfe_pct": outcome.max_favorable_excursion_pct,
+        "avg_mae_pct": outcome.max_adverse_excursion_pct,
+        "avg_volume_after_signal": outcome.volume_after_signal,
+    }
+    for metric_name, metric_value in metrics.items():
+        if metric_value is None:
+            continue
+        bucket["metric_sums"][metric_name] = bucket["metric_sums"].get(metric_name, 0.0) + float(metric_value)
+        bucket["metric_counts"][metric_name] = bucket["metric_counts"].get(metric_name, 0) + 1
+
+
+def _finalize_outcome_bucket(bucket_name: str, bucket: dict) -> dict:
+    count = int(bucket["count"])
+    row = {
+        "bucket": bucket_name,
+        "count": count,
+        "success_rate": round(bucket["success_count"] / count, 4) if count else 0,
+        "label_distribution": dict(sorted(bucket["label_distribution"].items())),
+    }
+    for metric_name, metric_sum in bucket["metric_sums"].items():
+        metric_count = bucket["metric_counts"].get(metric_name, 0)
+        row[metric_name] = round(metric_sum / metric_count, 4) if metric_count else None
+    return row
+
+
+async def get_outcome_bucket_analytics(
+    exchange: str | None = None,
+    pair: str | None = None,
+    hours: int | None = 168,
+    workspace_config: AppConfig | None = None,
+) -> dict:
+    """Aggregate post-signal outcomes by operational buckets.
+
+    This is read-only and intentionally bounded. It helps calibrate whether
+    phases, types and exchanges are producing useful outcomes without writing
+    extra analytics rows.
+    """
+    now = utcnow()
+    if not durable_storage_enabled():
+        return {
+            "from": (now - timedelta(hours=hours)).isoformat() if hours else None,
+            "to": now.isoformat(),
+            "total_outcomes": 0,
+            "label_distribution": {},
+            "buckets": {
+                "exchange": [],
+                "pair": [],
+                "opportunity_type": [],
+                "opportunity_subtype": [],
+                "movement_phase": [],
+                "operational_range_quality": [],
+                "alert_moment_type": [],
+                "score_bucket": [],
+            },
+        }
+
+    async with async_session() as session:
+        query = select(SignalOutcomeRecord).order_by(desc(SignalOutcomeRecord.signal_detected_at)).limit(5000)
+        if exchange:
+            query = query.where(SignalOutcomeRecord.exchange == exchange)
+        if pair:
+            query = query.where(SignalOutcomeRecord.pair == pair)
+        if hours:
+            query = query.where(SignalOutcomeRecord.signal_detected_at >= utcnow() - timedelta(hours=hours))
+        result = await session.execute(query)
+        outcomes = list(result.scalars().all())
+
+        opportunities_by_signal: dict[str, OpportunityRecord] = {}
+        signal_ids = {row.technical_signal_id for row in outcomes if row.technical_signal_id}
+        if signal_ids:
+            opportunity_result = await session.execute(
+                select(OpportunityRecord)
+                .where(OpportunityRecord.technical_signal_id.in_(signal_ids))
+                .order_by(desc(OpportunityRecord.detected_at))
+            )
+            for opportunity in opportunity_result.scalars().all():
+                if opportunity.technical_signal_id and opportunity.technical_signal_id not in opportunities_by_signal:
+                    opportunities_by_signal[opportunity.technical_signal_id] = opportunity
+
+    filtered: list[tuple[SignalOutcomeRecord, OpportunityRecord | None]] = []
+    for outcome in outcomes:
+        opportunity = opportunities_by_signal.get(outcome.technical_signal_id)
+        if workspace_config is not None and opportunity is not None and not opportunity_matches_config(opportunity, workspace_config):
+            continue
+        filtered.append((outcome, opportunity))
+
+    groups: dict[str, dict[str, dict]] = {
+        "exchange": {},
+        "pair": {},
+        "opportunity_type": {},
+        "opportunity_subtype": {},
+        "movement_phase": {},
+        "operational_range_quality": {},
+        "alert_moment_type": {},
+        "score_bucket": {},
+    }
+    label_distribution: dict[str, int] = {}
+
+    for outcome, opportunity in filtered:
+        label = outcome.outcome_label or "pending"
+        label_distribution[label] = label_distribution.get(label, 0) + 1
+        source_fields = {
+            "exchange": _source_value(outcome, opportunity, "exchange", "unknown"),
+            "pair": _source_value(outcome, opportunity, "pair", "unknown"),
+            "opportunity_type": _source_value(outcome, opportunity, "opportunity_type", "unknown"),
+            "opportunity_subtype": _source_value(outcome, opportunity, "opportunity_subtype", "unknown"),
+            "movement_phase": _source_value(outcome, opportunity, "movement_phase", "unknown"),
+            "operational_range_quality": _source_value(outcome, opportunity, "operational_range_quality", "unknown"),
+            "alert_moment_type": _source_value(outcome, opportunity, "alert_moment_type", "unknown"),
+            "score_bucket": _score_bucket(getattr(opportunity, "score", None) if opportunity is not None else None),
+        }
+        for group_name, bucket_name in source_fields.items():
+            bucket = groups[group_name].setdefault(
+                bucket_name,
+                {
+                    "count": 0,
+                    "success_count": 0,
+                    "label_distribution": {},
+                    "metric_sums": {},
+                    "metric_counts": {},
+                },
+            )
+            _add_outcome_bucket(bucket, outcome)
+
+    return {
+        "from": (now - timedelta(hours=hours)).isoformat() if hours else None,
+        "to": now.isoformat(),
+        "total_outcomes": len(filtered),
+        "label_distribution": dict(sorted(label_distribution.items())),
+        "buckets": {
+            group_name: sorted(
+                (_finalize_outcome_bucket(bucket_name, bucket) for bucket_name, bucket in group.items()),
+                key=lambda row: row["count"],
+                reverse=True,
+            )
+            for group_name, group in groups.items()
+        },
+    }
+
+
 async def get_historical_pair_calibration(hours: int = 168) -> dict[str, dict[str, float]]:
-    """Return recent pair-level calibration data using measured signal outcomes."""
+    """Return conservative pair-level calibration using outcomes and feedback.
+
+    The returned factor intentionally has a narrow range. It is a ranking hint,
+    not an automated trading decision, and should not overpower current
+    liquidity/executability.
+    """
+    if not durable_storage_enabled():
+        return {}
+
     async with async_session() as session:
         since = utcnow() - timedelta(hours=hours)
         query = select(SignalOutcomeRecord).where(SignalOutcomeRecord.signal_detected_at >= since)
@@ -1033,17 +1346,90 @@ async def get_historical_pair_calibration(hours: int = 168) -> dict[str, dict[st
                 )
             )
             success_rate = success_count / count
-            factor = 1.0 + min(max(avg_outcome / 10.0, -0.06), 0.06) + min(max((success_rate - 0.5) * 0.12, -0.06), 0.06)
+            outcome_factor = min(max(avg_outcome / 10.0, -0.06), 0.06)
+            success_factor = min(max((success_rate - 0.5) * 0.12, -0.06), 0.06)
+            factor = 1.0 + outcome_factor + success_factor
             calibration[pair_name] = {
                 "factor": round(min(max(factor, 0.9), 1.15), 4),
                 "count": float(count),
                 "avg_outcome": round(avg_outcome, 4),
                 "success_rate": round(success_rate, 4),
+                "outcome_factor": round(outcome_factor + success_factor, 4),
+                "feedback_factor": 0.0,
+                "feedback_score": 0.0,
+                "feedback_count": 0.0,
             }
+
+        feedback_score_by_pair: dict[str, list[float]] = {}
+        feedback_weights = {
+            "useful": 0.7,
+            "good_margin": 0.8,
+            "good_for_trade": 0.6,
+            "good_for_hold": 0.5,
+            "weak": -0.4,
+            "late": -0.45,
+            "no_liquidity": -0.8,
+            "insufficient_margin": -0.7,
+            "trapped_risk": -0.8,
+            "false_positive": -1.0,
+            "ignore": -0.6,
+        }
+
+        feedback_query = (
+            select(
+                SignalFeedbackRecord.feedback_label,
+                OpportunityRecord.pair.label("opportunity_pair"),
+                TechnicalSignalRecord.pair.label("signal_pair"),
+            )
+            .outerjoin(OpportunityRecord, SignalFeedbackRecord.opportunity_id == OpportunityRecord.id)
+            .outerjoin(TechnicalSignalRecord, SignalFeedbackRecord.signal_id == TechnicalSignalRecord.id)
+            .where(SignalFeedbackRecord.created_at >= since)
+        )
+        feedback_result = await session.execute(feedback_query)
+        for feedback_label, opportunity_pair, signal_pair in feedback_result.all():
+            pair_name = opportunity_pair or signal_pair
+            if not pair_name:
+                continue
+            weight = feedback_weights.get(str(feedback_label))
+            if weight is None:
+                continue
+            feedback_score_by_pair.setdefault(str(pair_name), []).append(weight)
+
+        for pair_name, values in feedback_score_by_pair.items():
+            feedback_count = len(values)
+            if not feedback_count:
+                continue
+            avg_feedback_score = sum(values) / feedback_count
+            # Full feedback impact requires repeated evidence; one click remains a small hint.
+            confidence = min(feedback_count / 5.0, 1.0)
+            feedback_factor = min(max(avg_feedback_score * confidence * 0.04, -0.04), 0.04)
+            current = calibration.setdefault(
+                pair_name,
+                {
+                    "factor": 1.0,
+                    "count": 0.0,
+                    "avg_outcome": 0.0,
+                    "success_rate": 0.0,
+                    "outcome_factor": 0.0,
+                },
+            )
+            combined_factor = float(current.get("factor", 1.0)) + feedback_factor
+            current.update(
+                {
+                    "factor": round(min(max(combined_factor, 0.9), 1.15), 4),
+                    "feedback_factor": round(feedback_factor, 4),
+                    "feedback_score": round(avg_feedback_score, 4),
+                    "feedback_count": float(feedback_count),
+                }
+            )
         return calibration
 
 
 async def save_workspace_config(workspace_id: str, config: AppConfig) -> None:
+    if not durable_storage_enabled():
+        _memory_workspace_configs[workspace_id] = config
+        return
+
     async with async_session() as session:
         record = await session.get(WorkspaceConfigRecord, workspace_id)
         value = config.model_dump_json()
@@ -1057,6 +1443,11 @@ async def save_workspace_config(workspace_id: str, config: AppConfig) -> None:
 
 
 async def load_workspace_config(workspace_id: str) -> AppConfig | None:
+    if not durable_storage_enabled():
+        return _memory_workspace_configs.get(workspace_id) or (
+            config_from_environment() if workspace_id == DEFAULT_WORKSPACE_ID else None
+        )
+
     async with async_session() as session:
         record = await session.get(WorkspaceConfigRecord, workspace_id)
         if record:
@@ -1065,6 +1456,11 @@ async def load_workspace_config(workspace_id: str) -> AppConfig | None:
 
 
 async def load_all_workspace_configs() -> dict[str, AppConfig]:
+    if not durable_storage_enabled():
+        if _memory_workspace_configs:
+            return dict(_memory_workspace_configs)
+        return {DEFAULT_WORKSPACE_ID: config_from_environment()}
+
     async with async_session() as session:
         result = await session.execute(select(WorkspaceConfigRecord))
         rows = result.scalars().all()
@@ -1073,6 +1469,10 @@ async def load_all_workspace_configs() -> dict[str, AppConfig]:
 
 async def save_config(config: AppConfig) -> None:
     """Backward-compatible default workspace config persistence."""
+    if not durable_storage_enabled():
+        _memory_workspace_configs[DEFAULT_WORKSPACE_ID] = config
+        return
+
     async with async_session() as session:
         record = await session.get(ConfigRecord, "app_config")
         value = config.model_dump_json()
@@ -1088,6 +1488,9 @@ async def save_config(config: AppConfig) -> None:
 
 async def load_config() -> AppConfig | None:
     """Backward-compatible default workspace config loading."""
+    if not durable_storage_enabled():
+        return _memory_workspace_configs.get(DEFAULT_WORKSPACE_ID) or config_from_environment()
+
     workspace_config = await load_workspace_config(DEFAULT_WORKSPACE_ID)
     if workspace_config is not None:
         return workspace_config

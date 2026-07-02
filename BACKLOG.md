@@ -25,7 +25,7 @@ Decisoes ja tomadas:
 | UX principal | Usuario ve oportunidades; auditoria explica decisoes tecnicas |
 | Ruido tecnico | Movimentos fracos, `avoid`, margem negativa e baixa liquidez nao aparecem por padrao |
 | Alertas | Telegram deve exigir gatilho acionavel; ativo saudavel/parado pode ser observavel, mas nao alerta |
-| Arbitragem | Modelar como multi-exchange; Mercado Bitcoin e NovaDAX sao foco inicial, nao acoplamento fixo |
+| Arbitragem | Importante, mas posterior a confiabilidade da oportunidade principal; Mercado Bitcoin e NovaDAX sao foco inicial, sem acoplamento fixo futuro |
 
 ---
 
@@ -55,6 +55,7 @@ Decisoes ja tomadas:
 - [x] Metricas compactas de qualidade do funil em `GET /api/diagnostics/funnel-quality`.
 - [x] Primeira camada da taxonomia operacional expandida com `opportunity_subtype`, mantendo `opportunity_type` compativel.
 - [x] Primeira camada de tese operacional para dashboard, detalhe e Telegram: status de acao, familia da oportunidade, entrada, saida, tamanho sugerido, liquidez, risco e motivo principal.
+- [x] Primeira camada de runtime memory-first: `STORAGE_MODE=memory|noop` permite API/scanner subirem sem banco, com config de ambiente, runtime state, snapshots atuais, cooldowns/repeticao, auditoria recente em memoria, health enriquecido, guards de rotas administrativas e avisos de UI para recursos degradados.
 
 ---
 
@@ -62,7 +63,43 @@ Decisoes ja tomadas:
 
 Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEMENTACAO.md`. Esta secao consolida o que ainda falta para o produto aderir totalmente a definicao final do assistente operacional.
 
-### Pendencias P0 / P1 Operacionais
+### Pendencias P0 Operacionais Da Proxima Sprint
+
+Regra central da proxima sprint:
+
+> Se o sistema nao consegue explicar uma operacao concreta, ele nao deve alertar.
+
+- [~] **Reduzir ruido operacional remanescente**
+  Revisar API, dashboard, WebSocket, historico operacional e Telegram para garantir que moeda parada, preparation, accumulation sem gatilho, margem ruim, baixa liquidez e sinal sem saida clara nao aparecam como oportunidade principal.
+  Criterio de aceite: a shortlist principal nao exibe item sem acao concreta, motivo, risco e condicao de saida.
+  Status: Telegram agora exige tese operacional concreta antes de enviar alerta; dashboard separa oportunidades acionaveis de observacao/auditoria. Ainda falta revisar WebSocket/historico com a mesma segmentacao visual e validar em browser com dados reais.
+
+- [x] **Bloqueio final de alertas sem tese concreta**
+  Criar ou reforcar um guardrail central antes do Telegram: todo alerta precisa ter entrada, saida, tamanho sugerido, risco, motivo principal, gatilho acionavel e facilidade minima de saida.
+  Criterio de aceite: preparation/accumulation/observavel sem gatilho ficam bloqueados com motivo claro, mesmo que score tecnico seja alto.
+  Status: `has_concrete_operational_thesis()` valida entrada, saida, tamanho sugerido, risco, motivo, status acionavel e liquidez minima antes de permitir Telegram.
+
+- [~] **Consolidar tese operacional por oportunidade**
+  Garantir que `operation_status`, `opportunity_family`, `entry_zone`, `exit_zone`, `suggested_capital_range_brl`, `liquidity_label`, `risk_label`, `main_reason` e `actionability_label` sejam consistentes e suficientes para decisao rapida.
+  Criterio de aceite: qualquer card/modal/Telegram responde "por que olhar?", "onde entraria?", "onde sairia?", "quanto cabe?", "qual o risco?".
+  Status: a tese ja alimenta dashboard, detalhe e Telegram; o bloqueio de alerta agora reprova sinais sem tese completa. Ainda falta revisar todos os textos da UI para reduzir ambiguidade para usuario nao tecnico.
+
+- [~] **Ranking operacional focado em saida**
+  Ajustar ranking para priorizar volume, liquidez, margem liquida, slippage de entrada/saida, spread e facilidade de vender, penalizando movimento bonito sem volume.
+  Criterio de aceite: ativos com volatilidade sem volume/liquidez caem para observar/evitar; ativos liquidos com movimento util sobem mesmo com variacao percentual menor.
+  Status: ranking backend/frontend passou a ponderar volume em BRL, profundidade de book, tamanho maximo operavel, margem liquida, slippage de venda, spread e gatilho acionavel. Ainda falta calibrar pesos com dados reais/outcomes.
+
+- [x] **Dashboard em tres blocos operacionais**
+  Separar a primeira tela em: `Oportunidades agora`, `So observar` e `Auditoria/Evitar`.
+  Criterio de aceite: o usuario nao precisa interpretar uma lista misturada; sinais sem acao concreta ficam fora do bloco principal.
+  Status: dashboard principal foi separado em tres blocos, usando bucket operacional derivado no frontend e mantendo auditoria tecnica fora da lista principal.
+
+- [~] **Tela simples de "por que nao alertou?"**
+  Criar tela operacional separada de Settings para investigar par/janela e mostrar catalogo, scan, bloqueio, ranking, shortlist, alerta e Telegram em linguagem simples.
+  Criterio de aceite: usuario consegue responder rapidamente se nao alertou por catalogo, provider, filtro, ranking, workspace, cooldown, falta de gatilho ou Telegram.
+  Status: criada a rota `/diagnostics` com modo `Visao geral` por periodo/workspace e modo `Par especifico`. A tela mostra conclusao operacional, proximo passo recomendado, workspace, catalogo, alerta, qualidade do funil, gargalos agregados, near misses, ciclos e timeline. Ainda falta validar a linguagem com dados reais de producao e decidir se o bloco legado em Settings deve ser removido ou mantido como atalho administrativo.
+
+### Pendencias P1 Operacionais
 
 - [~] **Taxonomia operacional expandida** — refs. 96, 103, 104
   Evoluir `trade`, `hold`, `observe`, `avoid` para tipos mais precisos: `directional_trade`, `range_trade`, `hold_continuation`, `breakout_trade`, `intra_exchange_spread`, `book_scalping`, `cross_exchange_arbitrage`, `inventory_arbitrage`, `transfer_arbitrage`, `profit_zone`, `observe_only`, `avoid`.
@@ -70,12 +107,15 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 
 - [ ] **Spread interno e book scalping** — refs. 97, 100, 101
   Detectar spread dentro da mesma exchange, medir margem liquida, profundidade em book, repeticao, fase do spread e bloquear falso spread sem liquidez.
+  Prioridade: depois da consolidacao da oportunidade principal.
 
 - [ ] **Arbitragem multi-exchange** — refs. 98, 99, 101, feedback do usuario
   Generalizar arbitragem para qualquer combinacao de exchanges habilitadas, nao apenas Mercado Bitcoin x NovaDAX, separando `inventory_arbitrage`, `transfer_arbitrage` e `cross_exchange_spread`.
+  Prioridade: depois da consolidacao da oportunidade principal.
 
 - [ ] **Fases do spread e alertas de spread** — refs. 100, 101
   Classificar `normal_spread`, `spread_opening`, `spread_operable`, `spread_peak`, `spread_closing`, `spread_stale`, `false_spread`, `illiquid_spread` e alertar apenas quando houver margem operacional real.
+  Prioridade: depois da consolidacao da oportunidade principal.
 
 - [ ] **Thresholds contextuais por tipo de oportunidade** — refs. 10, 11, 12, 74, 102
   Substituir cortes rigidos globais por reguas contextuais considerando ativo, liquidez, tamanho de ordem, fase do movimento, tipo de oportunidade e risco de execucao.
@@ -87,8 +127,9 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 - [ ] **Refino de lateralizacao + rompimento** — refs. 50, 59, 60, 61
   Melhorar deteccao de compressao, rompimento, continuacao, faixa operacional reaproveitavel, zona de compra/venda e risco de movimento esticado.
 
-- [ ] **Ranking usando outcomes e feedbacks de forma ativa** — refs. 62, 63, 89
+- [~] **Ranking usando outcomes e feedbacks de forma ativa** — refs. 62, 63, 89
   Outcomes e feedback manual ja existem, mas ainda precisam influenciar ranking, calibragem e reducao de falsos positivos/falsos negativos com limites e versao.
+  Status: `get_historical_pair_calibration()` agora combina outcomes medidos e feedback manual por par em um fator conservador, limitado e versionado como `v2_outcome_feedback`. Ainda falta expor explicabilidade detalhada do fator na UI e calibrar limites com dados reais.
 
 - [x] **Persistencia de cooldown/temperatura por provider/par** — refs. 37, 84, 90
   Persistir estado `hot`, `warm`, `cold`, falhas recorrentes e cooldown tecnico para sobreviver a restart do worker.
@@ -96,14 +137,16 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 
 ### Pendencias De Auditoria, UX E Produto
 
-- [ ] **Tela dedicada de auditoria operacional** — refs. 75, 88, 89, 103
+- [~] **Tela dedicada de auditoria operacional** — refs. 75, 88, 89, 103
   Tirar a auditoria de dentro de Settings e criar tela propria com funil por ciclo, bloqueios, near misses, alertas enviados e gargalos.
+  Status: primeira tela dedicada `/diagnostics` cobre visao global por periodo/workspace, sinal perdido por par/janela, qualidade do funil, near misses e gargalos agregados. Ainda falta validar com dados reais e evoluir para analise comparativa entre ciclos.
 
 - [ ] **Dashboard por tipo de oportunidade** — refs. 18, 88, 103
-  Separar visualmente oportunidades direcionais, faixas operacionais, spread interno, arbitragem multi-exchange, observaveis e auditoria tecnica.
+  Separar visualmente primeiro em `Oportunidades agora`, `So observar` e `Auditoria/Evitar`; depois expandir familias como direcional, faixa, spread interno e arbitragem.
 
-- [ ] **Historico operacional com filtros ricos** — refs. 82, 88, 103
+- [~] **Historico operacional com filtros ricos** — refs. 82, 88, 103
   Adicionar filtros por direcional, faixa, spread interno, arbitragem, alerta, bloqueado, descartado, fase, motivo e outcome.
+  Status: frontend do historico agora filtra por exchange, par, score minimo, estado do pipeline, tipo operacional, fase do movimento, risco, motivo de bloqueio, outcome e feedback. Ainda falta adicionar familias futuras de spread/arbitragem quando esses modulos estiverem maduros.
 
 - [ ] **Detalhe de oportunidade completo por decisao** — refs. 19, 61, 101, 103
   Mostrar dados usados, gatilho, liquidez, margem bruta/liquida, risco, necessidade de ordem limitada, dependencia de transferencia e motivo de alerta/bloqueio.
@@ -116,6 +159,7 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 
 - [ ] **Benchmark de egress por tela e governanca de retencao** — refs. 27-33, 84, 90
   Medir payloads por tela, validar TTLs em producao e garantir que novos endpoints nao reintroduzam datasets brutos.
+  Status parcial: worker agora suporta modo economico com auditoria compacta, `raw_market_observations` opt-in, TTLs configuraveis e cadencia reduzida para persistencia de estado.
 
 ### Pendencias Estruturais Futuras
 
@@ -148,7 +192,7 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
   Status: `operational_score` agora e campo explicito em oportunidades/snapshots/API/frontend, enquanto `alert_worthiness_score` mede urgencia do Telegram.
 
 - [x] **Gatilhos acionaveis de alerta**
-  Exigir gatilho claro para Telegram: rompimento inicial, continuacao com margem, momentum direcional com volume, arbitragem/spread acionavel ou faixa operacional com margem.
+  Exigir gatilho claro para Telegram: rompimento inicial, continuacao com margem, momentum direcional com volume ou faixa operacional com margem. Arbitragem/spread entram depois como familias especificas, sem dirigir a proxima sprint.
   Criterio de aceite: todo alerta enviado tem `alert_trigger_type` e motivo compreensivel.
   Status: primeira versao cobre `early_breakout`, `continuation`, `directional_momentum`, `range_trade` e `cross_exchange_arbitrage`, persistindo `alert_trigger_type`, `has_actionable_trigger`, `alert_state_key` e `alert_block_reason`.
 
@@ -161,10 +205,6 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
   Evitar alertas repetidos da mesma fase para o mesmo par.
   Criterio de aceite: `repeated_same_phase_alert` aparece na auditoria quando o estado nao mudou desde o ultimo alerta.
   Status: Telegram bloqueia repeticao do mesmo `alert_state_key` por destino/par e registra `no_state_change` na auditoria.
-
-- [ ] **Arbitragem multi-exchange**
-  Evoluir arbitragem para pares comuns entre todas as exchanges habilitadas, sem acoplamento fixo MB x NovaDAX.
-  Criterio de aceite: o motor calcula oportunidades entre qualquer combinacao de exchanges habilitadas e separa `inventory_arbitrage`, `transfer_arbitrage` e `cross_exchange_spread`.
 
 ### Separacao Entre Oportunidade E Registro Tecnico
 
@@ -239,6 +279,7 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 - [ ] **Retencao da auditoria validada em producao**
   Validar `run_audit_retention_if_due` e politicas de retencao em API/worker com volume real.
   Criterio de aceite: eventos detalhados expiram conforme TTL e resumos por ciclo continuam disponiveis.
+  Status parcial: TTLs de `signal_pipeline_events` e `scanner_cycle_audits` agora sao configuraveis por env e cobertos por teste automatizado; falta validar em banco ativo.
 
 ### Persistencia De Estado Operacional
 
@@ -255,6 +296,7 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 - [ ] **Persistir agregados seletivos de descartes**
   Manter agregados por ciclo/exchange/par sem gravar dados brutos pesados.
   Criterio de aceite: analytics de descarte continua disponivel sem inflar Supabase.
+  Status parcial: modo `compact` preserva descartes agregados em `scanner_cycle_audits` e evita persistir descartes comuns como eventos individuais.
 
 ### Producao
 
@@ -338,17 +380,19 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 
 ## P1 - Analytics, Outcomes E Feedback
 
-- [ ] **Analytics de outcomes por bucket**
+- [~] **Analytics de outcomes por bucket**
   Agregar por exchange, par, tipo de oportunidade, fase, faixa operacional, score, perfil e momento do alerta.
   Criterio de aceite: dashboard interno responde "quais tipos de sinal funcionam?".
+  Status: primeira versao adiciona `/api/analytics/outcomes` e bloco sob demanda no Historico, agregando outcomes por exchange, par, tipo, subtipo, fase, faixa operacional, momento do alerta e bucket de score. Ainda falta corte por perfil/workspace materializado e comparativo direto com feedback manual.
 
 - [ ] **Relatorio de sinais uteis vs falsos positivos**
   Mostrar win rate, retorno medio, MFE/MAE, labels de outcome e feedback manual.
   Criterio de aceite: usuario consegue avaliar qualidade historica do motor.
 
-- [ ] **Calibracao conservadora por outcomes**
+- [~] **Calibracao conservadora por outcomes**
   Evoluir `historical_confidence` para considerar buckets de outcome reais com limites de variacao seguros.
   Criterio de aceite: ranking melhora com dados reais sem oscilacoes extremas.
+  Status: `historical_confidence` agora combina outcomes recentes e feedback manual por par com limites conservadores e versao `v2_outcome_feedback`. Ainda falta evoluir para buckets por tipo/fase/perfil.
 
 - [ ] **Feedback manual em analytics**
   Expandir `feedback_distribution` para cortes por par, exchange, workspace e tipo de sinal.
@@ -369,7 +413,7 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 - [~] **Dashboard como lista de oportunidades operacionais**
   Redesenhar a tela principal para responder "o que merece atencao agora?", nao "tudo que o scanner viu".
   Criterio de aceite: a primeira tela mostra shortlist limpa, motivo resumido, score operacional, liquidez, margem, fase e risco.
-  Status: lista e modal passaram a exibir status operacional, familia, motivo, entrada, saida, tamanho sugerido, liquidez e risco. Ainda falta reorganizar a tela em blocos separados por tipo de oportunidade e auditoria.
+  Status: lista e modal passaram a exibir status operacional, familia, motivo, entrada, saida, tamanho sugerido, liquidez e risco. Ainda falta reorganizar a tela em `Oportunidades agora`, `So observar` e `Auditoria/Evitar`.
 
 - [ ] **Filtros de visibilidade operacional**
   Adicionar filtros: Oportunidades, Candidatos, Observaveis, Alertados, Descartados, Bloqueados e Auditoria.
@@ -391,9 +435,10 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
   Mostrar principais fatores que colocaram um sinal acima de outro: liquidez, margem, fase, score, outcome, feedback.
   Criterio de aceite: usuario entende por que uma oportunidade foi ranqueada no topo.
 
-- [ ] **Historico operacional melhorado**
+- [~] **Historico operacional melhorado**
   Filtros por fase, faixa operacional, momento do alerta, outcome label, feedback e motivo de bloqueio.
   Criterio de aceite: historico vira ferramenta de analise operacional, nao apenas lista de sinais.
+  Status: filtros por exchange, par, score minimo, estado do pipeline, tipo operacional, fase do movimento, risco, motivo de bloqueio, outcome e feedback foram adicionados.
 
 - [ ] **Tela de calibragem de near misses**
   Criar visualizacao tecnica para sinais quase bons e sua distancia dos thresholds.
@@ -403,9 +448,10 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 
 ## P2 - Aprendizado E Evolucao Do Motor
 
-- [ ] **Ranking adaptativo por feedback**
+- [~] **Ranking adaptativo por feedback**
   Usar feedback manual para ajustar pesos e reduzir falsos positivos recorrentes.
   Criterio de aceite: feedback afeta ranking apenas com limites, versao e auditoria.
+  Status: feedback por par agora influencia `historical_confidence` com impacto maximo pequeno, dependente de repeticao e limitado por fator global.
 
 - [ ] **Ranking adaptativo por falso negativo**
   Comparar eventos "deveria ter avisado" com pipeline e ajustar thresholds.
@@ -431,6 +477,11 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 
 ## P2 - Persistencia, Custo E Egress
 
+- [~] **Runtime memory-first com persistencia opcional**
+  Remover banco do caminho critico do produto principal: scanner, dashboard, Telegram, catalogo, cooldowns e oportunidades atuais devem funcionar sem Postgres/Supabase.
+  Criterio de aceite: `STORAGE_MODE=memory` sobe API com scanner local, mostra oportunidades atuais, envia Telegram e mantem auditoria recente sem executar migrations.
+  Status: primeira camada adiciona `STORAGE_MODE`, `init_db()` opcional, config default por ambiente, runtime/snapshots/cooldowns/repeticao/auditoria recente em memoria, retornos vazios para historico/analytics/outcomes quando nao ha storage duravel, `health` com status dos buffers, guards `409` para recursos administrativos duraveis e avisos no frontend. Ainda falta extrair interfaces formais de storage, implementar/adaptar adapters `MemoryStorage`, `NoopStorage`, `SQLiteStorage` e criar push/estado compartilhado se API e worker forem separados.
+
 - [ ] **Catalogo persistido em banco, se necessario**
   Migrar cache em memoria para banco apenas se volume/instancias exigirem.
   Criterio de aceite: catalogo sobrevive a restart e mantem ultimo estado valido sem custo excessivo.
@@ -438,6 +489,7 @@ Leitura feita a partir de `docs/superpowers/plans/ESPECIFICACAO_COMPLETA_IMPLEME
 - [ ] **Governanca completa de retencao por camada**
   Definir TTL para `raw_market_observations`, `opportunities`, `technical_signals`, `workspace_signal_projections`, `signal_outcomes`, auditoria e agregados.
   Criterio de aceite: pruning/compactacao roda automaticamente e preserva agregados importantes.
+  Status parcial: `opportunities`, `technical_signals`, `workspace_signal_projections`, `raw_market_observations` e `signal_outcomes` seguem `HISTORY_RETENTION_DAYS`; eventos e ciclos de auditoria agora possuem TTLs proprios; falta politica diferenciada por camada para longo prazo.
 
 - [ ] **Materializacoes ou agregados para analytics pesados**
   Evitar consultas longas no Supabase para dashboard/analytics.
@@ -540,20 +592,21 @@ Nao implementar antes de validar o produto de monitoramento com usuarios reais.
 
 ## Ordem Recomendada De Execucao
 
-1. Criar estado explicito do pipeline e portao central de oportunidade operacional.
-2. Fazer dashboard/API/Telegram ocultarem ruido tecnico por padrao.
-3. Separar historico operacional de auditoria tecnica.
-4. Implementar near misses compactos e metricas de qualidade do funil.
-5. Periodo customizado e enriquecimento do diagnostico de sinal perdido.
-6. Explicabilidade por workspace e motivos completos de bloqueio de alerta.
-7. Persistencia de cooldown/temperatura por provider/par.
-8. Tela dedicada de auditoria operacional com funil por ciclo.
-9. Refinamento de lateralizacao/rompimento e scores de fase/faixa.
-10. Analytics de outcomes/feedback/falsos positivos.
-11. Fluxo de falso negativo marcado pelo usuario.
-12. Governanca de retencao por camada e benchmark de egress.
-13. Feature gates por plano e Stripe.
-14. Paper trading somente depois que outcomes e auditoria estiverem maduros.
+1. Reduzir ruido operacional remanescente em API, dashboard, historico operacional e Telegram.
+2. Bloquear moeda parada, preparation e accumulation sem gatilho acionavel.
+3. Consolidar a tese operacional por oportunidade: entrada, saida, tamanho sugerido, risco, motivo e facilidade de saida.
+4. Reforcar a regra: se nao ha operacao concreta explicavel, nao ha alerta.
+5. Melhorar ranking operacional com foco em volume, liquidez, margem, slippage, spread e facilidade de vender.
+6. Separar dashboard em `Oportunidades agora`, `So observar` e `Auditoria/Evitar`.
+7. Criar tela simples de "por que nao alertou?" fora de Settings.
+8. Refinar lateralizacao/rompimento e scores de fase/faixa.
+9. Analytics de outcomes/feedback/falsos positivos.
+10. Fluxo de falso negativo marcado pelo usuario.
+11. Governanca de retencao por camada e benchmark de egress.
+12. Spread interno/book scalping.
+13. Arbitragem multi-exchange e tipos com inventario/transferencia.
+14. Feature gates por plano e Stripe.
+15. Paper trading somente depois que outcomes e auditoria estiverem maduros.
 
 ---
 

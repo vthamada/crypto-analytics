@@ -1447,3 +1447,40 @@ O sistema estará alinhado quando conseguir:
 ## 29. Definição final do sistema
 
 > **Um radar operacional de cripto BRL, focado inicialmente em Mercado Bitcoin e NovaDAX, que monitora pares relevantes, identifica faixas de compra/venda, spreads internos, arbitragem entre exchanges, rompimentos e mudanças de regime, filtra por volume e liquidez, calcula margem líquida e capital suportado, entrega apenas alertas acionáveis e mantém auditoria para explicar por que alertou, bloqueou ou descartou cada oportunidade.**
+
+---
+
+## Decisao de prioridade da proxima sprint
+
+A proxima etapa nao deve comecar por arbitragem multi-exchange como P0 principal.
+
+Arbitragem Mercado Bitcoin/NovaDAX, arbitragem multi-exchange, spread interno e book scalping continuam importantes, mas entram depois que a camada principal de oportunidade estiver confiavel.
+
+Prioridade imediata:
+
+1. Reduzir ruido operacional.
+2. Bloquear moeda parada, `preparation` e `accumulation` sem gatilho.
+3. Consolidar a tese operacional por oportunidade.
+4. Garantir que cada alerta tenha entrada, saida, tamanho sugerido, risco e motivo.
+5. Melhorar ranking operacional com foco em volume, liquidez, margem e facilidade de saida.
+6. Separar dashboard em `Oportunidades agora`, `So observar` e `Auditoria/Evitar`.
+7. Criar uma tela simples de "por que nao alertou?".
+
+Regra central:
+
+> Se o sistema nao consegue explicar uma operacao concreta, ele nao deve alertar.
+
+Foco da sprint: produto/UX operacional e confiabilidade da oportunidade principal, nao complexidade nova.
+
+Status inicial ja implementado nesta direcao:
+
+- Telegram bloqueia alerta sem tese operacional concreta.
+- A tese minima exige entrada, saida, tamanho sugerido, risco, motivo, gatilho acionavel e liquidez minima.
+- O ranking operacional passou a considerar mais fortemente volume em BRL, profundidade do book, tamanho maximo operavel, margem liquida, slippage de venda, spread e gatilho acionavel.
+- Dashboard principal foi dividido em `Oportunidades agora`, `So observar` e `Auditoria/Evitar`.
+- A primeira versao da tela simples de "por que nao alertou?" existe em `/diagnostics`, reaproveitando a auditoria tecnica compacta em modo geral por periodo/workspace ou por exchange/par/janela.
+- A tela ja mostra qualidade do funil, gargalos agregados, near misses, ciclos e timeline para o filtro informado.
+- A evolucao pendente e validar a linguagem com dados reais e transformar os ciclos em comparacao temporal de gargalos.
+- Outcomes e feedbacks ja entram no ranking como calibragem conservadora por par em `historical_confidence`, com versao `v2_outcome_feedback`.
+- A primeira versao de analytics de outcomes por bucket existe em `/api/analytics/outcomes` e na tela de Historico sob demanda, com cortes por exchange, par, tipo, subtipo, fase, faixa operacional, momento do alerta e bucket de score.
+- Ainda falta transformar esses buckets em calibragem automatica por tipo/fase/perfil e cruzar feedback manual diretamente nos mesmos cortes.

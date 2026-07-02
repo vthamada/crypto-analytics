@@ -9,6 +9,7 @@ _DEFAULT_DB = f"sqlite+aiosqlite:///{_BASE_DIR / 'crypto_analytics.db'}"
 class Settings(BaseSettings):
     # Database
     database_url: str = _DEFAULT_DB
+    storage_mode: str = "auto"  # auto, postgres, sqlite, memory, noop
 
     # Admin
     admin_token: str = ""
@@ -40,6 +41,16 @@ class Settings(BaseSettings):
     history_retention_days: int = 90
     history_retention_check_minutes: int = 60
     scanner_enabled: bool = True
+    raw_market_observations_enabled: bool = False
+    raw_market_observation_min_interval_seconds: int = 300
+    pipeline_audit_enabled: bool = True
+    pipeline_audit_mode: str = "compact"  # compact, full, off
+    pipeline_event_retention_days: int = 7
+    scanner_cycle_audit_retention_days: int = 30
+    repetition_persist_interval_seconds: int = 300
+    scanner_state_persist_interval_seconds: int = 300
+    runtime_memory_event_limit: int = 2000
+    runtime_memory_cycle_limit: int = 200
 
     # Default filter thresholds
     min_volatility_pct: float = 3.0
@@ -76,6 +87,19 @@ class Settings(BaseSettings):
     @property
     def effective_auth_secret(self) -> str:
         return self.auth_secret_key or self.admin_token
+
+    @property
+    def resolved_storage_mode(self) -> str:
+        mode = (self.storage_mode or "auto").strip().lower()
+        if mode != "auto":
+            return mode
+        if self.database_url.startswith("sqlite"):
+            return "sqlite"
+        return "postgres"
+
+    @property
+    def durable_storage_enabled(self) -> bool:
+        return self.resolved_storage_mode not in {"memory", "noop"}
 
 
 settings = Settings()

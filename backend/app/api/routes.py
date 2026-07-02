@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from typing import Literal
 
@@ -75,6 +76,7 @@ from app.services.shared_state import (
     get_funnel_quality_metrics,
     get_missed_signal_diagnostic,
     get_near_misses,
+    get_runtime_memory_status,
     get_scanner_runtime_state,
     read_opportunity_snapshots,
 )
@@ -84,6 +86,7 @@ from app.services.persistence import (
     get_workspace_operability_fields,
     get_history,
     get_history_summary,
+    get_outcome_bucket_analytics,
     get_workspace_score,
     load_config,
     load_workspace_config,
@@ -382,6 +385,18 @@ def require_workspace_owner_role(workspace: WorkspaceSummary) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace owner role required")
 
 
+def require_durable_storage(feature: str) -> None:
+    if settings.durable_storage_enabled:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            f"{feature} requires durable storage. Current STORAGE_MODE="
+            f"{settings.resolved_storage_mode}; use postgres/sqlite for this feature."
+        ),
+    )
+
+
 class ConfigUpdate(BaseModel):
     thresholds: FilterThresholds | None = None
     weights: ScoreWeights | None = None
@@ -445,6 +460,17 @@ async def build_workspace_status_response(
             "binance": bool(config.binance_api_key and config.binance_api_secret),
         },
         "onboarding_completed_at": session_metadata.get("onboarding_completed_at"),
+        "storage_mode": settings.resolved_storage_mode,
+        "durable_storage_enabled": settings.durable_storage_enabled,
+        "degraded_features": [] if settings.durable_storage_enabled else [
+            "users",
+            "invites",
+            "admin_audit_log",
+            "password_persistence",
+            "long_history",
+            "outcomes",
+            "long_analytics",
+        ],
     }
 
 
@@ -507,6 +533,7 @@ async def auth_refresh(payload: RefreshTokenRequest):
 
 @router.get("/invites/{code}", response_model=InvitePreviewResponse)
 async def invite_preview(code: str):
+    require_durable_storage("Invite preview")
     try:
         return await get_invite_preview(code)
     except LookupError as exc:
@@ -515,6 +542,7 @@ async def invite_preview(code: str):
 
 @router.post("/invites/accept")
 async def invite_accept(payload: InviteAcceptRequest):
+    require_durable_storage("Invite acceptance")
     try:
         session_info = await accept_invite(code=payload.code, email=payload.email, password=payload.password)
     except LookupError as exc:
@@ -546,6 +574,7 @@ async def auth_change_password(
     payload: PasswordChangeRequest,
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_durable_storage("Password change")
     try:
         updated_session = await change_admin_password(
             actor=session_info,
@@ -583,6 +612,7 @@ async def workspace_status(
 
 @router.post("/onboarding/complete")
 async def onboarding_complete(session_info: UserSession = Depends(require_user_session)):
+    require_durable_storage("Onboarding completion")
     try:
         return await mark_onboarding_completed(actor=session_info)
     except LookupError as exc:
@@ -594,6 +624,7 @@ async def create_workspace(
     payload: WorkspaceCreateRequest,
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_durable_storage("Workspace creation")
     try:
         workspace = await create_workspace_for_user(session_info, payload.name)
     except ValueError as exc:
@@ -606,6 +637,7 @@ async def list_users_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_durable_storage("User management")
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
     require_workspace_owner_role(workspace)
     return await list_users_for_workspace(workspace.id)
@@ -617,6 +649,7 @@ async def create_user_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_durable_storage("User management")
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
     require_workspace_owner_role(workspace)
     try:
@@ -641,6 +674,7 @@ async def list_invites_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_durable_storage("Invite management")
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
     require_workspace_owner_role(workspace)
     try:
@@ -657,6 +691,7 @@ async def create_invite_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_durable_storage("Invite management")
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
     require_workspace_owner_role(workspace)
     try:
@@ -682,6 +717,7 @@ async def update_user_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_durable_storage("User management")
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
     require_workspace_owner_role(workspace)
     try:
@@ -705,6 +741,7 @@ async def reset_user_password_endpoint(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_durable_storage("User management")
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
     require_workspace_owner_role(workspace)
     try:
@@ -726,6 +763,7 @@ async def admin_audit_log(
     x_workspace_id: str | None = Header(default=None),
     session_info: UserSession = Depends(require_user_session),
 ):
+    require_durable_storage("Admin audit log")
     workspace, _ = await resolve_workspace_context(session_info, x_workspace_id)
     require_workspace_admin_role(workspace)
     return await list_audit_logs(workspace_id=workspace.id, limit=limit)
@@ -767,15 +805,34 @@ def _opportunity_sort_value(opportunity: Opportunity, sort_by: str) -> float:
         type_bonus = {"trade": 5.0, "hold": 4.0, "observe": -2.0, "avoid": -12.0}
         phase = opportunity.movement_phase.value if hasattr(opportunity.movement_phase, "value") else opportunity.movement_phase
         late_penalty = -8.0 if opportunity.is_late_entry_risk else 0.0
+        quote_volume = max(float(opportunity.quote_volume_24h or 0.0), 1.0)
+        total_notional = float(opportunity.total_notional_top_n or 0.0)
+        max_order = float(opportunity.max_operable_order_notional_brl or 0.0)
+        sell_slippage = opportunity.estimated_sell_slippage_bps
+        exit_liquidity_bonus = min(math.log10(max(quote_volume, 1.0) / 1_000.0) * 5.0, 14.0)
+        exit_liquidity_bonus = max(exit_liquidity_bonus, -8.0)
+        book_depth_bonus = min(total_notional / 5_000.0, 10.0) + min(max_order / 1_000.0, 8.0)
+        margin_bonus = min(max(opportunity.estimated_net_trade_edge_pct or 0.0, 0.0) * 8.0, 12.0)
+        slippage_penalty = min(max(float(sell_slippage or 0.0), 0.0) / 20.0, 12.0)
+        spread_penalty = min(float(opportunity.spread_pct or 0.0) * 4.0, 10.0)
+        no_trigger_penalty = -10.0 if not opportunity.has_actionable_trigger else 0.0
+        poor_size_penalty = -12.0 if opportunity.operability_size_label == "not_operable" else 0.0
         return (
-            opportunity.score
-            + ((opportunity.executability_score or 0.0) * 0.12)
-            + ((opportunity.trade_margin_score or 0.0) * 0.08)
+            (opportunity.operational_score if opportunity.operational_score is not None else opportunity.score)
+            + ((opportunity.executability_score or 0.0) * 0.18)
+            + ((opportunity.trade_margin_score or 0.0) * 0.1)
             + min(max(opportunity.operational_range_margin_pct or 0.0, 0.0), 20.0) * 0.3
+            + exit_liquidity_bonus
+            + book_depth_bonus
+            + margin_bonus
             + phase_bonus.get(str(phase), 0.0)
             + range_bonus.get(opportunity.operational_range_quality or "none", 0.0)
             + type_bonus.get(opportunity.opportunity_type or "observe", 0.0)
             + late_penalty
+            + no_trigger_penalty
+            + poor_size_penalty
+            - slippage_penalty
+            - spread_penalty
         )
     sort_keys = {
         "executability": lambda item: item.executability_score if item.executability_score is not None else -1,
@@ -806,6 +863,7 @@ def _summarize_opportunity(opportunity: Opportunity) -> OpportunitySummary:
         score=opportunity.score,
         technical_score=opportunity.technical_score,
         operational_score=opportunity.operational_score if opportunity.operational_score is not None else opportunity.score,
+        reweighting_version=opportunity.reweighting_version,
         executability_score=opportunity.executability_score,
         executability_band=opportunity.executability_band,
         trade_margin_score=opportunity.trade_margin_score,
@@ -1148,6 +1206,24 @@ async def operational_analytics(
     )
 
 
+@router.get("/analytics/outcomes")
+async def outcome_analytics(
+    exchange: str | None = None,
+    pair: str | None = None,
+    hours: int | None = Query(default=168, ge=1, le=720),
+    x_workspace_id: str | None = Header(default=None),
+    session_info: UserSession = Depends(require_user_session),
+):
+    workspace, config = await resolve_workspace_context(session_info, x_workspace_id)
+    require_workspace_admin_role(workspace)
+    return await get_outcome_bucket_analytics(
+        exchange=exchange,
+        pair=pair,
+        hours=hours,
+        workspace_config=config,
+    )
+
+
 @router.get("/pairs/available", response_model=AvailablePairsResponse)
 async def available_pairs(
     force_refresh: bool = Query(default=False),
@@ -1346,9 +1422,17 @@ async def health():
     runtime = scan_monitor.snapshot()
     scanner_state = await get_scanner_runtime_state()
     has_local_scanner = _last_scan is not None
+    memory_only_requires_local_scanner = not settings.durable_storage_enabled
     return {
         "status": "ok",
         "mode": "scanner" if has_local_scanner else "api_only",
+        "storage_mode": settings.resolved_storage_mode,
+        "durable_storage_enabled": settings.durable_storage_enabled,
+        "scanner_enabled": settings.scanner_enabled,
+        "memory_runtime": get_runtime_memory_status(),
+        "warnings": [
+            "STORAGE_MODE=memory/noop does not share state between API and worker; run scanner in the API process."
+        ] if memory_only_requires_local_scanner and not has_local_scanner else [],
         "last_scan": _last_scan.isoformat() if _last_scan else None,
         "opportunities_count": len(_current_opportunities),
         "scanner": runtime,

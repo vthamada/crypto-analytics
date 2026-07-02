@@ -7,6 +7,7 @@ import {
   BookOpen,
   History,
   LayoutDashboard,
+  Search,
   Settings,
   Zap,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import type { WorkspaceSummary } from "@/lib/types";
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/history", label: "Histórico", icon: History },
+  { href: "/diagnostics", label: "Diagnostico", icon: Search },
   { href: "/settings", label: "Configurações", icon: Settings },
   { href: "/help", label: "Ajuda", icon: BookOpen },
 ];
@@ -111,7 +113,7 @@ export function Header() {
               </select>
             ) : null}
 
-            <nav className="grid grid-cols-4 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1 sm:flex sm:items-center sm:gap-1 sm:border-0 sm:bg-transparent sm:p-0">
+            <nav className="grid grid-cols-5 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1 sm:flex sm:items-center sm:gap-1 sm:border-0 sm:bg-transparent sm:p-0">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = pathname === item.href;

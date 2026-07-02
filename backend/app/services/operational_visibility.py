@@ -296,6 +296,33 @@ def build_operational_thesis(data: Mapping[str, Any] | Opportunity) -> dict[str,
     }
 
 
+def has_concrete_operational_thesis(data: Mapping[str, Any] | Opportunity) -> tuple[bool, str | None, dict[str, Any]]:
+    """Validate whether a signal can be explained as a concrete operation.
+
+    Alerts must not be based only on score or generic movement. They need the
+    minimum operational thesis a human can act on: entry, exit, capital size,
+    risk, reason, and sufficient exit liquidity.
+    """
+    thesis = build_operational_thesis(data)
+    required_fields = {
+        "entry_zone": thesis.get("entry_zone"),
+        "exit_zone": thesis.get("exit_zone"),
+        "suggested_capital_range_brl": thesis.get("suggested_capital_range_brl"),
+        "risk_label": thesis.get("risk_label"),
+        "main_reason": thesis.get("main_reason"),
+    }
+    missing = [key for key, value in required_fields.items() if not value]
+    if missing:
+        return False, f"incomplete_operational_thesis:{','.join(missing)}", thesis
+    if thesis.get("operation_status") != "vale_olhar_agora":
+        return False, "no_actionable_operation", thesis
+    if thesis.get("liquidity_label") == "sem_liquidez":
+        return False, "insufficient_exit_liquidity", thesis
+    if thesis.get("risk_label") == "alto":
+        return False, "high_operational_risk", thesis
+    return True, None, thesis
+
+
 def add_visibility_fields(data: dict[str, Any]) -> dict[str, Any]:
     pipeline_status, visibility_reason, operationally_visible = classify_pipeline_visibility_payload(data)
     opportunity_subtype = classify_opportunity_subtype(data)
@@ -446,6 +473,26 @@ def classify_alert_worthiness(opportunity: Opportunity) -> tuple[bool, str | Non
         return False, "preparation_without_trigger", details
     if phase in {"neutral"} and moment in {"neutral"} and not has_actionable_trigger:
         return False, "no_actionable_operation", details
+    has_thesis, thesis_reason, thesis = has_concrete_operational_thesis(
+        {
+            **opportunity.model_dump(),
+            "alert_trigger_type": trigger_type,
+            "has_actionable_trigger": has_actionable_trigger,
+            "alert_block_reason": None,
+        }
+    )
+    details.update(
+        {
+            "operation_status": thesis.get("operation_status"),
+            "entry_zone": thesis.get("entry_zone"),
+            "exit_zone": thesis.get("exit_zone"),
+            "suggested_capital_range_brl": thesis.get("suggested_capital_range_brl"),
+            "risk_label": thesis.get("risk_label"),
+            "main_reason": thesis.get("main_reason"),
+        }
+    )
+    if not has_thesis:
+        return False, thesis_reason or "incomplete_operational_thesis", details
     if alert_worthiness_score < 55:
         return False, "insufficient_alert_worthiness", details
     return True, None, details

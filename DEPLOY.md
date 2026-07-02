@@ -9,6 +9,17 @@ Este guia descreve o caminho recomendado de deploy para o estado atual do projet
 
 Essa topologia e a mais alinhada ao repositorio hoje porque o fluxo padrao ja separa API e worker em `docker-compose.yml`.
 
+Modo de sobrevivencia sem banco:
+
+- configure `STORAGE_MODE=memory`
+- configure `SCANNER_ENABLED=true` na API
+- nao use worker separado nesse modo, porque memoria nao e compartilhada entre processos
+- configure credenciais e thresholds por variaveis de ambiente
+- historico, analytics longos, outcomes persistidos, auditoria administrativa e multiusuario completo ficam limitados ou vazios
+- scanner, dashboard, Telegram, cooldowns recentes, snapshots atuais e auditoria recente funcionam em memoria
+- valide `/api/health`: `durable_storage_enabled=false`, `scanner_enabled=true` e `warnings=[]` ou apenas avisos esperados
+- se `SCANNER_ENABLED=false` em `STORAGE_MODE=memory`, o dashboard nao tera estado atualizado porque API e worker separados nao compartilham memoria
+
 Arquitetura alvo:
 
 ```text
@@ -192,7 +203,12 @@ Variaveis de ambiente minimas do worker:
 | `AUTH_SECRET_KEY` | mesmo valor da API |
 | `SCANNER_ENABLED` | `true` |
 | `LOG_LEVEL` | `INFO` |
-| `SCAN_INTERVAL_SECONDS` | `30` |
+| `SCAN_INTERVAL_SECONDS` | `300` em banco gratuito/baixo custo; `30` apenas com banco/plano adequado |
+| `HISTORY_RETENTION_DAYS` | `30` em modo economico |
+| `PIPELINE_AUDIT_MODE` | `compact` |
+| `PIPELINE_EVENT_RETENTION_DAYS` | `7` |
+| `SCANNER_CYCLE_AUDIT_RETENTION_DAYS` | `30` |
+| `RAW_MARKET_OBSERVATIONS_ENABLED` | `false` por padrao |
 
 Variaveis opcionais do worker:
 
@@ -275,7 +291,14 @@ LOG_AGGREGATION_TOKEN=
 DATABASE_URL=postgresql+asyncpg://postgres.xxx:senha@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
 AUTH_SECRET_KEY=gere-um-segredo-longo-e-aleatorio
 SCANNER_ENABLED=true
-SCAN_INTERVAL_SECONDS=30
+SCAN_INTERVAL_SECONDS=300
+HISTORY_RETENTION_DAYS=30
+PIPELINE_AUDIT_MODE=compact
+PIPELINE_EVENT_RETENTION_DAYS=7
+SCANNER_CYCLE_AUDIT_RETENTION_DAYS=30
+RAW_MARKET_OBSERVATIONS_ENABLED=false
+REPETITION_PERSIST_INTERVAL_SECONDS=300
+SCANNER_STATE_PERSIST_INTERVAL_SECONDS=300
 LOG_LEVEL=INFO
 
 # opcionais
@@ -302,7 +325,7 @@ Depois do deploy, valide nesta ordem:
 1. `GET /api/health` responde `ok` e `mode=api_only`.
 2. O worker aparece ativo e sem crash loop no Render.
 3. O dashboard abre na Vercel sem erro de CORS.
-4. As oportunidades aparecem em ate `30-60s`.
+4. As oportunidades aparecem apos o proximo ciclo do worker; em modo economico, considere ate `5-6min`.
 5. O WebSocket conecta com `101 Switching Protocols`.
 6. O frontend continua atualizando mesmo com API e worker separados.
 7. O teste de Telegram entrega mensagem.
@@ -313,8 +336,11 @@ select count(*) from opportunities;
 select count(*) from technical_signals;
 select count(*) from signal_outcomes;
 select count(*) from opportunity_snapshots;
-select count(*) from raw_market_observations;
+select count(*) from scanner_cycle_audits;
+select count(*) from signal_pipeline_events;
 ```
+
+Observacao: `raw_market_observations` fica vazia em modo economico, a menos que `RAW_MARKET_OBSERVATIONS_ENABLED=true` seja ativado temporariamente para diagnostico.
 
 9. Rode o verificador operacional:
 

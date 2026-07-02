@@ -23,12 +23,21 @@ O ponto mais importante para entender o comportamento atual e este:
 - cada oportunidade projetada tambem recebe `pipeline_status`, `visibility_reason` e `operationally_visible`
 - cada oportunidade tambem recebe `opportunity_subtype`, uma taxonomia operacional expandida derivada para diferenciar trade direcional, faixa, rompimento, continuidade, arbitragem, zona de realizacao, observacao e avoid sem quebrar o campo legado `opportunity_type`
 - dashboard, WebSocket e Telegram ocultam por padrao registros tecnicos como `avoid`, margem negativa, movimento fraco e baixa liquidez
+- o dashboard principal separa oportunidades em `Oportunidades agora`, `So observar` e `Auditoria/Evitar`, evitando misturar sinal acionavel com observacao tecnica
+- Telegram possui um guardrail final de tese operacional concreta: sem entrada, saida, tamanho sugerido, risco, motivo, gatilho acionavel e liquidez minima, o alerta nao e enviado
+- existe uma tela dedicada em `/diagnostics` para investigar o funil em modo geral por periodo/workspace ou sinal perdido por exchange/par/janela, traduzindo auditoria compacta em conclusao operacional, gargalos do funil e near misses
 - historico e resumo historico agora possuem visoes separadas: operacional, auditoria tecnica e todos os registros
+- historico possui filtros operacionais por exchange, par, score minimo, pipeline, tipo, fase, risco, motivo de bloqueio, outcome e feedback para auditoria sem misturar todos os sinais
+- analytics de outcomes por bucket existe como leitura sob demanda em `/api/analytics/outcomes`, cruzando `signal_outcomes` com oportunidades para medir taxa de acerto, retorno medio, MFE/MAE e labels por exchange, par, tipo, subtipo, fase, faixa operacional, momento de alerta e bucket de score
+- a calibragem historica por par usa outcomes e feedback manual de forma conservadora em `historical_confidence`, versionada como `v2_outcome_feedback`
 - a visibilidade final e recalculada por workspace
 - o historico persistido e global, mas filtrado por workspace na leitura
 - o WebSocket e isolado por workspace
 - os alertas Telegram sao enviados por workspace
 - o escopo operacional padrao prioriza Mercado Bitcoin e NovaDAX; Binance existe como provider complementar e fica desativada ate ativacao manual
+- existe a primeira camada de runtime `memory-first` via `STORAGE_MODE=memory|noop`: API/scanner podem subir sem inicializar banco, usar config derivada de ambiente, manter estado do scanner, snapshots atuais, cooldowns/repeticao e auditoria recente em memoria
+- `/api/health` expoe `storage_mode`, `durable_storage_enabled`, `scanner_enabled`, status dos buffers em memoria e avisos quando o modo sem banco esta configurado de forma que nao sustenta dashboard em tempo real
+- no frontend, Configuracoes e Historico indicam modo sem banco e desabilitam/explicam recursos que dependem de persistencia duravel
 
 Em outras palavras, o produto ja tem autenticacao e autorizacao multi-workspace na camada de acesso e configuracao, mas ainda nao opera um pipeline fisicamente isolado por tenant.
 
@@ -56,19 +65,20 @@ Worker de scan
   |       - Binance (opcional/desativada por padrao)
   |
   +--> Filtros e score
-  +--> Estado compartilhado em banco
+  +--> Estado compartilhado em banco ou runtime em memoria, conforme `STORAGE_MODE`
   +--> Projecao por workspace
   +--> Alertas Telegram por workspace
 ```
 
 Visao por modulo:
 
-- `backend/app/main.py`: inicializa banco, bootstrap de admin, publica REST + WebSocket e pode opcionalmente subir o scanner local quando `SCANNER_ENABLED=true`.
+- `backend/app/main.py`: inicializa banco quando ha storage duravel, bootstrap de admin, publica REST + WebSocket e pode opcionalmente subir o scanner local quando `SCANNER_ENABLED=true`.
 - `backend/app/api/routes.py`: autentica a sessao, resolve o workspace, expoe dashboard, oportunidades, historico, analytics, configuracao, usuarios, invites e auditoria.
 - `backend/app/api/websocket.py`: autentica conexoes e isola streams por workspace.
 - `backend/app/services/scanner.py`: executa a coleta nas exchanges, aplica filtros, classifica o movimento, calcula score tecnico, calcula executabilidade e enriquece arbitragem cross-exchange.
-- `backend/app/services/persistence.py`: persiste historico, le configuracoes por workspace, agrega configuracoes para o scanner global e recalcula score por workspace na leitura.
+- `backend/app/services/persistence.py`: persiste historico, le configuracoes por workspace, agrega configuracoes para o scanner global, recalcula score por workspace na leitura e agrega outcomes sob demanda por buckets operacionais.
 - `backend/app/services/shared_state.py`: persiste estado compartilhado entre worker e API, incluindo `scanner_runtime_state`, `opportunity_snapshots`, `technical_signals`, `workspace_signal_projections`, `signal_outcomes` e `repetition_counts`.
+- `backend/app/services/shared_state.py`: em `STORAGE_MODE=memory|noop`, substitui parte desse estado por buffers em memoria para snapshots atuais, runtime do scanner, estados por par, repeticao, eventos de pipeline e ciclos recentes.
 - `backend/app/services/shared_state.py`: tambem persiste a auditoria operacional compacta em `scanner_cycle_audits` e `signal_pipeline_events`, usada para diagnosticar sinais perdidos sem armazenar dataset bruto de mercado.
 - `backend/app/services/shared_state.py`: tambem consulta near misses compactos registrados em `signal_pipeline_events` com `event_type=near_miss`.
 - `backend/app/worker.py`: processo dedicado de scan usado no fluxo padrao do `docker-compose.yml`.
@@ -81,9 +91,29 @@ Visao por modulo:
 - `frontend/src/app/settings/page.tsx`: area administrativa e operacional do workspace.
 - `frontend/src/app/settings/page.tsx`: tambem expõe a busca de sinal perdido, consultando a auditoria compacta por exchange/par/janela para mostrar resumo por ciclo e timeline do funil.
 - `frontend/src/app/page.tsx`: dashboard em tempo real.
-- `frontend/src/app/history/page.tsx`: historico e analytics.
+- `frontend/src/app/history/page.tsx`: historico, analytics operacional e outcomes por bucket sob demanda.
 
 ## Modelo de operacao atual
+
+### 0. Modos de storage
+
+O backend agora reconhece `STORAGE_MODE`:
+
+- `auto`: padrao; usa `sqlite` quando `DATABASE_URL` e SQLite e `postgres` nos demais casos.
+- `sqlite` ou `postgres`: modo duravel, com migrations, historico, workspaces persistentes, outcomes e analytics.
+- `memory` ou `noop`: modo de sobrevivencia sem banco; `init_db()` nao executa conexao, a configuracao vem de variaveis de ambiente/defaults e o runtime usa memoria.
+
+No modo `memory/noop`, o objetivo e manter o produto principal vivo:
+
+- scanner local pode rodar se `SCANNER_ENABLED=true`
+- dashboard pode ler oportunidades atuais do estado em memoria
+- Telegram pode usar credenciais de ambiente
+- cooldowns, repeticao, snapshots e auditoria recente ficam em memoria
+- historico, analytics longos, outcomes persistidos, multiusuario completo e auditoria administrativa ficam limitados ou vazios
+- rotas administrativas de usuarios, convites, criacao de workspace, troca de senha, onboarding e log administrativo retornam erro controlado `409` quando nao ha storage duravel
+- `workspace/status` informa `degraded_features` para o frontend ocultar ou desabilitar acoes que nao fazem sentido sem banco
+
+Limitacao importante: memoria nao e compartilhada entre processos. Se API e worker estiverem separados, `STORAGE_MODE=memory` so funciona corretamente para o dashboard se o scanner rodar no mesmo processo da API ou se existir outro mecanismo de push/estado compartilhado.
 
 ### 1. Inicializacao do backend
 
@@ -423,6 +453,9 @@ Efeito pratico:
 Existe tambem uma retencao periodica:
 
 - registros antigos sao removidos conforme `history_retention_days`
+- eventos de pipeline expiram conforme `pipeline_event_retention_days`
+- ciclos de auditoria expiram conforme `scanner_cycle_audit_retention_days`
+- em producao economica, `raw_market_observations` fica desativado por padrao e so deve ser ligado para diagnostico temporario
 
 Em paralelo, o sistema cria outcomes pendentes para novos sinais tecnicos e avalia resultados de sinais anteriores em janelas configuradas a partir do preco de entrada.
 
@@ -495,6 +528,8 @@ Leituras operacionais:
 - `/api/opportunities/{id}`: detalhe do sinal corrente
 - `/api/history`: le o historico persistido e reaplica filtros do workspace
 - `/api/analytics`: agrega o historico filtrado para o workspace
+- `/api/analytics/operational`: agrega o historico com cortes operacionais recalculados para o workspace
+- `/api/analytics/outcomes`: agrega outcomes avaliados por buckets operacionais, sem criar novas linhas persistidas
 - `/api/pairs/available`: mostra o catalogo de pares e disponibilidade por exchange
 - `/api/health`: expande o status com `mode` (`scanner` ou `api_only`), `scanner_state`, providers e conexoes WebSocket
 
@@ -620,13 +655,16 @@ Estado atual importante:
 
 - ja existem camadas como `raw_market_observations`, `technical_signals`, `workspace_signal_projections` e `signal_outcomes`
 - `opportunities` ainda funciona como historico global resumido e feed operacional legado
-- existe funcao de retencao configuravel em `persistence.py`, mas a chamada periodica deve ser verificada no fluxo real do worker/API antes de considerar a politica efetivamente ativa
+- existe retencao configuravel em `persistence.py` e `shared_state.py`, chamada periodicamente pelo worker/API
+- `signal_pipeline_events` opera em modo `compact` por padrao para manter diagnostico de candidatos, near misses, alertas, bloqueios e erros sem gravar todo descarte comum
+- repeticoes e estado de pares sao persistidos em cadencia configuravel, nao necessariamente a cada ciclo
 
 Diretriz recomendada:
 
 - manter historico bruto e feed operacional por janela curta ou media
 - manter sinais e outcomes relevantes por prazo maior
 - manter agregados analiticos por longo prazo
+- manter `raw_market_observations` desligado em rotina normal quando o banco estiver em free tier ou modo de baixo custo
 - registrar futuramente uma camada explicita de `decision` antes de paper trading e uma camada de `execution` antes de ordens reais
 - nao usar o historico como base de automacao sem versionamento do motor, rastreabilidade e qualidade minima dos dados
 

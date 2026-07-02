@@ -20,6 +20,7 @@ from app.services.shared_state import (
     EXECUTABILITY_VERSION,
     MOVEMENT_VERSION,
     PROFILE_VERSION,
+    REWEIGHTING_VERSION,
     SCORE_VERSION,
     calculate_technical_score,
 )
@@ -1015,7 +1016,7 @@ class Scanner:
                 trade_margin_score=trade_margin_metrics["trade_margin_score"],
                 opportunity_type=opportunity_type,
                 semantic_signal_key=semantic_signal_key,
-                reweighting_version="v1",
+                reweighting_version=REWEIGHTING_VERSION,
                 volatility_pct=round(volatility_pct, 2),
                 volume_24h=ticker.volume_24h,
                 quote_volume_24h=ticker.quote_volume_24h,

@@ -587,6 +587,9 @@ def run_migrations(command_name: str = "upgrade") -> None:
 
 
 async def init_db() -> None:
+    if not settings.durable_storage_enabled:
+        return
+
     async with engine.connect() as conn:
         table_names = await conn.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
 

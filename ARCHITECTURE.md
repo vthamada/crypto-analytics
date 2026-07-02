@@ -64,6 +64,7 @@ O worker:
 - instancia providers por exchange
 - usa Mercado Bitcoin e NovaDAX como nucleo BRL padrao; Binance so entra no ciclo quando estiver habilitada manualmente
 - grava auditoria compacta do funil em `scanner_cycle_audits` e `signal_pipeline_events`, permitindo explicar se um par foi candidato, descartado, ranqueado, bloqueado ou alertado sem persistir candles/order book brutos
+- persiste eventos de pipeline em modo configuravel (`compact`, `full` ou `off`); em producao economica, descartes comuns ficam agregados em `scanner_cycle_audits` e nao viram linhas individuais
 - faz triagem leve por `ticker`/volume/movimento antes de chamadas caras
 - usa temperatura em memoria e cooldown por provider/par para reduzir chamadas repetidas em pares frios ou problemáticos
 - coleta `order_book` e `klines` somente para candidatos promovidos ao estagio profundo
@@ -71,6 +72,7 @@ O worker:
 - enriquece arbitragem cross-exchange
 - classifica o sinal como `interesting_signal` e `operable_signal`
 - grava o estado compartilhado do ciclo
+- grava `raw_market_observations` apenas quando habilitado explicitamente, pois esta camada cresce por oportunidade/ciclo e deve ser usada como diagnostico temporario
 - projeta oportunidades por workspace e dispara alertas Telegram
 - avalia outcomes pendentes de sinais anteriores
 
@@ -175,7 +177,8 @@ Campos operacionais recentes relevantes em `Opportunity` e nas camadas persistid
 - `opportunities` deve continuar como feed/historico operacional de compatibilidade, nao como unica fonte de verdade para automacao
 - `raw_market_observations`, `technical_signals`, `workspace_signal_projections` e `signal_outcomes` formam a base correta para evoluir analytics e calibracao
 - antes de qualquer execucao automatica, ainda sera necessario introduzir entidades explicitas de decisao e execucao, alem de politica real de retencao/compactacao por camada
-- a funcao de retencao existe no backend, mas a execucao periodica precisa ser validada no fluxo real do worker/API para evitar acumulo silencioso
+- a retencao roda no loop do worker/API e agora possui TTL configuravel para historico, eventos de pipeline e ciclos de auditoria
+- em banco gratuito/baixo custo, o worker deve usar intervalo maior, auditoria compacta e `raw_market_observations` desligado por padrao
 
 ### Escalabilidade
 

@@ -33,6 +33,10 @@ def make_opportunity(**overrides) -> Opportunity:
         "movement_type": MovementType.STRONG_RANGE,
         "movement_phase": MovementPhase.EARLY_BREAKOUT,
         "alert_moment_type": "early_breakout",
+        "operational_buy_zone_low": 9.8,
+        "operational_buy_zone_high": 10.1,
+        "operational_sell_zone_low": 10.5,
+        "operational_sell_zone_high": 10.9,
         "last_price": 10.0,
         "change_pct": 2.0,
     }
@@ -131,9 +135,26 @@ def test_actionable_alert_builds_operator_thesis():
     assert opportunity.operation_status == "vale_olhar_agora"
     assert opportunity.actionability_label == "Vale olhar agora"
     assert opportunity.opportunity_family == "rompimento"
-    assert opportunity.entry_zone == "R$ 10.00"
+    assert opportunity.entry_zone == "R$ 9.80 - R$ 10.10"
+    assert opportunity.exit_zone == "R$ 10.50 - R$ 10.90"
     assert opportunity.suggested_capital_range_brl is not None
     assert opportunity.main_reason
+
+
+def test_actionable_alert_requires_complete_operational_thesis():
+    opportunity = make_opportunity(
+        operational_sell_zone_low=None,
+        operational_sell_zone_high=None,
+        cross_exchange_reference_price=None,
+    )
+
+    alertable, block_reason, details = classify_alert_worthiness(opportunity)
+
+    assert alertable is False
+    assert block_reason == "incomplete_operational_thesis:exit_zone"
+    assert details["entry_zone"] == "R$ 9.80 - R$ 10.10"
+    assert details["exit_zone"] is None
+    assert details["suggested_capital_range_brl"] is not None
 
 
 def test_preparation_alert_builds_waiting_thesis():
